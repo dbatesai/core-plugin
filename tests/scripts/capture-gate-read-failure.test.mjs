@@ -24,7 +24,7 @@ function fixture(fields, registered = true) {
     fs.mkdirSync(dir, {recursive:true});
     writeSignedFile({dir, name:'workspace.json', body:JSON.stringify(fields), coreDir});
   }
-  const dir = fields ? stateDir({ root, harness: 'codex', coreDir }).dir : join(root, '.core/codex');
+  const dir = fields ? stateDir({ root, harness: 'codex', coreDir }).dir : join(root, '_core/codex');
   return { base, root, home, manifest: join(dir, 'workspace.json'),
     options: { project: root, home, env: { CORE_HARNESS: 'codex' } } };
 }
@@ -102,7 +102,7 @@ test('updating an unreadable manifest preserves its bytes and project identity',
       harness: 'codex', coreDir: join(f.home, '.core'), fields: { agent_name: 'test' } }), { code: 'EACCES' }));
     assert.deepEqual(fs.readFileSync(f.manifest), body);
     assert.deepEqual(fs.readFileSync(f.manifest + '.mac'), mac);
-    assert.equal(fs.readdirSync(join(f.root, '.core/codex')).some(n => n.includes('.unverified-')), false);
+    assert.equal(fs.readdirSync(join(f.root, '_core/codex')).some(n => n.includes('.unverified-')), false);
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
 });
 

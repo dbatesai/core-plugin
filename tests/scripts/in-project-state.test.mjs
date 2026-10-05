@@ -1,4 +1,4 @@
-// End-to-end guarantees for per-project state living in <project>/.core/<harness>/:
+// End-to-end guarantees for per-project state living in <project>/_core/<harness>/:
 // auto-close eligibility, two harnesses on one folder, migration apply, git hygiene,
 // cross-machine locks, and the no-hand-built-path gate. Every test runs in temp dirs.
 import { test } from 'node:test';
@@ -60,9 +60,9 @@ test('auto-close resolves only registered projects: a plain subfolder closes its
     mkdirSync(join(vendored, '.git'));
     assert.equal(resolveRegisteredRoot(join(vendored), { indexPath }), null, 'a vendored clone gets no close');
     const hostile = s.mk('Downloads', 'clone');
-    mkdirSync(join(hostile, '.core', 'claude-code'), { recursive: true });
+    mkdirSync(join(hostile, '_core', 'claude-code'), { recursive: true });
     mkdirSync(join(hostile, '_memories'));
-    writeFileSync(join(hostile, '.core', 'claude-code', 'workspace.json'), '{"agent_name":"x"}');
+    writeFileSync(join(hostile, '_core', 'claude-code', 'workspace.json'), '{"agent_name":"x"}');
     assert.equal(resolveRegisteredRoot(hostile, { indexPath }), null, 'a .core/ folder is never registration');
   } finally { s.cleanup(); }
 });
@@ -81,12 +81,12 @@ test('two harnesses on one folder at once keep separate subfolders, names and re
     ];
     const results = await Promise.all([...run('claude-code'), ...run('codex')]);
     for (const r of results) assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(readdirSync(join(p, '.core')).sort(), ['.gitignore', 'claude-code', 'codex']);
+    assert.deepEqual(readdirSync(join(p, '_core')).sort(), ['.gitignore', 'claude-code', 'codex']);
     for (const h of ['claude-code', 'codex']) {
       assert.equal(readManifest({ root: p, harness: h, coreDir: s.coreDir }).agent_name, `name-${h}`);
-      const rec = JSON.parse(readFileSync(join(p, '.core', h, 'last-bootstrap.json'), 'utf8'));
+      const rec = JSON.parse(readFileSync(join(p, '_core', h, 'last-bootstrap.json'), 'utf8'));
       assert.equal(rec.session_started_at, `2026-09-26T00:00:00Z-${h}`, `${h}'s bootstrap record is its own`);
-      assert.ok(existsSync(join(p, '.core', h, 'last-active')));
+      assert.ok(existsSync(join(p, '_core', h, 'last-active')));
     }
   } finally { s.cleanup(); }
 });
@@ -146,7 +146,7 @@ test('migration copies every legacy byte, verifies it, and a re-run is a no-op',
     assert.equal(r.live, 'legacy', 'the pointer names the live duplicate');
     assert.deepEqual(r.superseded, ['legacy-old']);
 
-    const receipt = JSON.parse(readFileSync(join(p, '.core', 'claude-code', 'migrated-from.json'), 'utf8'));
+    const receipt = JSON.parse(readFileSync(join(p, '_core', 'claude-code', 'migrated-from.json'), 'utf8'));
     assert.equal(receipt.complete, true);
     const copiedHashes = new Set(receipt.files.map((f) => f.sha256));
     for (const f of receipt.files) assert.equal(sha(f.to), f.sha256, `copy verified: ${f.to}`);
@@ -162,7 +162,7 @@ test('migration copies every legacy byte, verifies it, and a re-run is a no-op',
     assert.equal(m.agent_name, 'Plover');
     assert.equal(m.metrics_enabled, false, "the pointer's opt-out carries into the manifest");
     assert.equal(readFileSync(join(operationalMetricsDir(p, { home: s.home, env: { CORE_HARNESS: 'claude-code' } }), 'classified', '2026-09-01.jsonl'), 'utf8'), '{"state":"tier-0-win"}\n');
-    assert.ok(existsSync(join(p, '.core', 'claude-code', 'superseded', 'legacy-old', 'notes.md')), 'the duplicate is kept, not live');
+    assert.ok(existsSync(join(p, '_core', 'claude-code', 'superseded', 'legacy-old', 'notes.md')), 'the duplicate is kept, not live');
 
     const again = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
     assert.equal(again.status, 'already-migrated');
@@ -214,11 +214,11 @@ test('a migration interrupted mid-copy leaves no receipt, and the next run compl
   try {
     chmodSync(blocker, 0o000);
     assert.throws(() => applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table }), /EACCES|EPERM/);
-    assert.equal(existsSync(join(p, '.core', 'claude-code', 'migrated-from.json')), false, 'no receipt after an interrupted copy');
+    assert.equal(existsSync(join(p, '_core', 'claude-code', 'migrated-from.json')), false, 'no receipt after an interrupted copy');
     chmodSync(blocker, 0o644);
     const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
     assert.equal(r.status, 'migrated');
-    const receipt = JSON.parse(readFileSync(join(p, '.core', 'claude-code', 'migrated-from.json'), 'utf8'));
+    const receipt = JSON.parse(readFileSync(join(p, '_core', 'claude-code', 'migrated-from.json'), 'utf8'));
     for (const f of receipt.files) assert.equal(sha(f.to), f.sha256);
     assert.ok(receipt.files.some((f) => f.from === blocker));
   } finally { try { chmodSync(blocker, 0o644); } catch { /* gone */ } s.cleanup(); }
@@ -240,7 +240,7 @@ test('without a table, the running harness claims a sole unlabeled registration;
     const held = applyMigration({ root: multi, harness: 'codex', coreDir: s.coreDir });
     assert.equal(held.status, 'held');
     assert.equal(held.held.length, 2);
-    assert.equal(existsSync(join(multi, '.core', 'codex', 'migrated-from.json')), false);
+    assert.equal(existsSync(join(multi, '_core', 'codex', 'migrated-from.json')), false);
   } finally { s.cleanup(); }
 });
 
@@ -261,7 +261,7 @@ test('migration CLI exits 3 for ambiguous legacy registrations and 0 for genuine
     const report = JSON.parse(held.stdout);
     assert.equal(report.status, 'held');
     assert.equal(report.held.length, 2);
-    assert.equal(existsSync(join(heldRoot, '.core', 'codex', 'migrated-from.json')), false);
+    assert.equal(existsSync(join(heldRoot, '_core', 'codex', 'migrated-from.json')), false);
     for (let i = 0; i < index.length; i++) {
       assert.equal(readFileSync(join(s.coreDir, 'workspaces', index[i].workspace_id, 'workspace.json'), 'utf8'), before[i]);
       assert.equal(existsSync(join(s.coreDir, 'workspaces', index[i].workspace_id, 'MOVED.md')), false);
@@ -282,7 +282,7 @@ function exerciseState(s, root) {
   const metrics = operationalMetricsDir(root, { home: s.home, env: { CORE_HARNESS: 'claude-code' } });
   writeFileSync(join(metrics, 'orient-signal.txt'), 'signal\n');
   appendRows({ root, harness: 'claude-code' }, [{ capability_id: 'x', identity_status: 'PASS' }], {}, { home: s.home });
-  assert.ok(existsSync(join(root, '.core', 'claude-code', 'capability-history.jsonl')), 'state really is in the project');
+  assert.ok(existsSync(join(root, '_core', 'claude-code', 'capability-history.jsonl')), 'state really is in the project');
 }
 
 test('after a session\'s worth of state writes, `git add -A` stages nothing under .core/ (fresh repo and worktree)', () => {
@@ -298,7 +298,7 @@ test('after a session\'s worth of state writes, `git add -A` stages nothing unde
     git(repo, 'add', '-A');
     const staged = git(repo, 'status', '--porcelain').stdout.split('\n').filter((l) => l.includes('.core'));
     assert.deepEqual(staged, [], 'nothing under .core/ is addable');
-    assert.equal(readFileSync(join(repo, '.core', '.gitignore'), 'utf8'), '*\n');
+    assert.equal(readFileSync(join(repo, '_core', '.gitignore'), 'utf8'), '*\n');
 
     const wt = join(s.base, 'Projects', 'Repo-wt');
     assert.equal(git(repo, 'worktree', 'add', '-q', wt).status, 0);
@@ -423,10 +423,10 @@ test('concurrent first writes in a fresh project never set each other aside', as
         cmds.push(spawnAsync([REGISTRY_CLI, 'manifest', '--root', p, '--harness', 'claude-code', '--set-json', JSON.stringify({ [`k${i}`]: i }), '--core-dir', s.coreDir]));
       }
       for (const r of await Promise.all(cmds)) assert.equal(r.status, 0, r.stderr);
-      const dir = join(p, '.core', 'claude-code');
+      const dir = join(p, '_core', 'claude-code');
       assert.ok(existsSync(join(dir, 'last-active')), 'last-active survived');
       assert.ok(!readdirSync(dir).includes('superseded'), 'nothing was set aside');
-      assert.deepEqual(readdirSync(join(p, '.core')).filter((n) => n.startsWith('.creating-')), [], 'no temp folders left');
+      assert.deepEqual(readdirSync(join(p, '_core')).filter((n) => n.startsWith('.creating-')), [], 'no temp folders left');
     } finally { s.cleanup(); }
   }
 });
@@ -440,7 +440,7 @@ function signedProject(s) {
   return p;
 }
 const H = 'claude-code';
-const stateFile = (p, name) => join(p, '.core', H, name);
+const stateFile = (p, name) => join(p, '_core', H, name);
 
 test('a normal write of the manifest and bootstrap record verifies on read, with MAC sidecars beside them', () => {
   const s = sandbox();
@@ -487,7 +487,7 @@ test('a force-added .core file that git tracks is ignored, even with a valid MAC
     updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Wren' } });
     recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-09-26T10:00:00Z' });
     assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren');
-    assert.equal(git(p, 'add', '-f', '.core/claude-code/workspace.json', '.core/claude-code/workspace.json.mac', '.core/claude-code/last-bootstrap.json').status, 0);
+    assert.equal(git(p, 'add', '-f', '_core/claude-code/workspace.json', '_core/claude-code/workspace.json.mac', '_core/claude-code/last-bootstrap.json').status, 0);
     assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }), null, 'a tracked manifest reads as absent');
     assert.equal(readBootstrapRecord(s.coreDir, { root: p, harness: H }), null, 'a tracked bootstrap record reads as absent');
   } finally { s.cleanup(); }
@@ -507,7 +507,7 @@ test('a force-added tracked file still reads as absent when git ls-files itself 
     updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Wren' } });
     recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-09-26T10:00:00Z' });
     assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren');
-    assert.equal(git(p, 'add', '-f', '.core/claude-code/workspace.json', '.core/claude-code/workspace.json.mac', '.core/claude-code/last-bootstrap.json').status, 0);
+    assert.equal(git(p, 'add', '-f', '_core/claude-code/workspace.json', '_core/claude-code/workspace.json.mac', '_core/claude-code/last-bootstrap.json').status, 0);
     const indexFile = join(p, '.git', 'index');
     chmodSync(indexFile, 0o000);
     try {
@@ -529,11 +529,11 @@ test('the tracked guard still sees a force-added file under a v4 (prefix-compres
     assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren', 'untracked: trusted, and no git spawn needed');
     assert.equal(git(repo, 'update-index', '--index-version', '4').status, 0);
     // A neighbour that sorts just before the target ('-' < '/') makes v4 store the target
-    // as a suffix of '.core/claude-code', so the prefix never appears as plain bytes.
-    mkdirSync(join(p, '.core', 'claude-code-x'), { recursive: true });
-    writeFileSync(join(p, '.core', 'claude-code-x', 'f'), 'x');
-    assert.equal(git(repo, 'add', '-f', 'sub/Proj/.core/claude-code-x/f', 'sub/Proj/.core/claude-code/workspace.json', 'sub/Proj/.core/claude-code/workspace.json.mac').status, 0);
-    assert.ok(!readFileSync(join(repo, '.git', 'index')).includes('.core/claude-code/'), 'the fixture really hides the prefix');
+    // as a suffix of '_core/claude-code', so the prefix never appears as plain bytes.
+    mkdirSync(join(p, '_core', 'claude-code-x'), { recursive: true });
+    writeFileSync(join(p, '_core', 'claude-code-x', 'f'), 'x');
+    assert.equal(git(repo, 'add', '-f', 'sub/Proj/_core/claude-code-x/f', 'sub/Proj/_core/claude-code/workspace.json', 'sub/Proj/_core/claude-code/workspace.json.mac').status, 0);
+    assert.ok(!readFileSync(join(repo, '.git', 'index')).includes('_core/claude-code/'), 'the fixture really hides the prefix');
     assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }), null, 'tracked under a v4 index reads as absent');
   } finally { s.cleanup(); }
 });
@@ -576,8 +576,8 @@ test('old -> new -> old -> new: every line an older build appends reaches the pr
       assert.equal(lines.filter((l) => l === row).length, 1, `${row} appears exactly once`);
     }
     assert.equal(lines.length, 5);
-    assert.equal(readFileSync(join(p, '.core', H, 'superseded', 'legacy-2026-09-27', 'legacy', 'hot-section-draft.md'), 'utf8'), 'edited by the old build\n');
-    assert.equal(readFileSync(join(p, '.core', H, 'hot-section-draft.md'), 'utf8'), 'draft\n', 'the live copy of a non-log file is never overwritten');
+    assert.equal(readFileSync(join(p, '_core', H, 'superseded', 'legacy-2026-09-27', 'legacy', 'hot-section-draft.md'), 'utf8'), 'edited by the old build\n');
+    assert.equal(readFileSync(join(p, '_core', H, 'hot-section-draft.md'), 'utf8'), 'draft\n', 'the live copy of a non-log file is never overwritten');
     const newLog = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === join(legacyDir, 'sessions.jsonl'));
     assert.equal(readFileSync(newLog.to, 'utf8'), '{"s":1}\n', 'a new log arrives whole');
   } finally { s.cleanup(); }
@@ -592,7 +592,7 @@ test('a manifest whose MAC breaks keeps its opt-out: capture stays off, before a
     const env = { CORE_HARNESS: 'claude-code' };
     updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { metrics_enabled: false } });
     assert.equal(metricsEnabled({ project: p, env, home: s.home }), false);
-    const file = join(p, '.core', 'claude-code', 'workspace.json');
+    const file = join(p, '_core', 'claude-code', 'workspace.json');
     writeFileSync(file, readFileSync(file, 'utf8').replace('"harness"', '"harness_x": 1, "harness"'));
     assert.equal(metricsEnabled({ project: p, env, home: s.home }), false, 'unverified manifest still opts out');
     updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'x' } });
@@ -610,7 +610,7 @@ test('a manifest whose MAC breaks keeps its turn-capture opt-out too, before and
     const env = { CORE_HARNESS: 'claude-code' };
     updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { turn_capture: false } });
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
-    const file = join(p, '.core', 'claude-code', 'workspace.json');
+    const file = join(p, '_core', 'claude-code', 'workspace.json');
     writeFileSync(file, readFileSync(file, 'utf8').replace('"harness"', '"harness_x": 1, "harness"'));
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'unverified manifest still opts out');
     updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'x' } });
@@ -626,7 +626,7 @@ const RECEIPT_NAME = 'migrated-from.json';
 test('a copy that fails part-way keeps every reader and writer out of the half-copied state until a later run finishes it', { skip: isWin || isRoot }, () => {
   const { s, p, table } = migrationFixture();
   const blocker = join(s.coreDir, 'workspaces', 'legacy', 'hot-section-draft.md');
-  const inProject = join(p, '.core', H);
+  const inProject = join(p, '_core', H);
   try {
     chmodSync(blocker, 0o000);
     assert.throws(() => applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }), /EACCES|EPERM/);
@@ -678,7 +678,7 @@ test('a git-tracked receipt is not trusted', { skip: isWin }, () => {
   try {
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
     git(p, 'init', '-q');
-    git(p, 'add', '-f', join('.core', H, RECEIPT_NAME));
+    git(p, 'add', '-f', join('_core', H, RECEIPT_NAME));
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'receipt-unverified');
     assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
   } finally { s.cleanup(); }
@@ -701,7 +701,7 @@ test('drift never appends to a destination outside the state, whether the receip
     assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
     assert.equal(sha(outside), before, 'unsigned forgery: the outside file is byte-identical');
 
-    writeSignedFile({ dir: join(p, '.core', H), name: RECEIPT_NAME, body, coreDir: s.coreDir });
+    writeSignedFile({ dir: join(p, '_core', H), name: RECEIPT_NAME, body, coreDir: s.coreDir });
     const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
     assert.equal(d.status, 'receipt-unverified');
     assert.ok(d.problems.some((x) => x.startsWith('destination outside')));
@@ -713,7 +713,7 @@ test('an unreadable legacy folder stops the migration: no receipt, no release, s
   const { s, p, table } = migrationFixture();
   const legacy = join(s.coreDir, 'workspaces', 'legacy');
   const nested = join(legacy, 'metrics', 'classified');
-  const inProject = join(p, '.core', H);
+  const inProject = join(p, '_core', H);
   try {
     chmodSync(nested, 0o000);
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
@@ -742,11 +742,11 @@ test('a symlink inside the legacy workspace is refused, and its target is never 
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
     assert.equal(r.status, 'legacy-held');
     assert.equal(r.code, 'LEGACY_SYMLINK');
-    assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false);
+    assert.equal(existsSync(join(p, '_core', H, RECEIPT_NAME)), false);
     assert.equal(existsSync(join(legacy, 'MOVED.md')), false);
     const copied = [];
     const walk = (d) => { for (const n of readdirSync(d, { withFileTypes: true })) { const f = join(d, n.name); if (n.isDirectory()) walk(f); else copied.push(f); } };
-    walk(join(p, '.core'));
+    walk(join(p, '_core'));
     assert.ok(!copied.some((f) => readFileSync(f, 'utf8') === 'not part of the workspace\n'), 'the outside bytes are nowhere in the project state');
   } finally { s.cleanup(); }
 });
@@ -756,7 +756,7 @@ test('drift refuses to run over a legacy symlink or unreadable folder and leaves
   const legacy = join(s.coreDir, 'workspaces', 'legacy');
   try {
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
-    const receiptFile = join(p, '.core', H, RECEIPT_NAME);
+    const receiptFile = join(p, '_core', H, RECEIPT_NAME);
     const receiptBefore = sha(receiptFile);
     const legacyLog = join(legacy, 'capability-history.jsonl');
     const projectLog = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === legacyLog).to;
@@ -783,7 +783,7 @@ test('drift after an interrupted run never appends the same tail twice, whether 
     writeFileSync(legacyLog, original + tail);
 
     // The state a run that stopped after writing its intent leaves behind.
-    const interrupted = () => writeSignedFile({ dir: join(p, '.core', H), name: RECEIPT_NAME, coreDir: s.coreDir, body: JSON.stringify({
+    const interrupted = () => writeSignedFile({ dir: join(p, '_core', H), name: RECEIPT_NAME, coreDir: s.coreDir, body: JSON.stringify({
       ...before, files: before.files.map((f) => (f.from === legacyLog ? {
         ...f, pending: { from_offset: entry.length, from_length: (original + tail).length, to_offset: original.length, tail_sha: createHash('sha256').update(tail).digest('hex') },
       } : f)),
@@ -902,12 +902,12 @@ test('a workspace an older install registers after the receipt is copied as a ke
 
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
     assert.equal(r.status, 'already-migrated');
-    const copied = join(p, '.core', H, 'superseded', 'legacy-late', 'notes-late.md');
+    const copied = join(p, '_core', H, 'superseded', 'legacy-late', 'notes-late.md');
     assert.equal(readFileSync(copied, 'utf8'), 'written after migration\n', 'the late data is in the project');
     const receipt = JSON.parse(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'));
     assert.ok(receipt.superseded.includes('legacy-late'));
     assert.ok(receipt.files.some((f) => f.to === copied), 'the receipt lists it');
-    assert.equal(existsSync(join(p, '.core', H, '.migrating')), false);
+    assert.equal(existsSync(join(p, '_core', H, '.migrating')), false);
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 }).files, 0, 'a further run copies nothing');
   } finally { s.cleanup(); }
 });
@@ -920,7 +920,7 @@ function interruptedAppend(s, p, table, { toAfter, sourceAfter }) {
   const original = readFileSync(entry.to, 'utf8');
   const tail = '{"row":"old-2"}\n';
   writeFileSync(legacyLog, original + tail + (sourceAfter || ''));
-  writeSignedFile({ dir: join(p, '.core', H), name: RECEIPT_NAME, coreDir: s.coreDir, body: JSON.stringify({
+  writeSignedFile({ dir: join(p, '_core', H), name: RECEIPT_NAME, coreDir: s.coreDir, body: JSON.stringify({
     ...before, files: before.files.map((f) => (f.from === legacyLog ? { ...f, pending: {
       from_offset: entry.length, from_length: (original + tail).length, to_offset: original.length, tail_sha: createHash('sha256').update(tail).digest('hex'),
     } } : f)),
@@ -971,7 +971,7 @@ test('migration signs a carried metrics pin only when it names a place metrics m
 
 test('a marker write failure during migration blocks completion, not just an immediate read: no receipt, no release, state fenced, and a later run completes it', () => {
   const { s, p, table } = migrationFixture();
-  const inProject = join(p, '.core', H);
+  const inProject = join(p, '_core', H);
   try {
     const pinned = join(s.home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id');
     mkdirSync(pinned, { recursive: true });
@@ -1185,18 +1185,18 @@ test('the record is not used when anything that could give the migration new wor
     writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index, null, 2));
     const late = again();
     assert.equal(late.fast, undefined);
-    assert.ok(existsSync(join(p, '.core', 'claude-code', 'superseded', 'legacy-late', 'late.md')), 'the late workspace is copied');
+    assert.ok(existsSync(join(p, '_core', 'claude-code', 'superseded', 'legacy-late', 'late.md')), 'the late workspace is copied');
     assert.equal(again().fast, true, 'and the refreshed record is used after');
     // a changed classification table
     table.entries.extra = { harness: 'codex', evidence: 'fixture' };
     assert.equal(again().fast, undefined);
     // a record CORE did not sign
-    const rec = join(p, '.core', 'claude-code', 'migration-check.json');
+    const rec = join(p, '_core', 'claude-code', 'migration-check.json');
     writeFileSync(rec, readFileSync(rec, 'utf8').replace('"already-migrated"', '"nothing-to-migrate"'));
     assert.equal(again().fast, undefined);
     // an interrupted migration's marker
     again();
-    writeFileSync(join(p, '.core', 'claude-code', '.migrating'), 'x\n');
+    writeFileSync(join(p, '_core', 'claude-code', '.migrating'), 'x\n');
     assert.equal(again().fast, undefined);
   } finally { s.cleanup(); }
 });
@@ -1214,7 +1214,7 @@ test('a registration that lands after the pass but before its record is never st
     applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table, beforeRecord: () => lateWorkspace(s, p) });
     const next = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
     assert.equal(next.fast, undefined, 'the record names the bytes the pass read, not the later ones');
-    assert.ok(existsSync(join(p, '.core', 'claude-code', 'superseded', 'legacy-late', 'late.md')), 'the late workspace is copied');
+    assert.ok(existsSync(join(p, '_core', 'claude-code', 'superseded', 'legacy-late', 'late.md')), 'the late workspace is copied');
   } finally { s.cleanup(); }
 });
 
@@ -1286,8 +1286,8 @@ test('a legacy workspace folder that is a link is held: nothing is copied into t
     assert.equal(r.code, 'LEGACY_SYMLINK');
     assert.equal(r.path, legacy);
     assert.deepEqual(treeOf(foreign), before, 'no MOVED note or anything else was written there');
-    assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false, 'no completion receipt');
-    assert.equal(existsSync(join(p, '.core', H, '.migrating')), false, 'refused before the marker: the project is as it was');
+    assert.equal(existsSync(join(p, '_core', H, RECEIPT_NAME)), false, 'no completion receipt');
+    assert.equal(existsSync(join(p, '_core', H, '.migrating')), false, 'refused before the marker: the project is as it was');
   } finally { s.cleanup(); }
 });
 
@@ -1304,7 +1304,7 @@ test('a legacy workspaces folder that is itself a link is held before it is list
     assert.equal(r.code, 'LEGACY_SYMLINK');
     assert.equal(r.path, ws);
     assert.deepEqual(treeOf(foreign), before);
-    assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false);
+    assert.equal(existsSync(join(p, '_core', H, RECEIPT_NAME)), false);
   } finally { s.cleanup(); }
 });
 
@@ -1325,8 +1325,8 @@ test('a late-registered workspace that is a link is held: the earlier receipt is
     assert.equal(r.code, 'LEGACY_SYMLINK');
     assert.deepEqual(treeOf(foreign), before, 'no MOVED note, nothing else');
     assert.equal(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'), receiptBefore, 'the earlier receipt is byte-identical');
-    assert.equal(existsSync(join(p, '.core', H, 'superseded', 'legacy-late')), false, 'nothing foreign was copied in');
-    assert.equal(existsSync(join(p, '.core', H, '.migrating')), false, 'refused before the marker');
+    assert.equal(existsSync(join(p, '_core', H, 'superseded', 'legacy-late')), false, 'nothing foreign was copied in');
+    assert.equal(existsSync(join(p, '_core', H, '.migrating')), false, 'refused before the marker');
   } finally { s.cleanup(); }
 });
 
@@ -1410,7 +1410,7 @@ for (const shape of ['a link', 'a second hard link', 'a FIFO']) {
       assert.equal(r.status, 'legacy-held');
       assert.equal(r.path, leaf);
       assert.equal(r.opens, 0, 'the migration did not open or copy it');
-      const inProject = join(a.p, '.core', H);
+      const inProject = join(a.p, '_core', H);
       assert.equal(existsSync(join(inProject, RECEIPT_NAME)), false, 'no completion receipt');
       assert.ok(existsSync(join(inProject, '.migrating')), 'the state is fenced');
       assert.deepEqual(readdirSync(inProject).filter((n) => n !== '.migrating' && n !== 'stamp' && !n.startsWith('.')).sort(), [], 'nothing was copied in before the hold');
@@ -1563,7 +1563,7 @@ test('a git index that git itself rejects is never read as "nothing tracked": ge
       } else {
         assert.equal(tracked.has('.gitignore'), true, `${shape}: tracking is unknown, so every name reads as tracked`);
         assert.throws(() => ensureProjectArtifactDir(root, '_hooks'), `${shape}: no generated folder`);
-        assert.equal(existsSync(join(root, '.core', '_hooks')), false);
+        assert.equal(existsSync(join(root, '_core', '_hooks')), false);
       }
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
@@ -1634,4 +1634,99 @@ test('with GIT_DIR or GIT_WORK_TREE set, a project with no repository of its own
     assert.equal(readFileSync(join(c.p, 'workspace.json'), 'utf8'), before);
     assert.equal(r.root_pointer, null);
   } finally { c.s.cleanup(); }
+});
+
+// ---------- the visible state folder name ----------
+import { settleStateFolderName, manifestTurnCaptureOptsOutUnverified, ensureStateDir as ensureStateDirForRename } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { projectOnlyHint } from '../../plugins/core/skills/core/scripts/project-only.mjs';
+import { folderNameLine } from '../../plugins/core/skills/core/hooks/session-start-hook.mjs';
+
+test('an older .core is renamed to _core the first time its state is read, and the signed manifest still verifies', () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Old');
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    renameSync(join(p, '_core'), join(p, '.core'));
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Plover');
+    assert.equal(existsSync(join(p, '.core')), false);
+    assert.equal(readFileSync(join(p, '_core', '.gitignore'), 'utf8'), '*\n');
+    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir }).status, 'verified');
+  } finally { s.cleanup(); }
+});
+
+test('a migration receipt written under .core still verifies after the rename; the old pointer and notes are left as written', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const dir = join(p, '_core', H);
+    const body = readFileSync(join(dir, RECEIPT_NAME), 'utf8').replaceAll(`${p}/_core/`, `${p}/.core/`);
+    assert.ok(body.includes(`${p}/.core/`), 'the fixture receipt names the older folder');
+    writeSignedFile({ dir, name: RECEIPT_NAME, body, coreDir: s.coreDir });
+    const pointer = existsSync(join(p, 'workspace.json')) ? readFileSync(join(p, 'workspace.json'), 'utf8') : null;
+    renameSync(join(p, '_core'), join(p, '.core'));
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'already-migrated');
+    assert.notEqual(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
+    assert.equal(existsSync(join(p, '.core')), false);
+    assert.equal(existsSync(join(p, 'workspace.json')) ? readFileSync(join(p, 'workspace.json'), 'utf8') : null, pointer);
+  } finally { s.cleanup(); }
+});
+
+test('with both folders, _core is used, the older .core is left and reported, and an opt-out in it still restricts', () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Both');
+    mkdirSync(join(p, '.core', H), { recursive: true });
+    writeFileSync(join(p, '.core', H, 'workspace.json'), '{"turn_capture":false}');
+    mkdirSync(join(p, '_core'));
+    assert.equal(settleStateFolderName(p), 'both');
+    assert.ok(existsSync(join(p, '.core', H, 'workspace.json')));
+    assert.equal(manifestTurnCaptureOptsOutUnverified({ root: p, harness: H }), true);
+    assert.match(folderNameLine('both'), /older `\.core` folder is still there/);
+    assert.equal(folderNameLine(null), '');
+  } finally { s.cleanup(); }
+});
+
+test("the account's own .core is never renamed: the home folder, the passed core dir, or a folder holding keys or the registry", () => {
+  const s = sandbox();
+  try {
+    ensureInstallIdentity({ coreDir: s.coreDir });
+    assert.equal(settleStateFolderName(s.home, { coreDir: s.coreDir }), 'account-folder');
+    const odd = s.mk('Projects', 'Odd');
+    mkdirSync(join(odd, '.core'));
+    writeFileSync(join(odd, '.core', 'projects.json'), '[]');
+    assert.equal(settleStateFolderName(odd), 'account-folder');
+    try { stateDir({ root: s.home, harness: H, coreDir: s.coreDir, forWrite: true }); } catch { /* refusal is fine */ }
+    assert.ok(existsSync(join(s.coreDir, 'install-id')));
+    assert.equal(existsSync(join(s.home, '_core', 'install-id')), false);
+  } finally { s.cleanup(); }
+});
+
+test('a linked .core is left alone, and the project-only hint sees a folder not yet renamed', { skip: isWin }, () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Linked');
+    const elsewhere = s.mk('elsewhere');
+    symlinkSync(elsewhere, join(p, '.core'));
+    assert.equal(settleStateFolderName(p), 'legacy-not-a-folder');
+    assert.equal(existsSync(join(p, '_core')), false);
+    const q = s.mk('Projects', 'Pending');
+    mkdirSync(join(q, '.core', '_project-only', 'claude-code'), { recursive: true });
+    assert.equal(projectOnlyHint(q), true);
+  } finally { s.cleanup(); }
+});
+
+test('a .core that cannot be renamed stores nothing new', { skip: isWin || isRoot }, () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Stuck');
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    renameSync(join(p, '_core'), join(p, '.core'));
+    chmodSync(p, 0o555);
+    try {
+      assert.throws(() => ensureStateDirForRename({ root: p, harness: H, coreDir: s.coreDir }), (e) => e.code === 'STATE_NO_PROJECT_PLACE' && /could not be renamed/.test(e.reason));
+      assert.equal(existsSync(join(p, '_core')), false);
+    } finally { chmodSync(p, 0o755); }
+  } finally { s.cleanup(); }
 });

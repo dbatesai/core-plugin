@@ -13,7 +13,7 @@
  *     warning — for the agent to show the user BEFORE any publish.
  *   - Condition 4 (audit trail): TWO receipts, distinct in kind. The
  *     preflight-GENERATION receipt (this manifest, written before consent)
- *     lands under `<project>/.core/<harness>/artifact-receipts/` and
+ *     lands under `<project>/_core/<harness>/artifact-receipts/` and
  *     records what was generated and offered — never what went up. The
  *     POST-PUBLISH receipt (`--record-publish`) is written after the consent/
  *     publish step resolves and records the actual outcome — declined,

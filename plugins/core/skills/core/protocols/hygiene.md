@@ -298,8 +298,8 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 
 **During hygiene or after the relevant multi-agent run, outside `/finalize`:**
 
-2. Save effective agent configurations from multi-agent runs to `<project>/.core/_agent/agents/<name>.md` for future reuse.
-3. Save effective analysis-protocol configurations by task type to `<project>/.core/_agent/task-configs/<type>.md`. Check this folder before composing a new swarm.
+2. Save effective agent configurations from multi-agent runs to `<project>/_core/_agent/agents/<name>.md` for future reuse.
+3. Save effective analysis-protocol configurations by task type to `<project>/_core/_agent/task-configs/<type>.md`. Check this folder before composing a new swarm.
 4. Record strategy effectiveness per problem type.
 5. Sync cross-project learnings to `agent-profile.md` — user preferences, personality refinements, portfolio patterns. Never project-specific facts.
 6. Reconcile affected PROJECT.md sections and their source units during the hygiene pass. At `/finalize`, follow only its material-change gate for §State/§Moves and its bounded material-capture step.
@@ -367,7 +367,7 @@ Former dream cycle phases mapped to v2 hygiene:
 | Phase 3d: edge integrity sweep | Index regeneration + edge-reconciliation pass — `INDEX-*.md` regenerates, broken edges flagged |
 | Phase 3e: session-log auto-prune | Retired without replacement — no automated session-log cleanup ships; `_sessions/` grows until the user prunes it |
 | Phase 4: pattern synthesis | Graduation reasoning — same operation, named for what it actually is |
-| Phase 5: agent roster refresh | §"Self-evolution — hygiene and post-analysis learning" above — effective agent configurations saved to `<project>/.core/_agent/agents/<name>.md`, driven by the effectiveness reports |
+| Phase 5: agent roster refresh | §"Self-evolution — hygiene and post-analysis learning" above — effective agent configurations saved to `<project>/_core/_agent/agents/<name>.md`, driven by the effectiveness reports |
 
 There's no separate dream-cycle ritual, and no retrospective file — a per-pass retrospective had no reader. What a hygiene pass learns lands where it gets read: durable lessons graduate into units, and the pass's own narration tells the user what happened.
 

@@ -5,7 +5,7 @@
  * session's capability rows so drift and regression can be detected across
  * sessions (analyze-capability-drift.mjs is the consumer).
  *
- * Storage: the project's per-harness state, `<project>/.core/<harness>/capability-history.jsonl`
+ * Storage: the project's per-harness state, `<project>/_core/<harness>/capability-history.jsonl`
  *   (or ~/.core/local/<slug>/<harness>/ for a synced, read-only or another install's project),
  *   with a project fallback at `<project>/_metrics/capability-history/<harness>.jsonl`.
  *   One JSON object per line:

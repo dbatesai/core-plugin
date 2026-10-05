@@ -174,7 +174,7 @@ for (const harness of ['claude-code', 'codex']) test(`CLI --harness ${harness} b
   const home=join(root,'home'), project=join(root,'project');
   mkdirSync(join(home,'.core'),{recursive:true}); mkdirSync(project);
   writeFileSync(join(home,'.core','projects.json'), JSON.stringify([{path:project}]));
-  const meta=join(project,'.core',harness,'metrics');
+  const meta=join(project,'_core',harness,'metrics');
   const opposite=harness==='codex'?'claude-code':'codex';
   const isolate=join(root,'isolate.mjs');
   writeFileSync(isolate, `import os from 'node:os'; import {syncBuiltinESMExports} from 'node:module'; const original=os.userInfo; os.userInfo=(...args)=>({...original(...args),homedir:${JSON.stringify(home)}}); syncBuiltinESMExports();`);

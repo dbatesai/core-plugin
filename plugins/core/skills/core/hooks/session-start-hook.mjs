@@ -43,6 +43,7 @@ import { trustedHome } from '../scripts/trusted-home.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
 import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
 import { projectOnlyHint } from '../scripts/project-only.mjs';
+import { settleStateFolderName } from '../scripts/state-dirname.mjs';
 
 // trustedHome() (shared anchor in scripts/trusted-home.mjs): the OS-account home,
 // unspoofable by $HOME/$USERPROFILE. Unresolvable → null → nothing is authorized.
@@ -97,6 +98,14 @@ export function sessionIdLine(payload) {
   return typeof id === 'string' && SESSION_ID_RE.test(id) ? `CORE session id for this session (from the harness): ${id}` : '';
 }
 
+/** One line for the readiness summary when the older `.core` state folder is still in the project. */
+export function folderNameLine(settled) {
+  if (settled === 'both') return 'CORE state folder: this project has both `_core` and an older `.core`; CORE uses `_core`. Tell the user the older `.core` folder is still there for them to look at or remove.';
+  if (settled === 'legacy-not-a-folder') return 'CORE state folder: the older `.core` here is a link or not a folder, so CORE left it alone and keeps its state in `_core`. Tell the user.';
+  if (settled?.startsWith('not-renamed')) return `CORE state folder: the older \`.core\` could not be renamed to \`_core\` (${settled}); CORE stores nothing new for this project until it is. Tell the user.`;
+  return '';
+}
+
 export const PROJECT_ONLY_NOTICE = 'CORE project-only mode: this folder runs CORE from the folder alone. Automatic retrieval, end-of-session close and collab sync are off here. Run `/core project-only` to start, and `/finalize project-only` to close.';
 
 function main() {
@@ -107,6 +116,8 @@ function main() {
   if (projectOnlyHint(payload.cwd || process.cwd())) { process.stdout.write(PROJECT_ONLY_NOTICE + '\n' + (idLine ? idLine + '\n' : '')); return 0; }
   const cwd = payload.cwd || process.cwd();
   const logContext = { cwd, projectRoot: resolveRegisteredRoot(cwd) };
+  // Before any hook this session reads the project's state: give an older `.core` folder its visible name.
+  const folderLine = folderNameLine(logContext.projectRoot ? settleStateFolderName(logContext.projectRoot) : null);
   // A session running under CORE_CLOSE_PASS_ACTIVE=1 is discharging a close and must NOT be
   // told to run /core first — it has one job. Without this, such a session takes the /core
   // directive and never cleanly closes.
@@ -119,7 +130,7 @@ function main() {
     return 0;
   }
   const skill = autostartSkill(process.env, null, logContext);
-  process.stdout.write(buildDirective(skill) + '\n' + (idLine ? idLine + '\n' : ''));
+  process.stdout.write(buildDirective(skill) + '\n' + (idLine ? idLine + '\n' : '') + (folderLine ? folderLine + '\n' : ''));
   logHookEvent({ hook: 'session-start', action: 'inject', reason: skill === '/core' ? undefined : 'skill=' + skill, ...logContext });
   return 0;
 }

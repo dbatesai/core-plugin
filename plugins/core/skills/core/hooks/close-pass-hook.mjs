@@ -78,7 +78,7 @@ function main() {
   }
 
   // Canonicalize (realpath) then require a REGISTERED CORE project before spawning anything.
-  // Security: a generic `_memories/` dir or a `.core/` folder is not proof; the ~/.core
+  // Security: a generic `_memories/` dir or a `_core/` folder is not proof; the ~/.core
   // registry is the trust anchor an attacker can't plant from inside a project dir.
   // A session in a plain subfolder closes its registered project; one inside a nested
   // `.git` (worktree, vendored clone) closes nothing.

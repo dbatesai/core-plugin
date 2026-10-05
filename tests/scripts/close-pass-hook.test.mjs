@@ -29,7 +29,7 @@ process.env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
 // child spawn boundary, so the registered positive control proves every prior
 // gate was reached without launching a detached writer into a removed fixture.
 function runHook(payload, env = {}) {
-  const log = join(payload.cwd, '.core', '_hooks', 'hooks-log.jsonl');
+  const log = join(payload.cwd, '_core', '_hooks', 'hooks-log.jsonl');
   const probeDir = dirname(isolatedHooksLog());
   const probe = join(probeDir, 'spawn-probe.mjs');
   const spawned = join(probeDir, 'spawned.json');
@@ -131,7 +131,7 @@ test('isRegisteredWorkspace: only a path in the ~/.core registry passes (securit
   const good = mkdtempSync(join(tmpdir(), 'reg-ws-'));
   const evil = mkdtempSync(join(tmpdir(), 'evil-ws-'));
   mkdirSync(join(evil, '_memories'), { recursive: true }); // attacker plants a _memories dir
-  mkdirSync(join(evil, '.core', 'claude-code'), { recursive: true }); // and a .core/ state folder
+  mkdirSync(join(evil, '_core', 'claude-code'), { recursive: true }); // and a .core/ state folder
   const idxPath = join(registry, 'projects.json');
   writeFileSync(idxPath, JSON.stringify([{ path: good }]));
   assert.equal(cp.isRegisteredWorkspace(good, { indexPath: idxPath }), true, 'a registered path passes');
@@ -176,7 +176,7 @@ test('always exits 0 even on garbage stdin (fail-open)', () => {
 // into a fixture that is about to be removed.
 function runRealSpawn(t, rewrite, extraEnv = {}) {
   const f = registeredFixture(t);
-  const log = join(f.store, '.core', '_hooks', 'hooks-log.jsonl');
+  const log = join(f.store, '_core', '_hooks', 'hooks-log.jsonl');
   const probeDir = dirname(isolatedHooksLog());
   const probe = join(probeDir, 'real-spawn-probe.mjs');
   writeFileSync(probe, `

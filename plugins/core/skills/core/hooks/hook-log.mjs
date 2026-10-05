@@ -1,11 +1,12 @@
 /** Project-local, fail-open lifecycle receipts. No global or OS-temp fallback.
  * Callers supply the selected registered projectRoot; process cwd is never a root selector.
- * CORE_HOOKS_LOG_FILE may name a direct child of .core/_hooks, or /dev/null to mute.
+ * CORE_HOOKS_LOG_FILE may name a direct child of _core/_hooks, or /dev/null to mute.
  */
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureProjectArtifactDir, assertArtifactFile, projectArtifactRoot } from '../scripts/project-artifacts.mjs';
+import { STATE_DIRNAME } from '../scripts/state-dirname.mjs';
 
 // Packaged producer identity, read ONCE from the plugin manifest — the same
 // seam retrieve-context-hook.mjs uses for its evidence rows — and stamped on
@@ -27,7 +28,7 @@ export const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 export function resolveHookLogPath(env = process.env, projectRoot = null) {
   if (env?.CORE_HOOKS_LOG_FILE === '/dev/null') return '/dev/null';
   if (!projectRoot) return null;
-  const dir = join(resolve(projectRoot), '.core', '_hooks');
+  const dir = join(resolve(projectRoot), STATE_DIRNAME, '_hooks');
   const override = env?.CORE_HOOKS_LOG_FILE;
   const file = override ? resolve(override) : null;
   return file && dirname(file) === dir && !['.gitignore', '.', '..'].includes(file.slice(dir.length + 1))

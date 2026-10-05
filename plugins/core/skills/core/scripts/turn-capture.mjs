@@ -19,7 +19,7 @@
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
  *   2. `CORE_TURN_CAPTURE` env false → OFF (its own hard switch).
- *   3. the project's trusted manifest (`.core/<harness>/workspace.json`) `"turn_capture": false` → OFF. Unlike
+ *   3. the project's trusted manifest (`_core/<harness>/workspace.json`) `"turn_capture": false` → OFF. Unlike
  *      rich-context's opt-IN (machine-local only, so a sensitive enable could
  *      never travel with a copied project), an opt-OUT travelling with a copied
  *      project is privacy-safe — the flag lives with the project on purpose.
@@ -99,7 +99,7 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  * Precedence (first match wins):
  *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
- *   3. the project's trusted manifest (`.core/<harness>/workspace.json`), or the project-root
+ *   3. the project's trusted manifest (`_core/<harness>/workspace.json`), or the project-root
  *      `workspace.json`, says `"turn_capture": false` → OFF.
  *   4. default → ON.
  */

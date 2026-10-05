@@ -52,7 +52,7 @@ Critic is always present. Anti-anchoring discipline is non-negotiable regardless
 
 Hardware budget caps the upper end. From `protocols/execution.md`: ≥48GB → up to 6–8; ≥24GB → 4–5; <24GB → 2–3.
 
-Compose fresh personas for the task's specific shape. Saved compositions at `<project>/.core/_agent/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
+Compose fresh personas for the task's specific shape. Saved compositions at `<project>/_core/_agent/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
 
 Three starting templates ship at `templates/swarm-implement.md`, `templates/swarm-research.md`, and `templates/swarm-review.md` — roster skeletons plus briefing scaffolds for the three common shapes in the sizing table above. `references/refinement-strategies.md` catalogs refinement dispositions for when a first composition isn't converging. Both are seed material, same status as saved compositions: starting points, never verbatim.
 
@@ -230,7 +230,7 @@ Once accepted:
 2. Write the review-finding unit at `<project>/_memories/rf-<topic>-<YYYY-MM-DD>.md` with edges to implicated files.
 3. Append the effectiveness narrative to `<durable>/swarm-narrative.md` (path from `index-registry.mjs path --kind durable`) only on successful nonempty absolute path resolution. If refused, retain the narrative in the in-project effectiveness report and mark the operational append not stored; do not create a fallback.
 4. Write the effectiveness report at `<project>/_outputs/swarm-effectiveness/<YYYY-MM-DD>.md` per `protocols/hygiene.md §"Self-evolution — hygiene and post-analysis learning"`.
-5. Save research to `<project>/_outputs/research/` (research mode) and compositional patterns to `<project>/.core/_agent/agents/` + `<project>/.core/_agent/task-configs/`.
+5. Save research to `<project>/_outputs/research/` (research mode) and compositional patterns to `<project>/_core/_agent/agents/` + `<project>/_core/_agent/task-configs/`.
 6. Update `PROJECT.md` if the synthesis produced new decisions, risks, or moves.
 7. Verify the writes landed before freeing anything: the synthesis, the review-finding unit, the effectiveness report, and any successfully resolved swarm-narrative append must exist on disk with non-zero size; a refused operational append must be explicitly recorded as not stored in the effectiveness report (check each materialized file and the explicit refusal note). A write can fail silently — disk full, permission, a bad path — and after TeamDelete the content is unrecoverable. On any missing or empty file, surface the error and retry the write; don't TeamDelete until every required output or explicitly recorded refusal checks out.
 8. TeamDelete to free the context.

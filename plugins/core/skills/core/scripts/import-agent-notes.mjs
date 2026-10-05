@@ -3,10 +3,10 @@
  * One-time copy of the agent's own notes from the old shared ~/.core folder into this project.
  *
  * The agent profile, saved agents, task configurations and topic vocabulary live in
- * <project>/.core/_agent/. Research documents live in <project>/_outputs/research/ and are copied
+ * <project>/_core/_agent/. Research documents live in <project>/_outputs/research/ and are copied
  * only when asked (--research), because the old library mixes every project's research.
  *
- * Each family is decided once and recorded in .core/_agent/import-receipt.json with the source path
+ * Each family is decided once and recorded in _core/_agent/import-receipt.json with the source path
  * and a sha256 per copied file. A recorded family is never looked at again, so a missing or deleted
  * local copy never falls back to the old shared folder. A local copy that already exists wins and
  * nothing is copied over it. The old folder is only read.

@@ -35,7 +35,7 @@ cpSync(FIXT_SRC, FIXT, { recursive: true });
 process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 // Logs live inside the selected fixture project and disappear with that fixture.
-function isolatedHooksLog(root = FIXT) { return join(root, '.core', '_hooks', 'hooks-log.jsonl'); }
+function isolatedHooksLog(root = FIXT) { return join(root, '_core', '_hooks', 'hooks-log.jsonl'); }
 
 function runHook(prompt, env, cwd = FIXT) {
   return execFileSync('node', [HOOK], {
@@ -525,8 +525,8 @@ test('a migration fence stops retrieval and its receipt names the real reason, n
   for (const [shape, expected] of [['marker', 'migration-in-progress'], ['linked state', 'state-untrusted']]) {
     const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-fence-')));
     try {
-      if (shape === 'marker') { mkd(join(root, '.core', 'claude-code'), { recursive: true }); wf(join(root, '.core', 'claude-code', '.migrating'), ''); }
-      else { const other = mkdtempSync(join(tmpdir(), 'rh-fence-other-')); symlinkSync(other, join(root, '.core')); }
+      if (shape === 'marker') { mkd(join(root, '_core', 'claude-code'), { recursive: true }); wf(join(root, '_core', 'claude-code', '.migrating'), ''); }
+      else { const other = mkdtempSync(join(tmpdir(), 'rh-fence-other-')); symlinkSync(other, join(root, '_core')); }
       const r = runHookProcess('widget decision', {}, root);
       assert.equal(r.status, 0);
       assert.doesNotMatch(r.stdout, /dc-1-widget/, `${shape}: nothing retrieved`);

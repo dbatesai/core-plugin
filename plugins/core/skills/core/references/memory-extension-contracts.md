@@ -46,7 +46,7 @@ today, with no core change:
   through `log-event.mjs` untouched (§3).
 - **Additive detectors** — new Layer-2 passes over the captured record, alongside
   `metrics-detectors.mjs`.
-- **Saved agent compositions** under `<project>/.core/_agent/agents/`.
+- **Saved agent compositions** under `<project>/_core/_agent/agents/`.
 
 These sets are **closed** — extending them is a core change shipped through this repo, not
 something a wrapper can register locally:
@@ -141,13 +141,13 @@ blast-radius policy (MAJOR/MINOR on the plugin version) and called out in `CHANG
   and the strip-on-graduation rule for `mode` / `judgment-needed`.
 - **Metrics event passthrough** — unknown event fields and `query_shape` values are never
   rejected by capture.
-- **`<project>/.core/<harness>/` layout** for the files named in `protocols/data-storage.md`, resolved through `scripts/project-state.mjs` (`stateDir`, `readManifest`, `updateManifest`). The earlier `~/.core/workspaces/<id>/` layout is read only by the migration.
+- **`<project>/_core/<harness>/` layout** for the files named in `protocols/data-storage.md`, resolved through `scripts/project-state.mjs` (`stateDir`, `readManifest`, `updateManifest`). The earlier `~/.core/workspaces/<id>/` layout is read only by the migration.
 - **Unknown-frontmatter preservation** — CORE tooling never strips fields it doesn't know.
 
 What is internal and may change without notice: script internals and exports not named above,
 analyzer output formats, `state-cache.json` shape.
 
-Co-installation rule: a wrapper writes only under its own `<project>/.core/<wrapper>/` sub-namespace
+Co-installation rule: a wrapper writes only under its own `<project>/_core/<wrapper>/` sub-namespace
 and never the shared registry files — see `protocols/data-storage.md §Single-writer assumption`.
 
 ---

@@ -28,6 +28,7 @@ import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
+import { STATE_DIRNAME } from './state-dirname.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -182,7 +183,7 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
       for (const p of problems) held.push({ what: p.what, reason: `${p.reason}, so any record of an older external folder in it is hidden; nothing was moved` });
       places.push(...locations);
     } catch (e) {
-      held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
+      held.push({ what: join(root, STATE_DIRNAME, harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
     }
   }
   const { folders, unknown, error } = historyDiscovery(projectDir, { home, env });
@@ -220,7 +221,7 @@ export function todayUTC() {
 /**
  * Operational-meta metrics dir for a project (spec §17.6): the derived,
  * regeneratable side of the split — classified/, detectors/, rollups/, etc.
- * New data lives in the project's per-harness state (`.core/<harness>/metrics`).
+ * New data lives in the project's per-harness state (`_core/<harness>/metrics`).
  * Unsupported state routes throw STATE_NO_PROJECT_PLACE; any older local copy
  * is read-only history. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
  * Creates the directory (stamping new state) — use trustedMetricsDir for a pure read.
@@ -290,7 +291,7 @@ function checkMetricsParentChain(anchor, dir) {
  *      opt-in — re-enabling is fixing the pin (re-run metrics-init), not
  *      overriding the marker.
  *   3. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
- *   4. the project's trusted manifest (`.core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
+ *   4. the project's trusted manifest (`_core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
  *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
  *      A manifest whose stamp does not verify (planted by a clone) is not read.
  *   6. this harness's manifest says `"metrics_enabled": false` but doesn't verify → OFF,

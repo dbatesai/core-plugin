@@ -70,7 +70,7 @@ export const CANONICAL_STATES = [
 ];
 
 // ============================================================
-// Calibration state (persisted to the project's .core/<harness>/metrics/)
+// Calibration state (persisted to the project's _core/<harness>/metrics/)
 // ============================================================
 
 export function emptyCalibrationState() {

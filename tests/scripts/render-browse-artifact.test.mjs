@@ -227,7 +227,7 @@ rtest('writes a local receipt in the project state with content identical to the
     assert.equal(receiptWritten, true);
     assert.equal(manifest.receipt_fallback, false);
     assert.match(manifest.project_id, /^[0-9a-f]{32}$/, 'the project id rides the manifest');
-    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '.core')),
+    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '_core')),
       'receipt lands in the project\'s own .core/<harness>/artifact-receipts');
     const receipt = JSON.parse(readFileSync(manifest.receipt_path, 'utf8'));
     assert.deepEqual(receipt, manifest, 'receipt content == manifest content');
@@ -238,9 +238,9 @@ rtest('refused project state (a symlinked .core) refuses publication and receipt
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-elsewhere-')));
   try {
-    symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
+    symlinkSync(elsewhere, join(root, '_core'), DIR_LINK);
     const before = snapshotBytes(join(home, '.core'));
-    await assert.rejects(generate(root, home), /refusing .*\.core: symlink/);
+    await assert.rejects(generate(root, home), /refusing .*_core: symlink/);
     assert.equal(existsSync(join(root, 'out', 'view.html')), false);
     assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.deepEqual(readdirSync(elsewhere), [], 'nothing written through the symlink');
@@ -254,7 +254,7 @@ rtest('an unregistered folder refuses generation without writing receipts anywhe
     await assert.rejects(generate(root, home), error => error.code === 'STATE_NO_PROJECT_PLACE');
     assert.equal(existsSync(join(root, 'out', 'view.html')), false);
     assert.deepEqual(snapshotBytes(join(home, '.core')), before);
-    assert.equal(existsSync(join(root, '.core')), false, 'no .core/ planted in an unregistered folder');
+    assert.equal(existsSync(join(root, '_core')), false, 'no .core/ planted in an unregistered folder');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -687,16 +687,16 @@ test('a planted .core cannot redirect the receipt out of the operational root', 
   try {
     mkdirSync(join(home, '.core'), { recursive: true });
     writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
-    symlinkSync(stolen, join(project, '.core'), DIR_LINK);
+    symlinkSync(stolen, join(project, '_core'), DIR_LINK);
     const before = snapshotBytes(join(home, '.core'));
-    assert.throws(() => generationReceiptLocation({home, projectDir:project, generatedAt:'2026-07-28T00:00:00Z', env:{CORE_HARNESS:'claude-code'}}), /refusing .*\.core: symlink/);
+    assert.throws(() => generationReceiptLocation({home, projectDir:project, generatedAt:'2026-07-28T00:00:00Z', env:{CORE_HARNESS:'claude-code'}}), /refusing .*_core: symlink/);
     assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.deepEqual(readdirSync(stolen), [], 'nothing lands in the symlink target');
 
-    rmSync(join(project, '.core'));
+    rmSync(join(project, '_core'));
     const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
     assert.match(ok.projectId, /^[0-9a-f]{32}$/);
-    assert.equal(ok.receiptDir, join(realpathSync(project), '.core', 'claude-code', 'artifact-receipts'));
+    assert.equal(ok.receiptDir, join(realpathSync(project), '_core', 'claude-code', 'artifact-receipts'));
   } finally {
     for (const d of [home, project, stolen]) rmSync(d, { recursive: true, force: true });
   }

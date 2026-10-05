@@ -310,7 +310,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     for (const e of edges) {
       const target = String(e.target);
       if (target.includes('://') || target.startsWith('http')) continue;
-      // references-topic edges target the controlled vocabulary (.core/_agent/topics.md),
+      // references-topic edges target the controlled vocabulary (_core/_agent/topics.md),
       // not unit IDs. Validating them against the unit store produced false
       // dangling-edge warnings; a correctly-typed references-topic edge is an
       // external vocab reference and is always valid here.

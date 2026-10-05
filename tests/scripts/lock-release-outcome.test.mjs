@@ -97,7 +97,7 @@ test('migration reports failed release with the completed copy result; recovery 
       assertRelease(error, lock); assert.equal(error.operationResult.status, 'migrated');
       assert.ok(error.operationResult.files > 0);
     });
-    const receipt = JSON.parse(fs.readFileSync(join(f.root, '.core/codex/migrated-from.json')));
+    const receipt = JSON.parse(fs.readFileSync(join(f.root, '_core/codex/migrated-from.json')));
     const copied = receipt.files.find(x => x.from.endsWith('capability-history.jsonl')).to;
     assert.deepEqual(fs.readFileSync(copied), original);
     recover(lock);
@@ -111,7 +111,7 @@ test('legacy drift reports the completed append; a later check is a no-op after 
   const f = migrationFixture(), lock = join(f.root, '_memories/_close.lock');
   try {
     assert.equal(applyMigration(f.options).status, 'migrated');
-    const receipt = JSON.parse(fs.readFileSync(join(f.root, '.core/codex/migrated-from.json')));
+    const receipt = JSON.parse(fs.readFileSync(join(f.root, '_core/codex/migrated-from.json')));
     const copied = receipt.files.find(x => x.from.endsWith('capability-history.jsonl')).to;
     fs.appendFileSync(join(f.legacy, 'capability-history.jsonl'), '{"row":2}\n');
     denial(lock, () => {
@@ -217,7 +217,7 @@ for (const mode of ['completed-copy', 'primary-error', 'nested-releases']) {
       assert.ok(currentLockFile(join(f.root, '_memories/_close.lock')));
       if (mode === 'completed-copy') {
         assert.equal(report.status, 'lock-release-failed'); assert.equal(report.operation.status, 'migrated');
-        const receipt = JSON.parse(fs.readFileSync(join(f.root, '.core/codex/migrated-from.json')));
+        const receipt = JSON.parse(fs.readFileSync(join(f.root, '_core/codex/migrated-from.json')));
         const copy = receipt.files.find(x => x.from.endsWith('capability-history.jsonl')).to;
         assert.equal(fs.readFileSync(copy, 'utf8'), '{"row":1}\n');
       } else if (mode === 'primary-error') {

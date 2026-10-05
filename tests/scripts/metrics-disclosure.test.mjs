@@ -37,7 +37,7 @@ test('first call for a project shows the notice and persists the flag in its .co
     assert.equal(result.alreadyShown, false);
     assert.equal(result.noticeText, NOTICE_TEXT);
     const file = manifestFile(coreDir, project);
-    assert.equal(file, join(realpathSync(project), '.core', HARNESS, 'workspace.json'), 'the manifest lives in the project');
+    assert.equal(file, join(realpathSync(project), '_core', HARNESS, 'workspace.json'), 'the manifest lives in the project');
     const manifest = JSON.parse(readFileSync(file, 'utf8'));
     assert.equal(manifest.metrics_disclosure_shown, true, 'flag persisted into the manifest');
     assert.equal(manifest.schema_version, 'v2', 'pre-existing manifest fields preserved, not clobbered');
@@ -60,7 +60,7 @@ test('second and subsequent calls report ALREADY-SHOWN and write nothing further
 
 test('a project with no manifest yet still shows once and creates the manifest with the flag set', () => {
   sandbox(({ home, coreDir, project }) => {
-    assert.equal(existsSync(join(project, '.core')), false);
+    assert.equal(existsSync(join(project, '_core')), false);
     const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.shown, true);
     assert.equal(readManifest({ root: project, harness: HARNESS, coreDir }).metrics_disclosure_shown, true);
@@ -69,7 +69,7 @@ test('a project with no manifest yet still shows once and creates the manifest w
 
 test('a flag planted by a cloned repo never suppresses the notice', () => {
   sandbox(({ home, project }) => {
-    const planted = join(project, '.core', HARNESS);
+    const planted = join(project, '_core', HARNESS);
     mkdirSync(planted, { recursive: true });
     writeFileSync(join(planted, 'workspace.json'), JSON.stringify({ metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION }));
     const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
@@ -82,7 +82,7 @@ test('an unregistered folder shows the notice and keeps its manifest out of the 
   sandbox(({ home, project }) => {
     const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.shown, true);
-    assert.equal(existsSync(join(project, '.core')), false, 'no .core/ planted in an unregistered folder');
+    assert.equal(existsSync(join(project, '_core')), false, 'no .core/ planted in an unregistered folder');
   }, { registered: false });
 });
 
@@ -122,7 +122,7 @@ test('a signed but unparseable manifest is never clobbered, and the notice still
 test('the notice text names both opt-out mechanisms and where the log lives', () => {
   assert.match(NOTICE_TEXT, /CORE_METRICS_ENABLED=0/, 'names the env-var opt-out');
   assert.match(NOTICE_TEXT, /metrics_enabled:\s*false/, 'names the manifest opt-out');
-  assert.match(NOTICE_TEXT, /\.core\/<harness>\/workspace\.json/, 'names the config file where it really lives');
+  assert.match(NOTICE_TEXT, /_core\/<harness>\/workspace\.json/, 'names the config file where it really lives');
   assert.match(NOTICE_TEXT, /lives in this project's folder/, 'says where the log lives');
   assert.match(NOTICE_TEXT, /syncs with it/, 'says a synced project folder syncs the log too');
   assert.doesNotMatch(NOTICE_TEXT, /this machine/i, 'no claim the log stays on this machine');

@@ -7,8 +7,8 @@
  * those arguments alone: it never reads the account home, the registry, the install secret or
  * the install id, and it never enrolls the folder.
  *
- * State the mode writes lives in `<root>/.core/_project-only/<harness>/`, outside the signed
- * harness envelope (`.core/<harness>/` is never created or touched here) and under a name the
+ * State the mode writes lives in `<root>/_core/_project-only/<harness>/`, outside the signed
+ * harness envelope (`_core/<harness>/` is never created or touched here) and under a name the
  * harness-folder pattern can't match, so installed-mode discovery never reads it as harness
  * state. Everything in it is unsigned and says so; installed mode treats it as pending data
  * that the user may merge, never as trusted or completed work.
@@ -42,6 +42,7 @@ import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { useNoMachineIdentity, acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
 import { ensureStoreIgnores } from './store-ignores.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -53,20 +54,25 @@ export const ARCHIVE_DIR = '_archive';
 
 /**
  * True when `cwd` holds an active project-only folder for any harness: a real directory under
- * `.core/_project-only/` with a harness name. Disable-only: it never grants anything. What a normal
+ * `_core/_project-only/` (or the older `.core/_project-only/`) with a harness name. Disable-only: it never grants anything. What a normal
  * session has picked up sits under `_archive/`, which is history and suppresses nothing. A marker
  * folder that can't be read counts as active: the hint only restricts, so unknown restricts.
  */
 export function projectOnlyHint(cwd) {
   try {
     if (!cwd) return false;
-    return readdirSync(join(String(cwd), '.core', PROJECT_ONLY_DIR), { withFileTypes: true })
-      .some((e) => e.isDirectory() && HARNESS_RE.test(e.name));
-  } catch (e) {
-    // Plainly absent is "no". A marker folder that exists but can't be read is unknown, and since the
-    // hint only ever restricts, unknown counts as present.
-    return !(e?.code === 'ENOENT' || e?.code === 'ENOTDIR');
-  }
+    // The older folder name counts too: the hint only reads, and a folder not yet renamed still restricts.
+    return [STATE_DIRNAME, LEGACY_STATE_DIRNAME].some((name) => {
+      try {
+        return readdirSync(join(String(cwd), name, PROJECT_ONLY_DIR), { withFileTypes: true })
+          .some((e) => e.isDirectory() && HARNESS_RE.test(e.name));
+      } catch (e) {
+        // Plainly absent is "no". A marker folder that exists but can't be read is unknown, and since the
+        // hint only ever restricts, unknown counts as present.
+        return !(e?.code === 'ENOENT' || e?.code === 'ENOTDIR');
+      }
+    });
+  } catch { return true; }
 }
 
 /** The root for a project-only operation: an existing directory resolved physically, or a refusal. */
@@ -81,10 +87,11 @@ export function projectOnlyContext({ root, harness = 'claude-code', session = nu
   let home = null;
   try { home = userInfo().homedir || null; } catch { /* no account record: the home check is skipped */ }
   if (home && real === home) return { ok: false, state: 'refused', reason: 'home folder' };
+  settleStateFolderName(real);
   return { ok: true, mode: 'project-only', root: real, harness, session, operation };
 }
 
-export const pendingDir = (ctx) => join(ctx.root, '.core', PROJECT_ONLY_DIR, ctx.harness);
+export const pendingDir = (ctx) => join(ctx.root, STATE_DIRNAME, PROJECT_ONLY_DIR, ctx.harness);
 
 // A folder can arrive with any of these paths as a link to somewhere else (a cloned repo, an
 // unzipped archive), which would carry writes and reads out of the project. Every component CORE
@@ -117,15 +124,15 @@ function writeOwn(dir, name, body) {
   try { renameSync(tmp, join(dir, name)); } catch (e) { rmSync(tmp, { force: true }); throw e; }
 }
 
-/** Creates the pending folder, with `.core/.gitignore` in place before anything else is written. */
+/** Creates the pending folder, with `_core/.gitignore` in place before anything else is written. */
 export function ensurePending(ctx) {
   // Every existing component is checked before anything is created, so a refusal changes nothing.
-  for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
+  for (const d of [join(ctx.root, STATE_DIRNAME), join(ctx.root, STATE_DIRNAME, PROJECT_ONLY_DIR), pendingDir(ctx)]) {
     let st;
     try { st = lstatSync(d); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
     if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
   }
-  const core = ownDir(ctx, join(ctx.root, '.core'));
+  const core = ownDir(ctx, join(ctx.root, STATE_DIRNAME));
   const ignore = join(core, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { flag: 'wx' });   // wx never follows a link or overwrites
   ownDir(ctx, join(core, PROJECT_ONLY_DIR));
@@ -148,7 +155,7 @@ function readJson(ctx, file) {
 export function readPendingManifest(ctx) {
   let r;
   try {
-    for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
+    for (const d of [join(ctx.root, STATE_DIRNAME), join(ctx.root, STATE_DIRNAME, PROJECT_ONLY_DIR), pendingDir(ctx)]) {
       const st = lstatSync(d);
       if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
     }
@@ -367,10 +374,10 @@ const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const closeLock = (ctx) => join(ctx.root, '_memories', '_close.lock');
 const closeDir = (ctx) => join(pendingDir(ctx), 'close');
 
-/** Every directory from `.core` down to the close folder is a real, non-link directory, checked
+/** Every directory from `_core` down to the close folder is a real, non-link directory, checked
  *  again on each call: a separate CLI call can't trust what an earlier one saw. */
 function closeChain(ctx, extra = []) {
-  for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx), closeDir(ctx), ...extra]) {
+  for (const d of [join(ctx.root, STATE_DIRNAME), join(ctx.root, STATE_DIRNAME, PROJECT_ONLY_DIR), pendingDir(ctx), closeDir(ctx), ...extra]) {
     const st = lstatSync(d);
     if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
   }
@@ -470,7 +477,7 @@ export function finalizeFinish(ctx) {
 // `_archive/`, never deletes, and ends this harness's hook suppression; another harness's pending
 // folder keeps its own.
 function pendingChain(ctx) {
-  for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
+  for (const d of [join(ctx.root, STATE_DIRNAME), join(ctx.root, STATE_DIRNAME, PROJECT_ONLY_DIR), pendingDir(ctx)]) {
     const st = lstatSync(d);   // ENOENT propagates: nothing pending
     if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
   }
@@ -517,7 +524,7 @@ export function pickupArchive(ctx, { now = new Date() } = {}) {
   if (r.unfinished_close) return { status: 'refused', state: 'close-in-progress', session_id: r.unfinished_close, reason: 'a project-only close has begun and not certified; finish or release it first' };
   const stamp = now.toISOString().replace(/[:.]/g, '-');
   let archive;
-  try { archive = ownDir(ctx, join(ctx.root, '.core', PROJECT_ONLY_DIR, ARCHIVE_DIR)); }
+  try { archive = ownDir(ctx, join(ctx.root, STATE_DIRNAME, PROJECT_ONLY_DIR, ARCHIVE_DIR)); }
   catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
   const dest = join(archive, `${ctx.harness}-${stamp}`);
   if (existsSync(dest)) return { status: 'refused', state: 'destination-exists', reason: dest };

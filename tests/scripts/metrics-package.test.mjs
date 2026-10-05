@@ -255,7 +255,7 @@ test('a package run keeps its key and history in the project, leaves the old glo
     writeFileSync(legacySalt, 'a'.repeat(64) + '\n'); mkdirSync(legacyHistory); writeFileSync(join(legacyHistory, 'x.jsonl'), '{"old":1}\n');
     const r1 = runPackage([project, '--home', home, '--out', join(root, 'out1')]);
     assert.ok(r1.shipped, JSON.stringify(r1).slice(0, 300));
-    const state = join(project, '.core', '_package');
+    const state = join(project, '_core', '_package');
     assert.match(readFileSync(join(state, 'salt'), 'utf8'), /^[0-9a-f]{64}\n$/);
     assert.equal(readFileSync(join(state, 'history.jsonl'), 'utf8').trim().split('\n').length, 1, 'one baseline after a shipped package');
     assert.equal(readFileSync(legacySalt, 'utf8'), 'a'.repeat(64) + '\n', 'the old global key is untouched');
@@ -321,10 +321,10 @@ test('the shipped report names why deltas are unavailable, and refused projects 
   try {
     const home = makeFixtureHome(root);
     const good = makeFixtureProject(root);
-    mkdirSync(join(good, '.core', '_package'), { recursive: true });
-    writeFileSync(join(good, '.core', '_package', 'history.jsonl'), 'not json\n');
+    mkdirSync(join(good, '_core', '_package'), { recursive: true });
+    writeFileSync(join(good, '_core', '_package', 'history.jsonl'), 'not json\n');
     const bad = [join(root, 'a', 'repo'), join(root, 'b', 'repo')];
-    for (const p of bad) { mkdirSync(join(p, '_memories'), { recursive: true }); mkdirSync(join(p, '.core', '_package'), { recursive: true }); writeFileSync(join(p, '.core', '_package', 'salt'), 'bad\n'); }
+    for (const p of bad) { mkdirSync(join(p, '_memories'), { recursive: true }); mkdirSync(join(p, '_core', '_package'), { recursive: true }); writeFileSync(join(p, '_core', '_package', 'salt'), 'bad\n'); }
     writeFileSync(join(home, '.core', 'index.json'), JSON.stringify([{ id: 'fixture-ws-alpha', path: good }, { id: 'r1', path: bad[0] }, { id: 'r2', path: bad[1] }]));
     const r = runPackage(['--all', '--scratch-project', good, '--home', home, '--out', join(root, 'out')]);
     assert.ok(r.shipped, JSON.stringify(r).slice(0, 300));
@@ -344,8 +344,8 @@ test('a history that cannot be saved keeps the delivered package and says the ne
   try {
     const home = makeFixtureHome(root);
     const project = makeFixtureProject(root);
-    mkdirSync(join(project, '.core', '_package'), { recursive: true });
-    mkdirSync(join(project, '.core', '_package', 'history.jsonl'));   // a folder where the file goes
+    mkdirSync(join(project, '_core', '_package'), { recursive: true });
+    mkdirSync(join(project, '_core', '_package', 'history.jsonl'));   // a folder where the file goes
     const r = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     assert.ok(r.shipped, 'the package is still delivered');
     assert.equal(r.history_not_saved?.length, 1);

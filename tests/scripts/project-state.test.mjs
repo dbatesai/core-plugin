@@ -154,8 +154,8 @@ test('ensureStateDir writes .core/.gitignore ("*") and puts state under .core/<h
     register(s.coreDir, [p]);
     const out = ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir });
     assert.equal(out.location, 'project');
-    assert.equal(out.dir, join(p, '.core', 'claude-code'));
-    assert.equal(readFileSync(join(p, '.core', '.gitignore'), 'utf8'), '*\n');
+    assert.equal(out.dir, join(p, '_core', 'claude-code'));
+    assert.equal(readFileSync(join(p, '_core', '.gitignore'), 'utf8'), '*\n');
   } finally { s.cleanup(); }
 });
 
@@ -167,7 +167,7 @@ test('hot and durable state both stay in the project, synced folder or not', () 
     for (const kind of ['hot', 'durable']) {
       const out = projectStateDir({ root: p, harness: 'codex', kind, coreDir: s.coreDir });
       assert.equal(out.location, 'project', kind);
-      assert.equal(out.dir, join(p, '.core', 'codex'), kind);
+      assert.equal(out.dir, join(p, '_core', 'codex'), kind);
     }
   } finally { s.cleanup(); }
 });
@@ -189,7 +189,7 @@ test('an unregistered folder refuses new state without creating a local fallback
     const p = mk(s.home, 'Projects', 'Unregistered');
     assert.throws(()=>ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='unregistered');
     assert.equal(existsSync(join(s.coreDir,'local')),false);
-    assert.equal(existsSync(join(p, '.core')), false, 'nothing planted in the folder');
+    assert.equal(existsSync(join(p, '_core')), false, 'nothing planted in the folder');
   } finally { s.cleanup(); }
 });
 
@@ -201,7 +201,7 @@ test('harness names are a single safe segment', () => {
 // ---------- the stamp: hostile clone (spec test 2) ----------
 
 function plantState(p, harness, stamp) {
-  const dir = mk(p, '.core', harness);
+  const dir = mk(p, '_core', harness);
   writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ metrics_disclosure_shown: true, storage_path: '../../.ssh' }));
   writeFileSync(join(dir, 'close.lock.g1'), JSON.stringify({ pid: process.pid, nonce: 'x' }));
   if (stamp !== undefined) writeFileSync(join(dir, 'stamp'), typeof stamp === 'string' ? stamp : JSON.stringify(stamp));
@@ -262,7 +262,7 @@ test('a symlinked .core is refused on read and on write', () => {
     const target = mk(s.base, 'secret-dir');
     mkdirSync(join(target, 'claude-code'));
     const p = mk(s.base, 'clone');
-    symlinkSync(target, join(p, '.core'), DIR_LINK);
+    symlinkSync(target, join(p, '_core'), DIR_LINK);
     register(s.coreDir, [p]);
     assert.deepEqual(classifyStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir }), { status: 'refused', reason: 'symlink' });
     assert.throws(() => ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir }), /symlink/);
@@ -295,7 +295,7 @@ test('cp -r: the copy classifies as copied and the original is byte-identical', 
   try {
     const p = mk(s.base, 'Projects', 'P');
     writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
-    writeFileSync(join(p, '.core', 'claude-code', 'workspace.json'), '{"project_id":"abc"}');
+    writeFileSync(join(p, '_core', 'claude-code', 'workspace.json'), '{"project_id":"abc"}');
     const before = snapshot(p);
     const copy = join(s.base, 'Projects', 'P-copy');
     cpSync(p, copy, { recursive: true });
@@ -354,11 +354,11 @@ test('a moved project whose migration is unfinished is fenced: no re-stamp, no w
     try {
       const p = mk(s.base, 'Projects', 'P');
       writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
-      if (fenced) writeFileSync(join(p, '.core', 'claude-code', '.migrating'), '');
+      if (fenced) writeFileSync(join(p, '_core', 'claude-code', '.migrating'), '');
       const moved = join(s.base, 'Projects', 'P-renamed');
       renameSync(p, moved);
       register(s.coreDir, [moved]);
-      const stamp = join(moved, '.core', 'claude-code', 'stamp');
+      const stamp = join(moved, '_core', 'claude-code', 'stamp');
       const before = readFileSync(stamp, 'utf8');
       assert.equal(classifyStamp({ root: moved, harness: 'claude-code', coreDir: s.coreDir }).status, 'moved');
       if (fenced) {
@@ -384,12 +384,12 @@ test('a copied project with an unfinished migration is not archived or re-stampe
       writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
       const copy = join(s.base, 'Projects', 'P-copy');
       cpSync(p, copy, { recursive: true });
-      if (fenced) writeFileSync(join(copy, '.core', 'claude-code', '.migrating'), '');
+      if (fenced) writeFileSync(join(copy, '_core', 'claude-code', '.migrating'), '');
       register(s.coreDir, [p, copy]);
-      const before = snapshot(join(copy, '.core'));
+      const before = snapshot(join(copy, '_core'));
       if (fenced) {
         assert.throws(() => stateDir({ root: copy, harness: 'claude-code', coreDir: s.coreDir, forWrite: true }));
-        assert.deepEqual(snapshot(join(copy, '.core')), before, 'marker, stamp and bytes kept as found');
+        assert.deepEqual(snapshot(join(copy, '_core')), before, 'marker, stamp and bytes kept as found');
       } else {
         const r = stateDir({ root: copy, harness: 'claude-code', coreDir: s.coreDir, forWrite: true });
         assert.equal(r.status, 'copied'); assert.ok(r.setAside, 'control: a healthy copy is set aside');
@@ -405,14 +405,14 @@ test('a copied project with an unfinished migration is not archived or re-stampe
     const landed = join(mk(s.base, 'Projects'), 'P');
     renameSync(p, landed);
     rmSync(drive, { recursive: true, force: true });
-    writeFileSync(join(landed, '.core', 'claude-code', '.migrating'), '');
+    writeFileSync(join(landed, '_core', 'claude-code', '.migrating'), '');
     register(s.coreDir, [landed]);
-    const before = snapshot(join(landed, '.core'));
+    const before = snapshot(join(landed, '_core'));
     for (const decision of ['accept-move', 'fresh']) {
       const r = settleState(s.coreDir, { root: landed, harness: 'claude-code', decision });
       assert.equal(r.status, 'held', decision); assert.equal(r.changed, false);
     }
-    assert.deepEqual(snapshot(join(landed, '.core')), before);
+    assert.deepEqual(snapshot(join(landed, '_core')), before);
   } finally { s.cleanup(); }
 });
 
@@ -424,13 +424,13 @@ test('a malformed or missing stamp under an unfinished migration refuses the wri
       const p = mk(s.base, 'Projects', 'P');
       writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
       register(s.coreDir, [p]);
-      const stamp = join(p, '.core', 'claude-code', 'stamp');
+      const stamp = join(p, '_core', 'claude-code', 'stamp');
       if (shape === 'malformed') writeFileSync(stamp, 'not a stamp\n'); else rmSync(stamp);
-      writeFileSync(join(p, '.core', 'claude-code', '.migrating'), '');
-      writeFileSync(join(p, '.core', 'claude-code', 'notes.md'), 'half-copied\n');
-      const before = snapshot(join(p, '.core'));
+      writeFileSync(join(p, '_core', 'claude-code', '.migrating'), '');
+      writeFileSync(join(p, '_core', 'claude-code', 'notes.md'), 'half-copied\n');
+      const before = snapshot(join(p, '_core'));
       assert.throws(() => stateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir, forWrite: true }), shape);
-      assert.deepEqual(snapshot(join(p, '.core')), before, `${shape}: marker and bytes kept`);
+      assert.deepEqual(snapshot(join(p, '_core')), before, `${shape}: marker and bytes kept`);
     } finally { s.cleanup(); }
   }
 });

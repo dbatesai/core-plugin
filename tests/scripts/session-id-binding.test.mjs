@@ -31,7 +31,7 @@ for (const mode of ['project-only', 'normal']) {
   test(`${mode}: the hook states the harness's session id, never the one in the folder name`, () => {
     const s = sandbox();
     try {
-      if (mode === 'project-only') mkdirSync(join(s.proj, '.core', '_project-only', 'claude-code'), { recursive: true });
+      if (mode === 'project-only') mkdirSync(join(s.proj, '_core', '_project-only', 'claude-code'), { recursive: true });
       const out = hook(s, { cwd: s.proj, session_id: REAL });
       assert.match(out, mode === 'project-only' ? /CORE project-only mode/ : /CORE session protocol/);
       assert.match(out, new RegExp(`CORE session id for this session \\(from the harness\\): ${REAL}`));
@@ -43,7 +43,7 @@ for (const mode of ['project-only', 'normal']) {
 test('no id, or one that is not a plain id, gives no id line', () => {
   const s = sandbox();
   try {
-    mkdirSync(join(s.proj, '.core', '_project-only', 'claude-code'), { recursive: true });
+    mkdirSync(join(s.proj, '_core', '_project-only', 'claude-code'), { recursive: true });
     for (const session_id of [undefined, '', '../etc', 'has space', 'x'.repeat(200), 42]) {
       const out = hook(s, { cwd: s.proj, ...(session_id === undefined ? {} : { session_id }) });
       assert.match(out, /CORE project-only mode/);

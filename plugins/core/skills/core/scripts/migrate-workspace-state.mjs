@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * migrate-workspace-state.mjs — move per-project state from the legacy
- * ~/.core/workspaces/<id>/ folders into <project>/.core/<harness>/.
+ * ~/.core/workspaces/<id>/ folders into <project>/_core/<harness>/.
  *
  * --manifest (dry run) classifies every legacy workspace folder and
  * ~/.core/index.json entry and reports; it writes nothing but --out.
@@ -47,7 +47,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync, truncateSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -59,6 +59,7 @@ import {
 import { acquireFileLock, withAcquiredFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
 import { assertSafeWorkspaceId, isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 
 // Bookkeeping, not data: a folder holding only these has nothing worth migrating.
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
@@ -373,6 +374,10 @@ function verifiedReceipt({ root, harness, coreDir, stateDirs }) {
   try { receipt = JSON.parse(raw); } catch { return { ok: false, problems: ['receipt is not valid JSON'] }; }
   if (!receipt || receipt.complete !== true) return { ok: false, receipt, problems: ['receipt does not say complete'] };
   if (!Array.isArray(receipt.files)) return { ok: false, receipt, problems: ['receipt has no file list'] };
+  // A receipt written before the state folder took its visible name lists destinations under the
+  // older name; they are read as the same files in the renamed folder.
+  const older = join(root, LEGACY_STATE_DIRNAME) + sep;
+  receipt.files = receipt.files.map((f) => (f && typeof f.to === 'string' && f.to.startsWith(older) ? { ...f, to: join(root, STATE_DIRNAME, f.to.slice(older.length)) } : f));
   const problems = [];
   for (const f of receipt.files) {
     if (!f || typeof f.to !== 'string') { problems.push('a receipt entry has no destination'); continue; }
@@ -489,7 +494,7 @@ function classifiedInputs(manifest, real, table) {
 }
 
 function currentMigrationCheck({ real, harness, coreDir, table }) {
-  if (existsSync(join(real, '.core', harness, MIGRATING_MARKER))) return null;
+  if (existsSync(join(real, STATE_DIRNAME, harness, MIGRATING_MARKER))) return null;
   const raw = readSignedFile({ root: real, harness, name: CHECK_RECORD, coreDir });
   if (raw === null) return null;
   let rec;
@@ -565,7 +570,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     const live = mine.find((e) => e.class === 'migrate');
     const dups = mine.filter((e) => e.class === 'supersede');
     if (!live && !dups.length) {
-      const marker = join(real, '.core', harness, MIGRATING_MARKER);
+      const marker = join(real, STATE_DIRNAME, harness, MIGRATING_MARKER);
       if (existsSync(marker)) return { status: 'migration-incomplete', root: real, harness, reason: 'an earlier migration stopped part-way and there is no legacy state left to finish it from' };
       return { status: held.length ? 'held' : 'nothing-to-migrate', root: real, harness, held: held.map((e) => ({ workspace_id: e.workspace_id, reason: e.reason })) };
     }
@@ -733,7 +738,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
       const tracked = existsSync(pointerFile) ? gitTracks(real, 'workspace.json') : false;
       if (tracked === 'unknown') pointerKept = 'tracking-unknown';
       if (existsSync(pointerFile) && tracked === false) {
-        atomicWriteFileSync(pointerFile, JSON.stringify({ moved: '.core/', note: 'CORE state for this project now lives in .core/<harness>/.' }) + '\n');
+        atomicWriteFileSync(pointerFile, JSON.stringify({ moved: `${STATE_DIRNAME}/`, note: `CORE state for this project now lives in ${STATE_DIRNAME}/<harness>/.` }) + '\n');
       }
       const onIds = new Set(release.onPath.map((e) => e.workspace_id));
       mutateIndex(coreDir, (entries) => entries.map((e) => (e && onIds.has(e.workspace_id) && !e.migrated ? { ...e, migrated: true, migrated_at: iso } : e)));

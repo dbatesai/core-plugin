@@ -62,9 +62,9 @@ Four CORE surfaces, four responsibilities. Don't mix them. Harness-local recall 
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. It stays in the project even when the folder syncs (OneDrive, iCloud Drive, Dropbox, Google Drive). A read-only folder, a fenced migration or another install's project refuses new operational payload. Copies an older version left under `~/.core/local/` remain read-only history, named in disclosure and explicit purge planning; they are not silently moved or deleted. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
+- **Project operational state** — `<project>/_core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. It stays in the project even when the folder syncs (OneDrive, iCloud Drive, Dropbox, Google Drive). A read-only folder, a fenced migration or another install's project refuses new operational payload. Copies an older version left under `~/.core/local/` remain read-only history, named in disclosure and explicit purge planning; they are not silently moved or deleted. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
 
-- **Agent notes** — `<project>/.core/_agent/` — `agent-profile.md` (personality and the user model), `topics.md` (controlled vocabulary), saved `agents/` and `task-configs/`. Git-ignored. Copied once from the older shared `~/.core` folder by `import-agent-notes.mjs`; never read from there again.
+- **Agent notes** — `<project>/_core/_agent/` — `agent-profile.md` (personality and the user model), `topics.md` (controlled vocabulary), saved `agents/` and `task-configs/`. Git-ignored. Copied once from the older shared `~/.core` folder by `import-agent-notes.mjs`; never read from there again.
 - **Install keys and registry** — `~/.core/` — `install-secret` and `install-id` sign project state; `projects.json` (and the legacy `index.json`) lists the registered project roots; `local/<key>/` keeps only the adoption-consent records. The older `state-cache.json`, `agent-profile.md`, `topics.md`, `agents/`, `task-configs/` and `research/` there are read-only history. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
@@ -82,7 +82,7 @@ When sources conflict, this is the order CORE resolves:
 1. **Direct user instruction in the current session** — overrides everything else.
 2. **User-edited `<project>/PROJECT.md`** — the user's curation surface; anti-resurrection rule applies.
 3. **Canonical units in `<project>/_memories/`** — project facts of record.
-4. **CORE operational state in `<project>/.core/` and `~/.core/`** — runtime state only; not project fact authority.
+4. **CORE operational state in `<project>/_core/` and `~/.core/`** — runtime state only; not project fact authority.
 5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
 
 See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the separation of operational state from external recall that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
@@ -132,7 +132,7 @@ during weekly sync.
 
 Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the flat-layout rule.
 
-You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `<project>/.core/_agent/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
+You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `<project>/_core/_agent/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
 
 ### External-source observations — three-layer filtering
 
@@ -144,7 +144,7 @@ Observations from external sources (Teams, SharePoint, Jira, Confluence, Figma, 
 | 2. In-memory cheap filter | Pull subagent context | Haiku | No |
 | 3. Relevance judgment + extraction | Relevance subagent | Sonnet (default), Opus (multi-session context calls) | **Yes** — only here |
 
-**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `<project>/.core/_agent/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
+**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `<project>/_core/_agent/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
 
 **Layer 2** runs entirely in the pull subagent's context. Keyword + topic-vocabulary scan; drops obvious misses. Nothing written.
 
@@ -532,7 +532,7 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
   marks, written through the same lock.
 - **Per-project records are single-owner files in the project's state.** `index-registry.mjs
   touch` writes `last-active`, `bootstrap` writes `last-bootstrap.json`, `manifest --set-json`
-  merges into the manifest — each under `<project>/.core/<harness>/`, needing no registry lock.
+  merges into the manifest — each under `<project>/_core/<harness>/`, needing no registry lock.
 - **`~/.core/migration-manifest.json`** is shared by every project and harness; the
   migration writes it only under `~/.core/migration-manifest.lock`, after the project's close
   lock.
@@ -542,14 +542,14 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
   serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (an
   unlocked stamp loses writes under concurrent processes). No stamp writes the older global cache or
   takes a lock beside it.
-- **`.core/_agent/agent-profile.md`, `.core/_agent/topics.md`** — rare, usually interactive writes. Atomic
+- **`_core/_agent/agent-profile.md`, `_core/_agent/topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.
 - **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
   `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
 - A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace in the
-  project — `<project>/.core/<wrapper>/` — and must not write `~/.core`, CORE's harness folders,
-  or `.core/_agent/`.
+  project — `<project>/_core/<wrapper>/` — and must not write `~/.core`, CORE's harness folders,
+  or `_core/_agent/`.
 
 Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
 (10–30 min) — availability, not data loss. And if `~/.core` lands on a virtualized/synced path
@@ -560,7 +560,7 @@ treats that as "couldn't acquire" and retries, never crashes.
 
 ## Topic vocabulary
 
-`<project>/.core/_agent/topics.md` holds the controlled vocabulary. Currently 18 tags. You evolve the vocabulary during runs — add tags as units accumulate.
+`<project>/_core/_agent/topics.md` holds the controlled vocabulary. Currently 18 tags. You evolve the vocabulary during runs — add tags as units accumulate.
 
 Each addition is appended to a changelog at the top of the file:
 
@@ -582,7 +582,7 @@ When you write an observation that references a person, topic, or deliverable th
 **Stub creation triggers:**
 
 - Observation's `references-person` field names someone with no `who-<slug>.md` unit.
-- Observation's `references-topic` field uses a tag that doesn't have a `topic-<slug>.md` unit (the topic itself may already exist in `<project>/.core/_agent/topics.md`; the unit holds the substantive description).
+- Observation's `references-topic` field uses a tag that doesn't have a `topic-<slug>.md` unit (the topic itself may already exist in `<project>/_core/_agent/topics.md`; the unit holds the substantive description).
 - Observation mentions a deliverable (named work product, milestone, named artifact) with no `del-<slug>.md` unit.
 
 **Stub frontmatter (minimal — graduate later):**
@@ -740,7 +740,7 @@ Three rings, one read at runtime.
 ├── _outputs/                      ← swarm synthesis, deliverables (CORE-created)
 ├── docs/                          ← architecture, explainers (user surface)
 ├── .claude/                       ← harness config + scripts
-└── .core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
+└── _core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
     ├── _agent/                    ← agent-profile.md, topics.md, agents/, task-configs/, import-receipt.json
     └── <harness>/                 ← one per harness: claude-code, codex, …
         ├── stamp                  ← provenance: HMAC of (path, harness, install id)

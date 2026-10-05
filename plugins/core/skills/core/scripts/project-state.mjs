@@ -2,8 +2,8 @@
  * project-state.mjs — where a project's CORE operational state lives, and whether
  * state found there can be trusted.
  *
- * Layout: <project-root>/.core/<harness>/, with a `*` .gitignore written into
- * .core/ before anything else. ~/.core keeps only cross-project files plus
+ * Layout: <project-root>/_core/<harness>/, with a `*` .gitignore written into
+ * _core/ before anything else. ~/.core keeps only the registry and the install keys,
  * projects.json (the registered roots) and local/ (state that must not sit in the
  * project: read-only roots, another install's project).
  *
@@ -15,7 +15,7 @@
  * Trust: a registry entry can only be written by a startup the user ran, so the
  * registry is the auto-close anchor. State inside the project is trusted only when
  * its stamp verifies: an HMAC-SHA256 over (path, harness, install_id) keyed with
- * ~/.core/install-secret. A cloned or downloaded .core/ cannot carry a valid stamp.
+ * ~/.core/install-secret. A cloned or downloaded _core/ cannot carry a valid stamp.
  *
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
@@ -33,7 +33,8 @@ import { mapProjectPathToSlug } from './project-slug.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
 
-export const STATE_DIRNAME = '.core';
+export { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HEX64_RE = /^[0-9a-f]{64}$/;
 
@@ -206,7 +207,7 @@ export function projectStateDir({ root, harness, kind = 'durable', coreDir = def
   if (real === dirname(core) || isInside(real, core)) {
     return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'not-a-project-root' };
   }
-  // Only a folder the user registered by running /core gets a .core/ inside it; a
+  // Only a folder the user registered by running /core gets a _core/ inside it; a
   // hook or script working anywhere else keeps its state on this machine.
   let roots = registered;
   if (!roots) { try { roots = readRegisteredRoots({ coreDir: core }); } catch { roots = new Set(); } }
@@ -220,7 +221,7 @@ export function projectStateDir({ root, harness, kind = 'durable', coreDir = def
 }
 
 /**
- * Containment for in-project state: .core/ and .core/<harness>/ must each be a real
+ * Containment for in-project state: _core/ and _core/<harness>/ must each be a real
  * directory (not a symlink) directly inside the root. Returns null when they are
  * absent, 'ok' when sound, or the refusal reason.
  */
@@ -238,8 +239,8 @@ export function checkStateContainment({ root, harness }) {
 }
 
 /**
- * Create the state directory for writing. In-project: .core/.gitignore ("*") is
- * written before any other file, and a symlinked or non-directory .core refuses.
+ * Create the state directory for writing. In-project: _core/.gitignore ("*") is
+ * written before any other file, and a symlinked or non-directory _core refuses.
  */
 export function ensureStateDir(opts) {
   // Provisioning uses the same stamp, migration and no-place checks as every writer.
@@ -250,7 +251,7 @@ function noProjectPlace(reason) {
   throw Object.assign(new Error(`not stored: ${reason}; no writable project state`), { code: 'STATE_NO_PROJECT_PLACE', reason });
 }
 
-/** Create <root>/.core/ — refusing a symlinked or escaping .core — with .gitignore first. */
+/** Create <root>/_core/ — refusing a symlinked or escaping _core — with .gitignore first. */
 function ensureCoreDir(root, harness) {
   const real = canonical(root);
   const containment = checkStateContainment({ root: real, harness });
@@ -350,8 +351,8 @@ function wellFormed(s) {
 /**
  * Classify the in-project state for (root, harness). Reads only the stamp file,
  * never any other state file.
- *   absent          — no .core/<harness>/ yet
- *   refused         — .core or .core/<harness> is a symlink, not a directory, or escapes the root
+ *   absent          — no _core/<harness>/ yet
+ *   refused         — _core or _core/<harness> is a symlink, not a directory, or escapes the root
  *   verified        — this install's stamp for this path: use the state
  *   planted         — missing/malformed stamp, or this install's id but it does not verify
  *   foreign-install — well-formed stamp from another install: leave it untouched
@@ -482,13 +483,15 @@ function setAside(harnessDir, label) {
  * existing ~/.core/local/ history stays available to readers;
  * a moved project is re-stamped at its new path.
  *
- * Refused containment (a symlinked or escaping .core) throws on write and reads as null.
+ * Refused containment (a symlinked or escaping _core) throws on write and reads as null.
  * Optional readDirectoryGuard checks a selected state directory before child probes;
  * false means genuinely absent, and throws distinguish unsafe/unreadable parents.
  */
 export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent, readDirectoryGuard } = {}) {
   assertHarnessName(harness);
   const real = canonical(root);
+  const settled = settleStateFolderName(real, { coreDir });
+  if (forWrite && settled?.startsWith('not-renamed')) noProjectPlace(`the older ${LEGACY_STATE_DIRNAME} folder could not be renamed (${settled.slice(12)})`);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
   // Strict consumers inspect the selected parent chain before any child probe.
   // Ordinary readers and explicit writers retain their existing behavior.
@@ -584,7 +587,7 @@ export function contentMac(secret, rel, bytes) {
   return createHmac('sha256', secret).update(JSON.stringify([rel, Buffer.from(bytes).toString('base64')])).digest('hex');
 }
 
-/** Names under .core/<harness>/ that git tracks at `root`; empty outside a repo or without git. */
+/** Names under _core/<harness>/ that git tracks at `root`; empty outside a repo or without git. */
 /** The git index file for the repo containing `root` (worktrees and submodules included), or null. */
 function gitIndexFile(root) {
   for (let dir = root; ; dir = dirname(dir)) {
@@ -631,7 +634,7 @@ export function trackedProjectFiles(root, prefix) {
     env.GIT_CONFIG_NOSYSTEM = '1';
     env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
     // Without --full-name, ls-files prints paths relative to -C, so a project nested
-    // inside a larger repo still lists as `.core/<harness>/<name>`.
+    // inside a larger repo still lists as `_core/<harness>/<name>`.
     const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', prefix], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000, env,
     });
@@ -778,7 +781,7 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 
 /**
- * The harnesses with state for this project, in the project's `.core/` and its machine-local
+ * The harnesses with state for this project, in the project's `_core/` and its machine-local
  * fallback folder: the names found in every folder that could be listed, plus each folder that
  * couldn't. A missing folder has no harnesses; one that can't be read is a problem, not an
  * absence, and the names seen in the other one are still returned.
@@ -804,7 +807,7 @@ export function stateHarnessesPartial({ root, coreDir = defaultCoreDir(), includ
 
 /**
  * Every place this project's state for one harness can be, whichever one routing picks today: the
- * project folder (`<root>/.core/<harness>`) and the machine-local fallback
+ * project folder (`<root>/_core/<harness>`) and the machine-local fallback
  * (`~/.core/local/<project>/<harness>`). Registration and root writability move routing between
  * them, and the one not chosen can still hold records and rows. Read-only: nothing is created,
  * adopted or set aside. A place that exists but can't be trusted as this project's is a problem,
@@ -994,12 +997,19 @@ function untrustedOptOut(file) { return readCaptureOptOuts(file).metrics_enabled
  * Untrusted content may switch capture off, never on.
  */
 export function manifestOptsOutUnverified({ root, harness }) {
-  return untrustedOptOut(join(canonical(root), STATE_DIRNAME, harness, MANIFEST));
+  return optOutManifests(root, harness).some(untrustedOptOut);
 }
 
 /** Same rule for the turn-capture switch: an unverified manifest may switch it off, never on. */
 export function manifestTurnCaptureOptsOutUnverified({ root, harness }) {
-  return readCaptureOptOuts(join(canonical(root), STATE_DIRNAME, harness, MANIFEST)).turn_capture === false;
+  return optOutManifests(root, harness).some((f) => readCaptureOptOuts(f).turn_capture === false);
+}
+
+// An older `.core` still in the project (not yet renamed, or left beside `_core`) is read too:
+// these switches only turn capture off, so a second place can restrict and never enable.
+function optOutManifests(root, harness) {
+  const real = canonical(root);
+  return [STATE_DIRNAME, LEGACY_STATE_DIRNAME].map((d) => join(real, d, harness, MANIFEST));
 }
 
 // ---------- the bootstrap record (last-bootstrap.json) ----------
@@ -1059,7 +1069,7 @@ function adoptedInstallsFile({ root, coreDir }) {
 
 /**
  * Stamps of the restore's other harnesses, recorded when its first harness was adopted: the
- * sha256 of each sibling .core/<harness>/stamp exactly as it arrived. An install id inside a
+ * sha256 of each sibling _core/<harness>/stamp exactly as it arrived. An install id inside a
  * foreign stamp is self-asserted and copyable, so the second-harness offer is bound to these
  * bytes instead: state planted after the first adoption never matches.
  */
@@ -1094,7 +1104,7 @@ function lastWrittenAt(dir) {
 
 /**
  * The adoption question for (root, harness), or null when there's nothing to offer.
- * Offered only for a folder not registered here whose .core/<harness>/ is a real
+ * Offered only for a folder not registered here whose _core/<harness>/ is a real
  * directory holding a well-formed stamp from another install, for this harness,
  * that git doesn't track and the user hasn't declined. Reads the stamp and file
  * times only, never any other state file.

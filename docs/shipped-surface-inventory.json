@@ -632,6 +632,13 @@
       "surface": "shipped"
     },
     {
+      "name": "state-dirname",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/state-dirname.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "store-ignores",
       "kind": "script",
       "harness": "shared",

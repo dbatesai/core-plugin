@@ -20,7 +20,7 @@ function fixture() {
   fs.writeFileSync(join(home, '.core/projects.json'), JSON.stringify([{ path: root }]));
   assert.equal(spawnSync('git', ['init', '-q', root]).status, 0);
   fs.writeFileSync(join(root, '.gitignore'), '!.core/**\n');
-  return { base, root, home, wrong, log: join(root, '.core/_hooks/hooks-log.jsonl'),
+  return { base, root, home, wrong, log: join(root, '_core/_hooks/hooks-log.jsonl'),
     cleanup: () => fs.rmSync(base, { recursive: true, force: true }) };
 }
 function run(f, { entry = {}, env = {}, fault = '', hook = null, payload = {} } = {}) {
@@ -51,9 +51,9 @@ test('hook logger writes an excluded project-local receipt, with protected produ
     assert.equal(r.result.written, true); assert.deepEqual(r.violations, []);
     const [row] = rows(f); assert.equal(row.cwd, f.root); assert.notEqual(row.producer_sha, 'forged');
     assert.notEqual(row.producer_version, 'forged'); assert.ok(row.ts);
-    assert.equal(spawnSync('git', ['-C', f.root, 'check-ignore', '.core/_hooks/hooks-log.jsonl']).status, 0);
+    assert.equal(spawnSync('git', ['-C', f.root, 'check-ignore', '_core/_hooks/hooks-log.jsonl']).status, 0);
     assert.equal(fs.existsSync(join(f.home, '.core/install-id')), false);
-    assert.equal(fs.readdirSync(join(f.root, '.core')).some(n => n === 'codex' || n === 'claude-code'), false);
+    assert.equal(fs.readdirSync(join(f.root, '_core')).some(n => n === 'codex' || n === 'claude-code'), false);
   } finally { f.cleanup(); }
 });
 
@@ -72,10 +72,10 @@ for (const target of ['core', 'hooks', 'leaf', 'ignore']) test(`linked ${target}
   try {
     const outside = join(f.base, 'outside'); fs.mkdirSync(outside);
     let link;
-    if (target === 'core') link = join(f.root, '.core');
-    else { fs.mkdirSync(join(f.root, '.core'), { recursive: true });
-      if (target === 'hooks') link = join(f.root, '.core/_hooks');
-      else { fs.mkdirSync(join(f.root, '.core/_hooks')); link = target === 'leaf' ? f.log : join(f.root, '.core/_hooks/.gitignore'); }
+    if (target === 'core') link = join(f.root, '_core');
+    else { fs.mkdirSync(join(f.root, '_core'), { recursive: true });
+      if (target === 'hooks') link = join(f.root, '_core/_hooks');
+      else { fs.mkdirSync(join(f.root, '_core/_hooks')); link = target === 'leaf' ? f.log : join(f.root, '_core/_hooks/.gitignore'); }
     }
     if (target === 'ignore' || target === 'leaf') {
       fs.writeFileSync(join(outside, 'file'), target === 'ignore' ? '*\n' : 'untouched');
@@ -101,8 +101,8 @@ test('permission denial reports failure without a global or OS-temp fallback', (
 test('tracked receipts and a custom non-excluding ignore file are preserved and refused', () => {
   const f = fixture();
   try {
-    fs.mkdirSync(join(f.root, '.core/_hooks'), { recursive: true });
-    const ignore = join(f.root, '.core/_hooks/.gitignore');
+    fs.mkdirSync(join(f.root, '_core/_hooks'), { recursive: true });
+    const ignore = join(f.root, '_core/_hooks/.gitignore');
     fs.writeFileSync(ignore, '# user custom\n');
     assert.equal(run(f).result.written, false); assert.equal(fs.readFileSync(ignore, 'utf8'), '# user custom\n');
     fs.writeFileSync(ignore, '*\n'); fs.writeFileSync(f.log, 'preserved\n');
@@ -116,7 +116,7 @@ test('silencing the logger causes no directory or foreign sink access', () => {
   try {
     const r = run(f, { env: { CORE_HOOKS_LOG_FILE: '/dev/null' } });
     assert.equal(r.result.written, true); assert.deepEqual(r.violations, []);
-    assert.equal(fs.existsSync(join(f.root, '.core')), false);
+    assert.equal(fs.existsSync(join(f.root, '_core')), false);
   } finally { f.cleanup(); }
 });
 
@@ -132,6 +132,6 @@ for (const [hook, env, reason] of [
   try {
     const r = run(f, { hook, env }); assert.deepEqual(r.violations, []);
     assert.ok(rows(f).some(x => x.reason === reason && x.cwd === f.root));
-    assert.equal(fs.existsSync(join(f.wrong, '.core')), false);
+    assert.equal(fs.existsSync(join(f.wrong, '_core')), false);
   } finally { f.cleanup(); }
 });

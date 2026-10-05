@@ -531,7 +531,7 @@ function extractTimestampRange(transcriptPath) {
 /**
  * Security gate: which registered CORE project, if any, does `store` belong to?
  * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one,
- * and neither is a `.core/` folder. The trust anchor is the ~/.core registry
+ * and neither is a `_core/` folder. The trust anchor is the ~/.core registry
  * (projects.json, plus the legacy index.json while older installs still register
  * there), which an attacker can't plant from inside a project dir. The store's
  * realpath resolves to its nearest registered ancestor, stopping at any `.git`

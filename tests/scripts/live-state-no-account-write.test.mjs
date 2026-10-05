@@ -9,7 +9,7 @@ import {writeLiveState} from '../../plugins/core/skills/core/scripts/memory-view
 for(const location of ['project','local-history','global-history','first-account-write','first-account-alias','alias-history'])test(`supplied live-state ${location}: preserved grant and no outside replacement`,()=>{
  const base=fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'live-state-destination-')));try{
   const home=join(base,'home'),root=join(base,'project');fs.mkdirSync(home);fs.mkdirSync(root);
-  let folder=location==='project'?join(root,'.core','codex'):location==='local-history'?join(home,'.core','local','key','codex'):join(home,'.core','artifact-receipts');
+  let folder=location==='project'?join(root,'_core','codex'):location==='local-history'?join(home,'.core','local','key','codex'):join(home,'.core','artifact-receipts');
   if(location==='alias-history'){const target=join(home,'.core','local','key','codex');fs.mkdirSync(target,{recursive:true});folder=join(base,'history-alias');fs.symlinkSync(target,folder,process.platform==='win32'?'junction':'dir');}
   if(location==='first-account-alias'){const alias=join(base,'home-alias');fs.symlinkSync(home,alias,process.platform==='win32'?'junction':'dir');folder=join(alias,'.core','local','key','codex');}
   const path=join(folder,'memory-view-live.json'),before='synthetic old grant and publish budget\n';

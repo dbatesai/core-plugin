@@ -37,8 +37,8 @@ function run(f, code, fault='') {
   const calls=fs.readFileSync(audit,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   return {...data,calls,violations:calls.filter(x=>x.verdict.startsWith('refused-'))};
 }
-function cleanScratch(root){const dir=join(root,'.core','_scratch');assert.deepEqual(fs.readdirSync(dir),['.gitignore']);}
-function localAllocations(r,root){const calls=r.calls.filter(x=>x.call==='mkdtempSync');assert.ok(calls.length>0);assert.ok(calls.every(x=>norm(x.path).startsWith(norm(join(root,'.core','_scratch'))+'/')));}
+function cleanScratch(root){const dir=join(root,'_core','_scratch');assert.deepEqual(fs.readdirSync(dir),['.gitignore']);}
+function localAllocations(r,root){const calls=r.calls.filter(x=>x.call==='mkdtempSync');assert.ok(calls.length>0);assert.ok(calls.every(x=>norm(x.path).startsWith(norm(join(root,'_core','_scratch'))+'/')));}
 const gather=(f)=>`const {gatherMetrics}=await import(${JSON.stringify(check)});return await gatherMetrics(${JSON.stringify(f.root)},{home:${JSON.stringify(f.home)}});`;
 const packageCode=(f,args=[f.root,'--home',f.home,'--out',f.out])=>`const {runPackage}=await import(${JSON.stringify(pack)});return runPackage(${JSON.stringify(args)});`;
 
@@ -60,7 +60,7 @@ test('live probe failure remains degraded and cleans only its own local scratch'
 test('a linked scratch folder is refused without probing its foreign target',t=>{
   if(!symlinkCapable())return t.skip('symlink fixture privilege unavailable');
   const f=fixture();try{
-    const outside=join(f.base,'outside');fs.mkdirSync(outside);fs.mkdirSync(join(f.root,'.core'));fs.symlinkSync(outside,join(f.root,'.core','_scratch'),'dir');
+    const outside=join(f.base,'outside');fs.mkdirSync(outside);fs.mkdirSync(join(f.root,'_core'));fs.symlinkSync(outside,join(f.root,'_core','_scratch'),'dir');
     const r=run(f,gather(f));assert.equal(r.result.mechanics.probe.round_trip,false);assert.deepEqual(r.violations,[]);assert.deepEqual(fs.readdirSync(outside),[]);
   }finally{f.cleanup();}
 });
@@ -86,12 +86,12 @@ test('unexpected staging write failure is structured and cleans its local scratc
 test('--all requires an explicit scratch project before any salt or artifact write',()=>{
   const f=fixture();try{
     const r=run(f,packageCode(f,['--all','--home',f.home,'--out',f.out]));assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.match(r.result.error,/scratch-project/);
-    assert.equal(fs.existsSync(join(f.home,'.core','metrics-package-salt')),false);assert.equal(fs.existsSync(join(f.root,'.core')),false);assert.equal(fs.existsSync(join(f.other,'.core')),false);assert.deepEqual(r.violations,[]);
+    assert.equal(fs.existsSync(join(f.home,'.core','metrics-package-salt')),false);assert.equal(fs.existsSync(join(f.root,'_core')),false);assert.equal(fs.existsSync(join(f.other,'_core')),false);assert.deepEqual(r.violations,[]);
   }finally{f.cleanup();}
 });
 test('--all uses the explicitly selected registered project, irrespective of registry order',()=>{
   const f=fixture();try{
-    const r=run(f,packageCode(f,['--all','--scratch-project',f.other,'--home',f.home,'--out',f.out]));assert.equal(r.thrown,undefined);assert.ok(r.result.shipped);assert.deepEqual(r.violations,[]);localAllocations(r,f.other);cleanScratch(f.other);assert.deepEqual(fs.readdirSync(join(f.root,'.core')),['_package'],'the other project keeps only its own package key and history, no scratch');
+    const r=run(f,packageCode(f,['--all','--scratch-project',f.other,'--home',f.home,'--out',f.out]));assert.equal(r.thrown,undefined);assert.ok(r.result.shipped);assert.deepEqual(r.violations,[]);localAllocations(r,f.other);cleanScratch(f.other);assert.deepEqual(fs.readdirSync(join(f.root,'_core')),['_package'],'the other project keeps only its own package key and history, no scratch');
   }finally{f.cleanup();}
 });
 test('a scratch override outside the exported project set is refused before salt creation',()=>{
@@ -112,7 +112,7 @@ test('the scratch directory helper alone creates no harness or install identity'
     const helper=new URL('project-artifacts.mjs',scripts).href;
     const r=run(f,`const {ensureProjectArtifactDir}=await import(${JSON.stringify(helper)});return ensureProjectArtifactDir(${JSON.stringify(f.root)},'_scratch');`);
     assert.equal(r.thrown,undefined);assert.deepEqual(r.violations,[]);cleanScratch(f.root);
-    assert.deepEqual(fs.readdirSync(join(f.root,'.core')),['_scratch']);assert.equal(fs.existsSync(join(f.home,'.core','install-id')),false);
+    assert.deepEqual(fs.readdirSync(join(f.root,'_core')),['_scratch']);assert.equal(fs.existsSync(join(f.home,'.core','install-id')),false);
   }finally{f.cleanup();}
 });
 
@@ -120,14 +120,14 @@ const cleanupFault=`const remove=fs.rmSync;fs.rmSync=(p,...args)=>{if(norm(p).in
 test('probe cleanup denial is visible, degrades its result, and retains only local scratch',()=>{
   const f=fixture();try{
     const r=run(f,gather(f),cleanupFault);assert.equal(r.thrown,undefined);assert.equal(r.result.mechanics.probe.round_trip,false);assert.match(r.result.caveats.join(' '),/cleanup failed.*EPERM/);assert.deepEqual(r.violations,[]);
-    assert.ok(fs.readdirSync(join(f.root,'.core','_scratch')).some(n=>n.startsWith('probe-')));
+    assert.ok(fs.readdirSync(join(f.root,'_core','_scratch')).some(n=>n.startsWith('probe-')));
   }finally{f.cleanup();}
 });
 test('verification cleanup denial preserves extraction failure and reports retained local scratch',()=>{
   const f=fixture();try{
     const stage=join(f.root,'staged');fs.mkdirSync(stage);const zip=join(f.out,'bad.zip');fs.writeFileSync(zip,'not an archive');
     const code=`const {verifyArchiveRoundTrip}=await import(${JSON.stringify(pack)});return verifyArchiveRoundTrip(${JSON.stringify(zip)},${JSON.stringify(stage)},{projectRoot:${JSON.stringify(f.root)}});`;
-    const r=run(f,code,cleanupFault);assert.equal(r.thrown,undefined);assert.equal(r.result.ok,false);assert.match(r.result.reason,/archive did not extract/);assert.equal(r.result.scratch_cleanup.error_code,'EPERM');assert.ok(norm(r.result.scratch_cleanup.path).startsWith(norm(join(f.root,'.core','_scratch'))+'/'));assert.ok(fs.existsSync(r.result.scratch_cleanup.path));assert.deepEqual(r.violations,[]);
+    const r=run(f,code,cleanupFault);assert.equal(r.thrown,undefined);assert.equal(r.result.ok,false);assert.match(r.result.reason,/archive did not extract/);assert.equal(r.result.scratch_cleanup.error_code,'EPERM');assert.ok(norm(r.result.scratch_cleanup.path).startsWith(norm(join(f.root,'_core','_scratch'))+'/'));assert.ok(fs.existsSync(r.result.scratch_cleanup.path));assert.deepEqual(r.violations,[]);
   }finally{f.cleanup();}
 });
 test('package cleanup denial keeps a primary leakage result and names retained scratch',()=>{

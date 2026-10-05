@@ -30,16 +30,16 @@ for (const legacyRecord of [false, true]) test(`${legacyRecord ? 'older signed c
     if (legacyRecord) {
       run();run(); // Complete a healthy transfer and obtain current input fingerprints.
       const stateModule=resolve(dirname(fileURLToPath(import.meta.url)),'../../plugins/core/skills/core/scripts/project-state.mjs');
-      const code=`const {readSignedFile,writeSignedFile}=await import(${JSON.stringify(pathToFileURL(stateModule).href)});const opts={root:${JSON.stringify(root)},harness:'codex',coreDir:${JSON.stringify(core)},name:'migration-check.json'};const record=JSON.parse(readSignedFile(opts));delete record.validation_version;writeSignedFile({dir:${JSON.stringify(join(root,'.core','codex'))},name:opts.name,coreDir:opts.coreDir,body:JSON.stringify(record)});`;
+      const code=`const {readSignedFile,writeSignedFile}=await import(${JSON.stringify(pathToFileURL(stateModule).href)});const opts={root:${JSON.stringify(root)},harness:'codex',coreDir:${JSON.stringify(core)},name:'migration-check.json'};const record=JSON.parse(readSignedFile(opts));delete record.validation_version;writeSignedFile({dir:${JSON.stringify(join(root,'_core','codex'))},name:opts.name,coreDir:opts.coreDir,body:JSON.stringify(record)});`;
       const old=spawnSync(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(preload),'--input-type=module','-e',code],{cwd:root,env,encoding:'utf8',timeout:10000});assert.equal(old.error,undefined,old.stderr);assert.equal(old.status,0,old.stderr);
     }
     fs.writeFileSync(fail,'synthetic selected EIO');
     let receipt=null;
     for(let invocation=1;invocation<=3;invocation++) {
       const r=run();assert.equal(r.out.root_pointer,'kept (tracking-unknown)',`invocation ${invocation} must retain unresolved pointer status`);assert.equal(r.out.fast===true,false);assert.equal(r.checks,1);assert.equal(r.out.released,true);assert.equal(r.out.status,invocation===1&&!legacyRecord?'migrated':'already-migrated');
-      const bytes=fs.readFileSync(join(root,'.core','codex','migrated-from.json'),'utf8');if(receipt===null)receipt=bytes;else assert.equal(bytes,receipt,'completed material is not replayed');
+      const bytes=fs.readFileSync(join(root,'_core','codex','migrated-from.json'),'utf8');if(receipt===null)receipt=bytes;else assert.equal(bytes,receipt,'completed material is not replayed');
     }
     fs.unlinkSync(fail);const recovered=run();assert.equal(recovered.out.root_pointer,undefined);assert.equal(recovered.out.fast===true,false);assert.equal(recovered.checks,1);
-    const fast=run();assert.equal(fast.out.fast,true);assert.equal(fast.out.root_pointer,undefined);assert.equal(fast.checks,0);assert.equal(fs.readFileSync(join(root,'.core','codex','migrated-from.json'),'utf8'),receipt);
+    const fast=run();assert.equal(fast.out.fast,true);assert.equal(fast.out.root_pointer,undefined);assert.equal(fast.checks,0);assert.equal(fs.readFileSync(join(root,'_core','codex','migrated-from.json'),'utf8'),receipt);
   } finally {fs.rmSync(base,{recursive:true,force:true});}
 });

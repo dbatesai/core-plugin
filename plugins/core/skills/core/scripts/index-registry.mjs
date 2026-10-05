@@ -9,7 +9,7 @@
  * protocols/data-storage.md forbids hand-editing it.
  *
  * Per-project records (last-active, the bootstrap record) are single-owner files
- * in the project's own state, `<root>/.core/<harness>/`, written through
+ * in the project's own state, `<root>/_core/<harness>/`, written through
  * project-state.mjs. They need no registry lock.
  *
  * The legacy ~/.core/index.json is read-only here apart from mutateIndex, which the

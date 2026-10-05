@@ -13,7 +13,7 @@ const HOOKS = fileURLToPath(new URL('../../plugins/core/skills/core/hooks/', imp
 const CLOSE_PASS = join(HOOKS, '..', 'scripts', 'close-pass.mjs');
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'hook-log-project-'));
-  return { root, log: join(root, '.core', '_hooks', 'hooks-log.jsonl'), cleanup: () => rmSync(root, {recursive:true,force:true}) };
+  return { root, log: join(root, '_core', '_hooks', 'hooks-log.jsonl'), cleanup: () => rmSync(root, {recursive:true,force:true}) };
 }
 function readLog(file) { return existsSync(file) ? readFileSync(file,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : []; }
 function hook(f, name, env = {}, payload = {}) {
@@ -24,7 +24,7 @@ function hook(f, name, env = {}, payload = {}) {
   });
 }
 test('local path selection rejects missing roots and foreign overrides, permits direct children and mute', () => {
-  const root = resolve('/project'), dir = join(root,'.core','_hooks'), dflt = join(dir,'hooks-log.jsonl');
+  const root = resolve('/project'), dir = join(root,'_core','_hooks'), dflt = join(dir,'hooks-log.jsonl');
   assert.equal(resolveHookLogPath({}),null);
   assert.equal(resolveHookLogPath({},root),dflt);
   assert.equal(resolveHookLogPath({CORE_HOOKS_LOG_FILE:'/other/log'},root),dflt);
@@ -44,10 +44,10 @@ test('logger appends JSONL and protects its packaged producer fields', () => {
 });
 test('a file in place of a log directory returns failure without throwing or relocation', () => {
   const f=fixture();try{
-    mkdirSync(join(f.root,'.core'));writeFileSync(join(f.root,'.core','_hooks'),'preserved');
+    mkdirSync(join(f.root,'_core'));writeFileSync(join(f.root,'_core','_hooks'),'preserved');
     const out=logHookEvent({hook:'test',action:'skip',projectRoot:f.root});
     assert.equal(out.written,false);assert.equal(out.fallback,undefined);
-    assert.equal(readFileSync(join(f.root,'.core','_hooks'),'utf8'),'preserved');
+    assert.equal(readFileSync(join(f.root,'_core','_hooks'),'utf8'),'preserved');
   }finally{f.cleanup();}
 });
 for(const [env,action,reason] of [

@@ -9,7 +9,7 @@
  *   - The GENERATION receipt (the preflight manifest, written by the
  *     generator before consent) records what was generated and offered —
  *     never what went up. This module owns where it lands
- *     (`<project>/.core/<harness>/artifact-receipts/`, or the flagged
+ *     (`<project>/_core/<harness>/artifact-receipts/`, or the flagged
  *     `~/.core/artifact-receipts/` fallback when no workspace.json exists).
  *   - The PUBLISH receipt (`--record-publish`) is written after the consent/
  *     publish step resolves and records the actual outcome — declined,
@@ -86,7 +86,7 @@ export function sanitizeTimestamp(iso) {
 
 /**
  * Where a generation receipt for this project/instant lands: the project's
- * per-harness state (`.core/<harness>/artifact-receipts/`, trust-gated by its
+ * per-harness state (`_core/<harness>/artifact-receipts/`, trust-gated by its
  * stamp). A refused or unavailable project state stops the generation before
  * artifact publication. Existing account-global receipts remain readable
  * history; no new receipt payload is written beside them.

@@ -39,7 +39,7 @@ test('classifying, reading signed files and checking for adoption mint nothing o
   try {
     // Install A stamps the project and signs a manifest; then the folder is looked at from machine B.
     writeStamp({ root: s.root, harness: 'claude-code', coreDir: s.coreA });
-    const dir = join(s.root, '.core', 'claude-code');
+    const dir = join(s.root, '_core', 'claude-code');
     writeSignedFile({ dir, name: 'workspace.json', body: '{"agent_name":"A"}\n', coreDir: s.coreA });
     assert.equal(classifyStamp({ root: s.root, harness: 'claude-code', coreDir: s.coreA }).status, 'verified', 'control: its own install verifies it');
 

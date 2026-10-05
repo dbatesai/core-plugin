@@ -1,7 +1,7 @@
 /** Reserved local hook/scratch/cache artifacts. This creates no enrollment or identity state. */
 import { lstatSync, realpathSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve, join, dirname } from 'node:path';
-import { trackedProjectFiles, trackedStateFiles } from './project-state.mjs';
+import { trackedProjectFiles, trackedStateFiles, STATE_DIRNAME, settleStateFolderName } from './project-state.mjs';
 
 function refuse() { throw Object.assign(new Error('Project artifact target is not safe'), { code: 'project-artifact-unsafe-target' }); }
 function statOrMissing(path) {
@@ -27,7 +27,7 @@ export function projectArtifactRoot(projectRoot) {
 }
 export function ensureProjectArtifactDir(projectRoot, kind) {
   if (!['_hooks', '_scratch', '_package', '_agent'].includes(kind)) refuse();
-  return ensureGeneratedDir(projectRoot, ['.core', kind]);
+  return ensureGeneratedDir(projectRoot, [STATE_DIRNAME, kind]);
 }
 
 /** Generated attribution cache uses the same policy-before-writer guard as hook/scratch files. */
@@ -42,10 +42,11 @@ export function assertProjectCacheDir(projectRoot) {
 
 function ensureGeneratedDir(projectRoot, segments, create = true) {
   const root = projectArtifactRoot(projectRoot);
+  if (segments[0] === STATE_DIRNAME) settleStateFolderName(root);
   const parent = join(root, segments[0]), dir = join(parent, segments[1]);
   const parentStat = physicalDirectory(parent);
   if (parentStat) physicalDirectory(dir);
-  const tracked = segments[0] === '.core' ? trackedStateFiles(root, segments[1]) : trackedProjectFiles(root, segments.join('/') + '/');
+  const tracked = segments[0] === STATE_DIRNAME ? trackedStateFiles(root, segments[1]) : trackedProjectFiles(root, segments.join('/') + '/');
   if (tracked.size || tracked.has('.gitignore')) refuse();
   if (!parentStat) { if (!create) refuse(); mkdirSync(parent, { mode: 0o700 }); }
   if (!physicalDirectory(dir)) { if (!create) refuse(); mkdirSync(dir, { mode: 0o700 }); }

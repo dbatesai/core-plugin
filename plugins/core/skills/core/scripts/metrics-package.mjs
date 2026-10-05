@@ -15,7 +15,7 @@
  * discloses how many fields were dropped. By design this boundary lives in
  * prescriptive code, not skill prose; and the script carries zero dependencies.
  *
- * Pseudonyms: HMAC-SHA256 over a per-project secret key (<project>/.core/_package/salt,
+ * Pseudonyms: HMAC-SHA256 over a per-project secret key (<project>/_core/_package/salt,
  * 0600, NEVER shipped). Stable across packages of the same project so trend lines
  * are comparable; meaningless elsewhere, and unrelated between projects.
  * Deleting the key rotates that project's pseudonyms and restarts its deltas.
@@ -1558,7 +1558,7 @@ export function runPackage(argv, { homeOverride } = {}) {
       mode: flagsIn.all ? 'all-projects' : 'single-project',
       plugin,
       generator,
-      pseudonym_note: "Ids are HMAC pseudonyms from a per-project key that never ships; stable across one project's packages and unrelated between projects. Deleting the project's .core/_package/salt rotates them and restarts its deltas.",
+      pseudonym_note: "Ids are HMAC pseudonyms from a per-project key that never ships; stable across one project's packages and unrelated between projects. Deleting the project's _core/_package/salt rotates them and restarts its deltas.",
       residual_risk: "Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across that project's packages (delete its key to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.",
       salt_rotated_this_run: saltCreated,
       field_policy: {

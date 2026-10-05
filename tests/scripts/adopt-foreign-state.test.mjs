@@ -54,7 +54,7 @@ function restoredProject(s, manifestFields = { agent_name: 'Wren' }, sibling = f
   registerProject(coreA, original);
   const m = updateManifest({ root: original, harness: H, coreDir: coreA, fields: manifestFields });
   recordBootstrap(coreA, { root: original, harness: H, sessionStartedAt: '2026-09-20T10:00:00Z' });
-  writeFileSync(join(original, '.core', H, 'capability-history.jsonl'), '{"row":1}\n{"row":2}\n');
+  writeFileSync(join(original, '_core', H, 'capability-history.jsonl'), '{"row":1}\n{"row":2}\n');
   if (sibling) updateManifest({root:original, harness:'codex', coreDir:coreA, fields:{agent_name:'Synthetic sibling'}});
   const homeB = s.home('homeB');
   const coreB = join(homeB, '.core');
@@ -79,7 +79,7 @@ test('restore, yes: history, project_id and agent_name carry over, and the signe
     assert.equal(m.project_id, project_id);
     assert.equal(m.agent_name, 'Wren');
     assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'completion evidence from another install is not carried: startup runs in full here');
-    assert.equal(readFileSync(join(restored, '.core', H, 'capability-history.jsonl'), 'utf8'), '{"row":1}\n{"row":2}\n');
+    assert.equal(readFileSync(join(restored, '_core', H, 'capability-history.jsonl'), 'utf8'), '{"row":1}\n{"row":2}\n');
     assert.equal(registerProject(coreB, restored).action, 'registered');
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'asked once');
     assert.equal(checkMetricsDisclosure({ projectDir: restored, home: homeB, env: ENV }).shown, true, 'the notice shows again on this machine');
@@ -91,8 +91,8 @@ test('restore, yes: a fabricated unsigned bootstrap record is not promoted to ve
   try {
     const { coreB, restored } = restoredProject(s);
     const now = new Date().toISOString();
-    writeFileSync(join(restored, '.core', H, 'last-bootstrap.json'), JSON.stringify({ session_started_at: now, bootstrap_completed_at: now }));
-    rmSync(join(restored, '.core', H, 'last-bootstrap.json.mac'), { force: true });
+    writeFileSync(join(restored, '_core', H, 'last-bootstrap.json'), JSON.stringify({ session_started_at: now, bootstrap_completed_at: now }));
+    rmSync(join(restored, '_core', H, 'last-bootstrap.json.mac'), { force: true });
     assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'unsigned before adoption');
     assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
     assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'still not evidence after adoption: startup is owed');
@@ -103,14 +103,14 @@ test('restore, no: nothing is read, the foreign files stay byte-identical, and i
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
-    const before = treeHashes(join(restored, '.core'));
+    const before = treeHashes(join(restored, '_core'));
     assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'no' }).status, 'declined');
-    assert.deepEqual(treeHashes(join(restored, '.core')), before);
+    assert.deepEqual(treeHashes(join(restored, '_core')), before);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }), null, 'the foreign manifest is not read');
     assert.equal(registerProject(coreB, restored, { offerAdopt: true, harness: H }).action, 'new', 'register proceeds normally after a no');
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }), null, 'still not read once registered');
-    assert.deepEqual(treeHashes(join(restored, '.core')), before);
+    assert.deepEqual(treeHashes(join(restored, '_core')), before);
   } finally { s.cleanup(); }
 });
 
@@ -192,9 +192,9 @@ test('an unparseable manifest is set aside on yes, not adopted', () => {
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
-    writeFileSync(join(restored, '.core', H, 'workspace.json'), '{not json');
+    writeFileSync(join(restored, '_core', H, 'workspace.json'), '{not json');
     assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
-    assert.ok(readdirSync(join(restored, '.core', H)).some((n) => n.startsWith('workspace.json.unparseable-')));
+    assert.ok(readdirSync(join(restored, '_core', H)).some((n) => n.startsWith('workspace.json.unparseable-')));
     const m = readManifest({ root: restored, harness: H, coreDir: coreB });
     assert.equal(m, null, 'no manifest was adopted');
   } finally { s.cleanup(); }
@@ -216,7 +216,7 @@ test('a stamp git tracks (committed state, not a restore) is never an adoption c
   try {
     const { coreB, restored } = restoredProject(s);
     assert.equal(spawnSync('git', ['-C', restored, 'init', '-q']).status, 0);
-    assert.equal(spawnSync('git', ['-C', restored, 'add', '-f', '.core/claude-code/stamp']).status, 0);
+    assert.equal(spawnSync('git', ['-C', restored, 'add', '-f', '_core/claude-code/stamp']).status, 0);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
@@ -256,9 +256,9 @@ test('a symlinked .core is never an adoption candidate', () => {
   try {
     const { coreB, restored } = restoredProject(s);
     const elsewhere = join(s.base, 'Elsewhere');
-    cpSync(join(restored, '.core'), elsewhere, { recursive: true });
-    rmSync(join(restored, '.core'), { recursive: true, force: true });
-    symlinkSync(elsewhere, join(restored, '.core'), DIR_LINK);
+    cpSync(join(restored, '_core'), elsewhere, { recursive: true });
+    rmSync(join(restored, '_core'), { recursive: true, force: true });
+    symlinkSync(elsewhere, join(restored, '_core'), DIR_LINK);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
@@ -293,7 +293,7 @@ test('the home folder is never offered for adoption, even holding a foreign stam
     const { homeB, coreB, restored } = restoredProject(s);
     const homeState = join(homeB, '.core', H);
     mkdirSync(homeState, { recursive: true });
-    writeFileSync(join(homeState, 'stamp'), readFileSync(join(restored, '.core', H, 'stamp')));
+    writeFileSync(join(homeState, 'stamp'), readFileSync(join(restored, '_core', H, 'stamp')));
     assert.equal(adoptionCandidate({ root: homeB, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
@@ -313,7 +313,7 @@ test('a hand-built hostile stamp (never written by a real install) is offered wi
     const homeB = s.home('homeB');
     const coreB = join(homeB, '.core');
     const target = s.mk('Target', 'Folder');
-    const harnessDir = join(target, '.core', H);
+    const harnessDir = join(target, '_core', H);
     mkdirSync(harnessDir, { recursive: true });
 
     const hostileStamp = {
@@ -383,14 +383,14 @@ test('a restored project with an unfinished migration is not offered, and a yes 
     const s = sandbox();
     try {
       const { coreB, restored } = restoredProject(s);
-      if (fenced) writeFileSync(join(restored, '.core', H, '.migrating'), '');
-      const before = treeHashes(join(restored, '.core'));
+      if (fenced) writeFileSync(join(restored, '_core', H, '.migrating'), '');
+      const before = treeHashes(join(restored, '_core'));
       const registryBefore = fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null;
       if (fenced) {
         assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'not offered while fenced');
         const r = adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
         assert.equal(r.status, 'held'); assert.equal(r.reason, 'migration-in-progress');
-        assert.deepEqual(treeHashes(join(restored, '.core')), before, 'marker, foreign stamp and files exactly as found');
+        assert.deepEqual(treeHashes(join(restored, '_core')), before, 'marker, foreign stamp and files exactly as found');
         assert.equal(fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null, registryBefore, 'nothing registered');
       } else {
         assert.ok(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), 'control: offered');

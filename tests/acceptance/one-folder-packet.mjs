@@ -106,7 +106,7 @@ for (const errno of ['EACCES', 'ENOENT']) {
       return r;
     };
     const po = (...a) => [PO, ...a, '--root', root];
-    await step('startup', 'project-only.mjs startup', po('startup', '--session', 'pk-1'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['.core/.gitignore', '.core/_project-only/claude-code/bootstrap.json'] } });
+    await step('startup', 'project-only.mjs startup', po('startup', '--session', 'pk-1'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['.core/.gitignore', '_core/_project-only/claude-code/bootstrap.json'] } });
     await step('status', 'project-only.mjs status', po('status'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.pending === true ? null : 'pending not reported') } });
     await step('capture-status', 'project-only.mjs capture-status', po('capture-status'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.in_project?.rows === 1 && j?.outside_history === 'unknown' ? null : 'capture rows or outside-history wrong') } });
     await step('explicit-retrieval', 'retrieve-context.mjs <root> "<query>"', [join(CORE, 'scripts/retrieve-context.mjs'), root, 'what color are the widgets'], 'confined', { outcome: { exit: 0, stdout: /dc-1-widgets/ } });
@@ -114,7 +114,7 @@ for (const errno of ['EACCES', 'ENOENT']) {
     await step('hook-session-end', 'hooks/close-pass-hook.mjs (SessionEnd)', [join(CORE, 'hooks/close-pass-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionEnd', cwd: root, reason: 'other', session_id: 'pk-1' }) , outcome: { exit: 0, emptyStdout: true } });
     await step('hook-session-start', 'hooks/session-start-hook.mjs (SessionStart)', [join(CORE, 'hooks/session-start-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: root, source: 'startup', session_id: 'pk-1' }) , outcome: { exit: 0, stdout: /project-only/i } });
     for (const [i, a] of [['begin', ['finalize-begin', '--harness', 'claude-code', '--session', 'pk-1']], ['record-capture', ['finalize-record', '--harness', 'claude-code', '--session', 'pk-1', '--op', 'material-capture', '--status', 'done']], ['record-render', ['finalize-record', '--harness', 'claude-code', '--session', 'pk-1', '--op', 'render-project-md', '--status', 'done']], ['record-summary', ['finalize-record', '--harness', 'claude-code', '--session', 'pk-1', '--op', 'session-summary', '--status', 'done']], ['certify', ['finalize-certify', '--harness', 'claude-code', '--session', 'pk-1']], ['finish', ['finalize-finish', '--harness', 'claude-code', '--session', 'pk-1']]]) {
-      await step(`finalize-${i}`, `project-only.mjs ${a[0]}`, po(...a), 'confined', { outcome: { exit: 0, status: 'ok', files: i === 'certify' ? ['.core/_project-only/claude-code/close/receipts/pk-1.json'] : [] } });
+      await step(`finalize-${i}`, `project-only.mjs ${a[0]}`, po(...a), 'confined', { outcome: { exit: 0, status: 'ok', files: i === 'certify' ? ['_core/_project-only/claude-code/close/receipts/pk-1.json'] : [] } });
     }
     await step('purge-dry-run', 'project-only.mjs purge', po('purge'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['_metrics/turn-capture/2026-10-01.jsonl'], check: (j) => (j?.outcome === 'dry-run' && j.would_remove?.includes('_metrics/turn-capture') && j.outside_history === 'unknown' ? null : 'dry run report wrong') } });
     await step('purge-apply', 'project-only.mjs purge --apply', po('purge', '--apply'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.outcome === 'purged-in-project' && j.outside_history === 'unknown' && !existsSync(join(root, '_metrics/turn-capture')) && existsSync(join(root, '_memories/dc-1-widgets.md')) ? null : 'purge did not remove the captured turns, or removed more') } });
@@ -126,7 +126,7 @@ for (const errno of ['EACCES', 'ENOENT']) {
     // Unsupported in this mode: observed, not claimed. Each shows what still reaches outside the folder.
     await step('maintenance-run', 'maintenance-run.mjs <root> (housekeeping)', [join(CORE, 'scripts/maintenance-run.mjs'), root, '--json'], 'unsupported');
     await step('close-pass-detect', 'close-pass.mjs detect <root> (normal close bookkeeping)', [join(CORE, 'scripts/close-pass.mjs'), 'detect', root], 'unsupported');
-    await step('pickup-archive', 'project-only.mjs pickup-archive', po('pickup-archive', '--harness', 'claude-code'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.archived === true && !existsSync(join(root, '.core/_project-only/claude-code')) ? null : 'not archived') } });
+    await step('pickup-archive', 'project-only.mjs pickup-archive', po('pickup-archive', '--harness', 'claude-code'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.archived === true && !existsSync(join(root, '_core/_project-only/claude-code')) ? null : 'not archived') } });
     // After pickup the automatic hooks are no longer suppressed: the same hook now goes on to look the
     // project up in the registry, which under this gate shows as an outside attempt.
     const post = await runConfined(root, errno, [join(CORE, 'hooks/retrieve-context-hook.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: root, prompt: 'what color are the widgets', session_id: 'pk-2' }) });

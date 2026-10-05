@@ -31,7 +31,7 @@ function restoredTwoHarness(s, extra = {}) {
       agent_name: 'Wren', name: 'Garden', created: '2026-05-01', agent_notes: NOTES[h],
       session_log_refs: [`${original}/_sessions/2026-09-20/log.md`], ...(extra[h] || {}) } }).project_id;
   }
-  const originals = Object.fromEntries(['claude-code', 'codex'].map(h => [h, readFileSync(join(original, '.core', h, 'workspace.json'))]));
+  const originals = Object.fromEntries(['claude-code', 'codex'].map(h => [h, readFileSync(join(original, '_core', h, 'workspace.json'))]));
   const coreB = s.home('homeB');
   const restored = join(s.base, 'New', 'Garden');
   cpSync(original, restored, { recursive: true });
@@ -40,7 +40,7 @@ function restoredTwoHarness(s, extra = {}) {
 }
 
 const archived = (root, h) => {
-  const dir = join(root, '.core', h, 'superseded');
+  const dir = join(root, '_core', h, 'superseded');
   const sub = readdirSync(dir).filter(n => n.startsWith('adopted-'));
   assert.equal(sub.length, 1, `${h}: exactly one adoption archive`);
   return readFileSync(join(dir, sub[0], 'workspace.json'));
@@ -78,12 +78,12 @@ test('on a registered root, foreign state from a different install is not a cand
     assert.equal(adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }).status, 'adopted');
     // a third install writes this project's codex state (a synced folder another machine is using)
     const coreC = s.home('homeC');
-    rmSync(join(restored, '.core', 'codex'), { recursive: true, force: true });
+    rmSync(join(restored, '_core', 'codex'), { recursive: true, force: true });
     const elsewhere = join(s.base, 'Elsewhere', 'Garden');
     mkdirSync(elsewhere, { recursive: true });
     registerProject(coreC, elsewhere);
     updateManifest({ root: elsewhere, harness: 'codex', coreDir: coreC, fields: { agent_notes: 'from install C' } });
-    cpSync(join(elsewhere, '.core', 'codex'), join(restored, '.core', 'codex'), { recursive: true });
+    cpSync(join(elsewhere, '_core', 'codex'), join(restored, '_core', 'codex'), { recursive: true });
     assert.equal(adoptionCandidate({ root: restored, harness: 'codex', coreDir: coreB }), null);
     assert.equal(adoptForeignState({ root: restored, harness: 'codex', coreDir: coreB, decision: 'yes' }).status, 'not-a-candidate');
   } finally { s.cleanup(); }
@@ -115,8 +115,8 @@ test('the second-harness offer is bound to the stamp that arrived with the resto
     mkdirSync(other, { recursive: true });
     registerProject(coreA, other);
     updateManifest({ root: other, harness: 'codex', coreDir: coreA, fields: { agent_notes: 'planted later' } });
-    rmSync(join(restored, '.core', 'codex'), { recursive: true, force: true });
-    cpSync(join(other, '.core', 'codex'), join(restored, '.core', 'codex'), { recursive: true });
+    rmSync(join(restored, '_core', 'codex'), { recursive: true, force: true });
+    cpSync(join(other, '_core', 'codex'), join(restored, '_core', 'codex'), { recursive: true });
     assert.equal(adoptionCandidate({ root: restored, harness: 'codex', coreDir: coreB }), null, 'same install id, different stamp bytes: not offered');
   } finally { s.cleanup(); }
 });
@@ -128,13 +128,13 @@ test('a symlinked manifest is not archived (named) and its target bytes never en
     if (process.platform !== 'win32') {   // an unprivileged Windows user can't create a file symlink
     const secret = join(s.base, 'secret.json');
     writeFileSync(secret, JSON.stringify({ agent_name: 'PRIVATE-KEY-MATERIAL', agent_notes: 'PRIVATE-KEY-MATERIAL', project_id: 'stolen' }));
-    const m = join(restored, '.core', 'claude-code', 'workspace.json');
+    const m = join(restored, '_core', 'claude-code', 'workspace.json');
     rmSync(m); symlinkSync(secret, m);
     const r = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' });
     assert.ok(r.not_archived.includes('workspace.json'), JSON.stringify(r));
     const signed = readManifest({ root: restored, harness: 'claude-code', coreDir: coreB }) || {};
     assert.doesNotMatch(JSON.stringify(signed), /PRIVATE-KEY-MATERIAL|stolen/, 'the link target never reaches the signed manifest');
-    const dir = join(restored, '.core', 'claude-code', 'superseded');
+    const dir = join(restored, '_core', 'claude-code', 'superseded');
     for (const sub of readdirSync(dir)) for (const f of readdirSync(join(dir, sub))) assert.doesNotMatch(readFileSync(join(dir, sub, f), 'utf8'), /PRIVATE-KEY-MATERIAL/);
     }
 
@@ -143,7 +143,7 @@ test('a symlinked manifest is not archived (named) and its target bytes never en
       const t = restoredTwoHarness(s2);
       const outside = join(s2.base, 'outside');
       mkdirSync(outside);
-      symlinkSync(outside, join(t.restored, '.core', 'codex', 'superseded'), process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(outside, join(t.restored, '_core', 'codex', 'superseded'), process.platform === 'win32' ? 'junction' : 'dir');
       const r2 = adoptForeignState({ root: t.restored, harness: 'codex', coreDir: t.coreB, decision: 'yes' });
       assert.equal(r2.status, 'held');
       assert.deepEqual(readdirSync(outside), [], 'nothing written through the link');
@@ -170,7 +170,7 @@ test('a failure after the stamp is committed (signature sidecar obstructed) is r
   const s = sandbox();
   try {
     const { coreB, restored } = restoredTwoHarness(s);
-    const sidecar = join(restored, '.core', 'claude-code', 'workspace.json.mac');
+    const sidecar = join(restored, '_core', 'claude-code', 'workspace.json.mac');
     rmSync(sidecar, { force: true }); mkdirSync(sidecar);
     assert.throws(() => adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }));
     rmSync(sidecar, { recursive: true });
@@ -190,7 +190,7 @@ test('planted adopted-* links under superseded/ are never written through; the a
     const { coreB, restored, originals } = restoredTwoHarness(s);
     const outside = join(s.base, 'outside');
     mkdirSync(outside);
-    const sup = join(restored, '.core', 'claude-code', 'superseded');
+    const sup = join(restored, '_core', 'claude-code', 'superseded');
     mkdirSync(sup);
     for (let i = 0; i < 5; i++) symlinkSync(outside, join(sup, `adopted-2026-10-04T13-00-00-00${i}Z`), process.platform === 'win32' ? 'junction' : 'dir');
     const r = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' });
@@ -204,7 +204,7 @@ test('a transient read error on the archived original holds the resume with its 
   const s = sandbox();
   try {
     const { coreB, restored } = restoredTwoHarness(s);
-    const sidecar = join(restored, '.core', 'claude-code', 'workspace.json.mac');
+    const sidecar = join(restored, '_core', 'claude-code', 'workspace.json.mac');
     rmSync(sidecar, { force: true }); mkdirSync(sidecar);
     assert.throws(() => adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }));
     rmSync(sidecar, { recursive: true });
@@ -239,7 +239,7 @@ test('a transient read error on the foreign manifest holds a fresh adoption with
     const real = fs.readFileSync;
     let failed = false;
     fs.readFileSync = function (p, ...a) {
-      if (!failed && /[\\/]\.core[\\/]claude-code[\\/]workspace\.json$/.test(String(p))) { failed = true; throw Object.assign(new Error('transient'), { code: 'EIO' }); }
+      if (!failed && /[\\/]_core[\\/]claude-code[\\/]workspace\.json$/.test(String(p))) { failed = true; throw Object.assign(new Error('transient'), { code: 'EIO' }); }
       return real.call(this, p, ...a);
     };
     syncBuiltinESMExports();
@@ -247,7 +247,7 @@ test('a transient read error on the foreign manifest holds a fresh adoption with
     try { r = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }); }
     finally { fs.readFileSync = real; syncBuiltinESMExports(); }
     assert.equal(r.status, 'held');
-    assert.ok(existsSync(join(restored, '.core', 'claude-code', 'workspace.json')), 'not set aside as unparseable');
+    assert.ok(existsSync(join(restored, '_core', 'claude-code', 'workspace.json')), 'not set aside as unparseable');
     assert.equal(adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }).status, 'adopted');
     assert.equal(readManifest({ root: restored, harness: 'claude-code', coreDir: coreB }).agent_notes, NOTES['claude-code']);
   } finally { s.cleanup(); }

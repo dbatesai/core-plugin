@@ -409,7 +409,7 @@ for (const apply of [false, true]) {
       const meta = operationalMetricsDir(projectDir, { home, env: E });
       signedPin(meta, home, old, projectDir);
       const pinFile = join(meta, 'storage-path.txt');
-      const stamp = join(projectDir, '.core', 'claude-code', 'stamp');
+      const stamp = join(projectDir, '_core', 'claude-code', 'stamp');
       assert.ok(existsSync(stamp), 'fixture has a stamp');
       if (!denyRead(stamp)) { skipped = true; restoreRead(stamp); return; }
       try {
@@ -458,7 +458,7 @@ for (const [label, fence] of [
       writeFileSync(row, '{"synthetic":1}\n');
       writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
       signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-      const harnessDir = join(projectDir, '.core', 'claude-code');
+      const harnessDir = join(projectDir, '_core', 'claude-code');
       const stampFile = join(harnessDir, 'stamp');
       await fence({ stampFile, home, harnessDir });
       const before = readFileSync(stampFile, 'utf8');
@@ -528,7 +528,7 @@ test('a harness state folder that is a link is reported, not skipped as absent',
     operationalMetricsDir(projectDir, { home, env: E });
     const elsewhere = mkdtempSync(join(tmpdir(), 'metrics-linked-harness-'));
     try {
-      symlinkSync(elsewhere, join(projectDir, '.core', 'codex'), process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(elsewhere, join(projectDir, '_core', 'codex'), process.platform === 'win32' ? 'junction' : 'dir');
       const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
       assert.equal(r.purged, false);
       assert.match(r.held_history.map((h) => h.reason).join(' '), /codex state cannot be read as its own \(refused\)/);
@@ -543,7 +543,7 @@ test('a state folder that cannot be listed is reported as unknown, in the helper
   withProject(({ home, projectDir }) => {
     registerProject(join(home, '.core'), projectDir);
     operationalMetricsDir(projectDir, { home, env: E });
-    const core = join(projectDir, '.core');
+    const core = join(projectDir, '_core');
     try {
       if (!denyList(core)) { skipped = true; return; }
       assert.match(metricsHistoryHeld(projectDir, { home, env: E }).map((h) => h.reason).join(' '), /could not be listed/);
@@ -860,7 +860,7 @@ test('one unknown state location does not hide a known history folder from the p
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
     signedPin(meta, home, old, projectDir);
-    const codex = join(projectDir, '.core', 'codex');
+    const codex = join(projectDir, '_core', 'codex');
     mkdirSync(codex, { recursive: true }); writeFileSync(join(codex, 'workspace.json'), '{}');
     const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
     assert.equal(r.purged, false);

@@ -284,7 +284,7 @@ function localReceiptResult(root, receipt) {
 
 function nestedImportBoundaryProblem(root, file) {
   for (let dir = dirname(file); dir !== root; dir = dirname(dir)) {
-    for (const name of ['PROJECT.md', '.git', '.core', '_memories']) {
+    for (const name of ['PROJECT.md', '.git', '_core', '.core', '_memories']) {
       try { lstatSync(join(dir, name)); return 'nested-project-boundary'; }
       catch (e) { if (e.code !== 'ENOENT') return `nested-boundary-unreadable: ${e.code || e.message}`; }
     }

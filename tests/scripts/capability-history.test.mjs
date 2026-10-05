@@ -21,7 +21,7 @@ function tmpHome() {
   return mkdtempSync(join(tmpdir(), 'caphist-'));
 }
 
-// A project root inside the temp home; its state lands in <root>/.core/claude-code/.
+// A project root inside the temp home; its state lands in <root>/_core/claude-code/.
 function tgt(home, name) {
   const root = join(home, `proj-${name}`);
   mkdirSync(root, { recursive: true });

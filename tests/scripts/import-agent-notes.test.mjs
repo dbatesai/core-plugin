@@ -20,7 +20,7 @@ function setup() {
   writeFileSync(join(home, '.core', 'agents', 'anvil.md'), 'anvil\n');
   writeFileSync(join(home, '.core', 'agents', 'retired', 'old.md'), 'old\n');
   writeFileSync(join(home, '.core', 'research', 'index.json'), '{"documents":[]}\n');
-  return { base, home, root, agent: join(root, '.core', '_agent') };
+  return { base, home, root, agent: join(root, '_core', '_agent') };
 }
 const snapshot = (dir) => readdirSync(dir, { recursive: true }).sort().map(n => { try { return [n, readFileSync(join(dir, n), 'utf8')]; } catch { return [n]; } });
 

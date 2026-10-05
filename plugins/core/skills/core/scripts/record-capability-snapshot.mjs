@@ -3,7 +3,7 @@
  *
  * The wire between the producer and the store: startup runs the capability probe
  * and writes capability-state.json; this script runs runStartup() and appends the
- * rows to the project's `.core/<harness>/capability-history.jsonl` via appendRows(), which
+ * rows to the project's `_core/<harness>/capability-history.jsonl` via appendRows(), which
  * is what gives drift/regression analysis something to read across sessions.
  *
  * Used by protocols/startup.md (once per session, fail-open) so each session

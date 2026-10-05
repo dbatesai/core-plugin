@@ -84,7 +84,7 @@ control('review shared tracking guard keeps broken Git metadata unknown when ind
 control('review shared tracking guard accepts a valid unborn Git repository without an index', `
   const {spawnSync}=await import('node:child_process');const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('GIT_')));Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'});
   assert.equal(spawnSync('git',['-C',root,'init','--quiet'],{env,encoding:'utf8'}).status,0);assert.equal(fs.existsSync(root+'/.git/index'),false);
-  const ps=await import(${JSON.stringify(url('project-state.mjs'))}),pa=await import(${JSON.stringify(url('project-artifacts.mjs'))});assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),false);assert.equal(ps.trackedStateFiles(root,'codex').size,0);assert.ok(pa.ensureProjectArtifactDir(root,'_hooks').endsWith('/.core/_hooks'));
+  const ps=await import(${JSON.stringify(url('project-state.mjs'))}),pa=await import(${JSON.stringify(url('project-artifacts.mjs'))});assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),false);assert.equal(ps.trackedStateFiles(root,'codex').size,0);assert.ok(pa.ensureProjectArtifactDir(root,'_hooks').endsWith('/_core/_hooks'));
 `);
 
 control('invalid transfer timestamp is refused before producing an invalid receipt', `

@@ -124,7 +124,7 @@ export function isAccountCorePayloadPath(candidate, { home = requireTrustedHome(
     return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel));
   };
   if (within(root, resolve(candidate)) || containedPath(root, candidate) !== null) return true;
-  // Before .core exists, resolve both future paths through the existing home.
+  // Before ~/.core exists, resolve both future paths through the existing home.
   // This also excludes a first write through a physical alias of that home.
   const physicalRoot = containedPath(home, root);
   const physicalCandidate = containedPath(home, candidate);

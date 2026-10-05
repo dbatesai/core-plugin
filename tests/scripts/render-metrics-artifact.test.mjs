@@ -386,7 +386,7 @@ test('CLI --json-in: renders from a pre-captured canonical object; manifest is a
     assert.equal(manifest.total_bytes, onDisk.length, 'total_bytes == real file size');
     assert.match(onDisk.toString('utf8'), /1 &middot; Does the machinery work\?/);
     // Generation receipt written in the project's own state, content == manifest.
-    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '.core')));
+    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '_core')));
     assert.deepEqual(JSON.parse(readFileSync(manifest.receipt_path, 'utf8')), manifest);
     // Truthful renderer identity, distinct from the data producer.
     assert.equal(manifest.producer.script, 'render-metrics-artifact.mjs');
@@ -714,11 +714,11 @@ test('refused project state (a symlinked .core): no publication or receipt fallb
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-elsewhere-')));
   try {
-    symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
+    symlinkSync(elsewhere, join(root, '_core'), DIR_LINK);
     const dataPath = join(root, 'metrics.json');
     writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
     const before = readFileSync(join(home, '.core', 'projects.json'));
-    await assert.rejects(renderMetricsArtifact(root, {outPath:join(root,'out','v.html'), jsonIn:dataPath, home}), /refusing .*\.core: symlink/);
+    await assert.rejects(renderMetricsArtifact(root, {outPath:join(root,'out','v.html'), jsonIn:dataPath, home}), /refusing .*_core: symlink/);
     assert.equal(existsSync(join(root,'out','v.html')), false);
     assert.equal(existsSync(join(home,'.core','artifact-receipts')), false);
     assert.equal(existsSync(join(home,'.core','local')), false);
