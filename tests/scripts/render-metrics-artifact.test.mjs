@@ -26,6 +26,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 // A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
 const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';
 
@@ -137,7 +138,7 @@ function chromeOf(html) {
 }
 
 function fixtureProject({ workspace = true } = {}) {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-artifact-')));
+  const root = realpathSync.native(removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'metrics-artifact-'))));
   const home = join(root, 'home');
   mkdirSync(join(home, '.core'), { recursive: true });
   // A registered project keeps its receipts in its own .core/<harness>/.
