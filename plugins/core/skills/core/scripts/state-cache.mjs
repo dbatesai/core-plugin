@@ -92,6 +92,9 @@ export function cacheCustodyProblem(projectDir) {
     if (kind(lib)) {
       const st = kind(join(lib, 'state-cache.json'));
       if (st && (st.isSymbolicLink() || (st.isFile() && st.nlink !== 1))) return `${rel(join(lib, 'state-cache.json'))} is a link or has a second name`;
+      // A FIFO, socket or device where the cache should be would block or misbehave on read: refused
+      // before any byte is selected. A directory in the way stays the ordinary unreadable case.
+      if (st && !st.isFile() && !st.isDirectory()) return `${rel(join(lib, 'state-cache.json'))} is not a regular file`;
       const lock = foreignLockArtifact(join(lib, '.state-cache.lock'));
       if (lock) return `${rel(join(lib, lock))} is a link or has a name outside this folder`;
     }

@@ -5,7 +5,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, symlinkSync, linkSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stampFiles, readProjectCache, cacheCustodyProblem, CACHE_UNREADABLE, CACHE_ABSENT } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
 
 const skip = process.platform === 'win32';
@@ -60,3 +62,33 @@ for (const [name, plant] of Object.entries(cases)) {
     } finally { s.cleanup(); }
   });
 }
+
+test('a FIFO where the cache file should be is refused without being opened: the read and the stamp both return, bounded', { skip }, () => {
+  const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const mod = pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts/state-cache.mjs')).href;
+  const s = setup();
+  try {
+    const lib = join(s.root, '_memories', '_lib'); mkdirSync(lib);
+    const fifo = join(lib, 'state-cache.json'); execFileSync('mkfifo', [fifo]);
+    const script = `const m = await import(${JSON.stringify(mod)}); const read = m.readProjectCache(${JSON.stringify(s.root)}); const stamp = m.stampFiles(${JSON.stringify(s.root)}, [{ path: 'a.md', hash: 'abc', lastWrittenBy: 't' }]); console.log(JSON.stringify({ read: [read.status, read.error], stamp: [stamp.stamped, stamp.outcome, stamp.reason] }));`;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 8000 });
+    assert.equal(r.signal, null, 'neither call blocked on the FIFO');
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.read[0], CACHE_UNREADABLE);
+    assert.match(out.read[1], /^cache-custody: .*state-cache\.json is not a regular file/);
+    assert.deepEqual(out.stamp.slice(0, 2), [false, 'refused']);
+    assert.match(out.stamp[2], /^cache-custody: /);
+    assert.equal(existsSync(fifo), true, 'the FIFO is left as found');
+  } finally { s.cleanup(); }
+});
+
+test('a directory where the cache file should be stays the ordinary unreadable case, not a custody refusal', () => {
+  const s = setup();
+  try {
+    mkdirSync(join(s.root, '_memories', '_lib', 'state-cache.json'), { recursive: true });
+    assert.equal(cacheCustodyProblem(s.root), null);
+    const read = readProjectCache(s.root);
+    assert.equal(read.status, CACHE_UNREADABLE);
+    assert.doesNotMatch(read.error, /cache-custody/);
+  } finally { s.cleanup(); }
+});
