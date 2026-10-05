@@ -28,6 +28,7 @@ import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
+import { ensureStoreIgnores, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
 import { STATE_DIRNAME } from './state-dirname.mjs';
 
 /**
@@ -51,6 +52,14 @@ export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = 
  */
 export function resolveStoragePath(projectDir) {
   return join(projectDir, '_metrics');
+}
+
+/** The project's `_metrics/`, made with its ignore file in place before any lock or data is written there. */
+export function prepareStorageDir(projectDir) {
+  const base = resolveStoragePath(projectDir);
+  mkdirSync(base, { recursive: true });
+  ensureStoreIgnores(projectDir, { families: [METRICS_IGNORE], verify: false });
+  return base;
 }
 
 /**
@@ -408,6 +417,8 @@ export function logEvent(projectDir, filename, event, { today, now } = {}) {
   try {
     mkdirSync(sessionDir, { recursive: true });
   } catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
+  // Machine telemetry stays out of git from its first line; the rest of `_sessions/` stays visible.
+  ensureStoreIgnores(projectDir, { families: [SESSIONS_IGNORE], verify: false });
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };
 

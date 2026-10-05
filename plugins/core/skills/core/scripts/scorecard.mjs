@@ -28,7 +28,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
+import { resolveStoragePath, prepareStorageDir, metricsEnabled } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { readCaptureHealth, listTurnCaptureFiles, turnCaptureEnabled, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -159,6 +159,7 @@ export function appendScorecard(projectDir, card, { home, env } = {}) {
   const file = scorecardLogPath(projectDir, { home, env });
   const base = resolveStoragePath(projectDir, { home, env });
   try {
+    prepareStorageDir(projectDir);
     withFileLock(scorecardLockPath(projectDir, { home, env }), () => {
       mkdirSync(base, { recursive: true });
       appendFileSync(file, JSON.stringify(card) + '\n');

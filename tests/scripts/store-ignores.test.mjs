@@ -378,3 +378,55 @@ test('a positive-only custom policy that covers the samples but not the family i
     finally { fs.readdirSync = orig; syncBuiltinESMExports(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('telemetry under _sessions/ and the files in _metrics/ are ignored from the first write, with no startup; notes beside them stay visible', async () => {
+  const { logEvent, prepareStorageDir } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const root = project();
+  try {
+    logEvent(root, 'retrieval-log.jsonl', { kind: 'x' }, { today: '2026-10-05' });
+    mkdirSync(join(root, '_sessions', '2026-10-05'), { recursive: true });
+    writeFileSync(join(root, '_sessions', '2026-10-05', 'notes.md'), 'mine\n');
+    prepareStorageDir(root);
+    const ask = (paths) => spawnSync('git', ['-C', root, 'check-ignore', '--no-index', '--stdin'], { input: paths.join('\n') + '\n', env, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+    assert.deepEqual(ask(['_sessions/2026-10-05/retrieval-log.jsonl', '_sessions/2026-10-05/notes.md', '_sessions/2026-10-06/hygiene-log.jsonl']).sort(),
+      ['_sessions/2026-10-05/retrieval-log.jsonl', '_sessions/2026-10-06/hygiene-log.jsonl']);
+    assert.deepEqual(ask(['_metrics/judgment-log.jsonl', '_metrics/.turn-capture.lock', '_metrics/turn-capture/2026-10-05.jsonl', '_metrics/README.md', '_metrics/.gitignore']).sort(),
+      ['_metrics/.turn-capture.lock', '_metrics/judgment-log.jsonl', '_metrics/turn-capture/2026-10-05.jsonl']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('maintenance reports a re-include in _core and CORE files git already tracks; the bare files CORE wrote before are accepted', async () => {
+  const { PROJECT_IGNORES, STORE_IGNORES, trackedGenerated } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  const root = project();
+  try {
+    mkdirSync(join(root, '_core', 'claude-code'), { recursive: true });
+    writeFileSync(join(root, '_core', '.gitignore'), '*\n');
+    mkdirSync(join(root, '_metrics'));
+    writeFileSync(join(root, '_metrics', '.gitignore'), '*\n!.gitignore\n!README.md\n');
+    assert.deepEqual(ensureStoreIgnores(root, { families: PROJECT_IGNORES }).filter((p) => !p.startsWith('_sessions')), [], 'files CORE wrote before, without the header, pass');
+    writeFileSync(join(root, '_core', '.gitignore'), '*\n!claude-code/\n!claude-code/workspace.json\n');
+    assert.ok(ensureStoreIgnores(root, { families: PROJECT_IGNORES }).some((p) => p.startsWith('_core/.gitignore')), 'a re-include in _core is reported');
+    writeFileSync(join(root, '_metrics', 'judgment-log.jsonl'), '{}\n');
+    writeFileSync(join(root, '_metrics', 'README.md'), 'readme\n');
+    git(root, 'add', '-f', '_metrics/judgment-log.jsonl', '_metrics/README.md', '_memories/u1.md', '_memories/inbox.md');
+    assert.deepEqual(trackedGenerated(root, [...STORE_IGNORES, ...PROJECT_IGNORES]), ['_metrics/judgment-log.jsonl is tracked by git, so its ignore rule does not apply to it']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a per-turn writer only makes sure the ignore file is there: git is never run on that path', { skip: isWin }, async () => {
+  const { chmodSync } = await import('node:fs');
+  const { logEvent } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const root = project();
+  const bin = join(root, '..', `bin-hot-${Date.now()}`); mkdirSync(bin);
+  const marker = join(bin, 'git-was-run');
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`); chmodSync(join(bin, 'git'), 0o755);
+  const path = process.env.PATH;
+  try {
+    mkdirSync(join(root, '_sessions'));
+    writeFileSync(join(root, '_sessions', '.gitignore'), '# mine\n');
+    process.env.PATH = `${bin}:${path}`;
+    logEvent(root, 'retrieval-log.jsonl', { kind: 'x' }, { today: '2026-10-05' });
+    assert.equal(existsSync(marker), false);
+    assert.equal(readFileSync(join(root, '_sessions', '.gitignore'), 'utf8'), '# mine\n', "the user's file is left alone");
+  } finally { process.env.PATH = path; rmSync(root, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
+});

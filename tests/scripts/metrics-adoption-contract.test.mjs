@@ -77,7 +77,7 @@ test('explicit CORE_METRICS_ENABLED=1 forces ON over a workspace opt-out', () =>
 function readLegacyEvents(dir) {
   const root = join(dir, '_sessions');
   const out = [];
-  for (const d of readdirSync(root)) {
+  for (const d of readdirSync(root).filter((n) => n !== ".gitignore")) {
     for (const f of readdirSync(join(root, d))) {
       if (!f.endsWith('.jsonl')) continue;
       for (const line of readFileSync(join(root, d, f), 'utf8').split('\n')) {

@@ -47,7 +47,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath } from './log-event.mjs';
+import { resolveStoragePath, prepareStorageDir } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { listTurnCaptureFiles, computeStoreSignature, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { buildRetrievalTrace } from './retrieve-context.mjs';
@@ -166,6 +166,7 @@ export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, now, env 
 
   if (rows.length) {
     try {
+      prepareStorageDir(projectDir);
       withFileLock(judgmentLockPath(projectDir), () => {
         mkdirSync(resolveStoragePath(projectDir), { recursive: true });
         appendFileSync(logFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');

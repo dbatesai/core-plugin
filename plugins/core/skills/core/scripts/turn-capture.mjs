@@ -47,7 +47,7 @@ import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSy
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
+import { resolveStoragePath, prepareStorageDir, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
@@ -311,8 +311,7 @@ function bumpHealth(projectDir, { failed, reason, ts }) {
   try {
     // Health is best-effort, but never somewhere else: an unsafe location means no health write.
     if (captureCustodyProblem(projectDir, { healthOnly: true })) return;
-    const base = resolveStoragePath(projectDir);
-    mkdirSync(base, { recursive: true });
+    const base = prepareStorageDir(projectDir);
     const file = join(base, HEALTH_FILENAME);
     let health = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
     try { health = { ...health, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { /* fresh */ }
@@ -394,6 +393,7 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
     }
     let appendError = null;
     try {
+      prepareStorageDir(projectDir);
       withFileLock(turnCaptureLockPath(projectDir), () => {
         // mkdir + append + hardening inside the shared lock: a concurrent
         // purge can't race between mkdir and append, and owner-only modes are
