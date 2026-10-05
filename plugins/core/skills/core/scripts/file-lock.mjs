@@ -306,29 +306,40 @@ export function acquireFileLock(lockPath, {
 }
 
 /**
- * The name of a file in this lock's family that is not physically the lock's own, or null: a
- * symbolic link, or a file with a hard link somewhere other than this folder. A generation is
- * created by linking a temp file in the same folder, so for a moment it has two names, both here;
- * that is the lock's own doing and passes. A name anywhere else is someone else's bytes.
+ * The name of a file in this lock's family that can't be shown to be physically the lock's own, or
+ * null. Refused: a symbolic link; anything that is not a regular file (a FIFO would block the read
+ * that acquisition makes); a file with a hard link somewhere other than this folder; and a family
+ * file, or the count of its names, that can't be examined for any reason other than having gone.
+ * A generation is created by linking a temp file in the same folder, so for a moment it has two
+ * names, both here: that is the lock's own doing and passes.
  */
 export function foreignLockArtifact(lockPath) {
   const dir = dirname(lockPath), base = basename(lockPath);
+  const gone = (e) => e?.code === 'ENOENT';
   for (let attempt = 0; attempt < 3; attempt++) {
     let names;
-    try { names = readdirSync(dir); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+    try { names = readdirSync(dir); } catch (e) { if (gone(e)) return null; throw e; }
     const stats = new Map();
-    for (const n of names) { try { stats.set(n, lstatSync(join(dir, n))); } catch { /* gone mid-scan */ } }
+    for (const n of names) {
+      try { stats.set(n, lstatSync(join(dir, n))); }
+      catch (e) {
+        if (gone(e)) continue;                    // released or cleaned up mid-scan
+        if (n.startsWith(base)) return n;         // a family file that can't be examined is unknown
+        // an unexaminable sibling just can't be counted as one of the names: the count below comes up short and refuses
+      }
+    }
     let retry = false;
     for (const [n, st] of stats) {
       if (!n.startsWith(base)) continue;
-      if (st.isSymbolicLink()) return n;
-      if (!st.isFile() || st.nlink === 1) continue;
+      if (st.isSymbolicLink() || !st.isFile()) return n;
+      if (st.nlink === 1) continue;
       let here = 0;
       for (const other of stats.values()) if (other.ino === st.ino && other.dev === st.dev) here++;
       if (here === st.nlink) continue;                       // every name is in this folder
-      let again; try { again = lstatSync(join(dir, n)); } catch { continue; }   // released meanwhile
+      let again;
+      try { again = lstatSync(join(dir, n)); } catch (e) { if (gone(e)) continue; return n; }
       if (again.nlink !== st.nlink) { retry = true; break; }  // an acquisition was in flight: look again
-      return n;
+      return n;                                               // a name outside this folder, or one that couldn't be counted
     }
     if (!retry) return null;
   }
