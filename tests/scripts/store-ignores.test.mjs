@@ -88,3 +88,20 @@ test('no store, nothing written; a store that is a link is reported, not written
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('generated self-test rounds and their trigger state are ignored once a round is made; curated gold sets are not', { skip: isWin }, async () => {
+  const { newRound, markAutoAuthorTriggered } = await import('../../plugins/core/skills/core/scripts/self-test-round.mjs');
+  const root = project();
+  try {
+    mkdirSync(join(root, '_tests'));
+    writeFileSync(join(root, '_tests', 'retrieval-gold-set.json'), '[]');
+    try { newRound(root); } catch { /* a round needs units to quota; the folder is made first */ }
+    markAutoAuthorTriggered(root);
+    const made = files(join(root, '_tests', 'self-test')).map((p) => relative(root, p).split('\\').join('/')).filter((r) => !r.endsWith('/.gitignore'));
+    assert.ok(made.includes('_tests/self-test/auto-author-state.json'));
+    for (const r of made) assert.equal(ignored(root, r), true, `${r} is ignored`);
+    assert.equal(ignored(root, '_tests/self-test/round-1/goldset.json'), true, 'a round written later is covered too');
+    assert.equal(ignored(root, '_tests/retrieval-gold-set.json'), false, 'the curated gold set stays committable');
+    assert.equal(readdirSync(join(root, '..')).includes('.gitignore'), false, 'nothing is written above the project');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

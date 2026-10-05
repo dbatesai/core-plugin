@@ -4,7 +4,7 @@
  * project gets the rules even if startup never ran.
  *
  * Written only when absent, and never edited: an ignore file the user already has is theirs.
- * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md) is never matched.
+ * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md, curated gold sets) is never matched.
  */
 import { lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +13,8 @@ const HEADER = '# Written by CORE: its own working files in this folder, never p
 export const STORE_IGNORES = [
   ['_memories', ['_close.lock*', '._close.lock*', '.*.lock*', '_close-marker.json', '_maintenance-state.json', '_pm-state.json', '_capability-drift-log.md']],
   ['_memories/_lib', ['*']],
+  // Generated test rounds hold answer keys and run state: local evaluation, not project content.
+  ['_tests/self-test', ['round-*/', 'auto-author-state.json']],
 ];
 
 /** Problems found, as short strings; empty when every rule file is in place. Never throws. */
