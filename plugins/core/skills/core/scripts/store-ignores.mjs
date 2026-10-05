@@ -27,8 +27,8 @@ export function ensureStoreIgnores(projectRoot) {
     try {
       let st;
       // A folder that doesn't exist yet gets its rules when its own writer creates it.
-      try { st = lstatSync(dir); } catch (e) { if (e.code !== 'ENOENT') problems.push(`${rel}: ${e.code}`); break; }
-      if (st.isSymbolicLink() || !st.isDirectory()) { problems.push(`${rel} is not a real folder`); break; }
+      try { st = lstatSync(dir); } catch (e) { if (e.code !== 'ENOENT') problems.push(`${rel}: ${e.code}`); continue; }
+      if (st.isSymbolicLink() || !st.isDirectory()) { problems.push(`${rel} is not a real folder`); continue; }
       writeFileSync(join(dir, '.gitignore'), HEADER + rules.join('\n') + '\n', { flag: 'wx' });
     } catch (e) {
       if (e.code !== 'EEXIST') problems.push(`${rel}/.gitignore: ${e.code || e.message}`);
