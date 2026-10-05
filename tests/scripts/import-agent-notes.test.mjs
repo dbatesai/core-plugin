@@ -188,3 +188,43 @@ test('a pending record that names a folder not provably this import\'s own is he
     assert.equal(readFileSync(join(agent, '.importing-task-configs-0badc0de', 'payload', 'x.md'), 'utf8'), 'not what was recorded\n');
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
+
+test('a pending family publishes the snapshot it recorded, even if the old folder changed since; with the snapshot gone it is held and nothing is re-read', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { base, home, root, agent } = setup();
+  try {
+    const real = fs.linkSync;
+    fs.linkSync = () => { throw Object.assign(new Error('interrupted'), { code: 'EIO' }); };
+    syncBuiltinESMExports();
+    try { importAgentNotes({ root, home }); } finally { fs.linkSync = real; syncBuiltinESMExports(); }
+    writeFileSync(join(home, '.core', 'topics.md'), 'changed since\n');
+    importAgentNotes({ root, home });
+    assert.equal(readFileSync(join(agent, 'topics.md'), 'utf8'), 'topics v1\n', 'the recorded snapshot, not the new bytes');
+
+    const receipt = JSON.parse(readFileSync(join(agent, 'import-receipt.json'), 'utf8'));
+    receipt.families.topics = { result: 'pending', staging: '.importing-topics-0000beef', files: { '.': sha('topics v1\n') } };
+    writeFileSync(join(agent, 'import-receipt.json'), JSON.stringify(receipt));
+    rmSync(join(agent, 'topics.md'));
+    const r = importAgentNotes({ root, home });
+    assert.equal(r.results.find((x) => x.family === 'topics').result, 'held');
+    assert.equal(existsSync(join(agent, 'topics.md')), false);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('a file named __proto__ is hashed like any other; a saved folder holding a link is not reported readable', { skip: process.platform === 'win32' }, async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { base, home, root, agent } = setup();
+  try {
+    writeFileSync(join(home, '.core', 'agents', '__proto__'), 'odd name\n');
+    importAgentNotes({ root, home });
+    const text = readFileSync(join(agent, 'import-receipt.json'), 'utf8');
+    assert.equal(JSON.parse(text).families.agents.files.__proto__, sha('odd name\n'));
+    writeFileSync(join(base, 'outside.md'), 'x\n');
+    symlinkSync(join(base, 'outside.md'), join(agent, 'agents', 'linked.md'));
+    const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../plugins/core/skills/core/scripts/import-agent-notes.mjs'), '--root', root, '--check'], { encoding: 'utf8', env: { ...process.env, HOME: join(base, 'nowhere') } });
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /do not read: agents \(contains-link\)/);
+    assert.match(out.stdout, /readable: dm-profile\.md, topics\.md/);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});

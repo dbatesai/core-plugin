@@ -1,6 +1,6 @@
 /** Reserved local hook/scratch/cache artifacts. This creates no enrollment or identity state. */
 import { lstatSync, realpathSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, resolve, join, dirname } from 'node:path';
+import { isAbsolute, resolve, join, dirname, sep } from 'node:path';
 import { trackedProjectFiles, trackedStateFiles, STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './project-state.mjs';
 
 function refuse() { throw Object.assign(new Error('Project artifact target is not safe'), { code: 'project-artifact-unsafe-target' }); }
@@ -65,5 +65,5 @@ function ensureGeneratedDir(projectRoot, segments, create = true) {
  * (ignore file first) before anything is resolved or written there. */
 export function ensureScratchFor(projectRoot, ...paths) {
   const scratch = join(resolve(projectRoot), STATE_DIRNAME, '_scratch');
-  if (paths.some((p) => p && dirname(resolve(p)) === scratch)) ensureProjectArtifactDir(projectRoot, '_scratch');
+  if (paths.some((p) => p && (dirname(resolve(p)) === scratch || resolve(p).startsWith(scratch + sep)))) ensureProjectArtifactDir(projectRoot, '_scratch');
 }

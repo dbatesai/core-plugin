@@ -25,9 +25,10 @@
 
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
-import { join } from 'node:path';
+import { sep, join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { operationalMetricsDir } from './log-event.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 
 // Typed marker an older scaffold wrote when it could not pin storage, and that capture read to
 // stay off. Nothing writes it now; one left behind by an earlier version is read by
@@ -36,8 +37,14 @@ export const CAPTURE_DISABLED_MARKER = 'capture-disabled.json';
 
 /** Where that marker may sit: the operational meta dir, then the project-local `_metrics/`. */
 export function captureDisabledMarkerCandidates({ projectDir, operationalMetaDir }) {
+  // The same marker left in an older `.core` beside `_core` still disables capture.
+  const inState = `${sep}${STATE_DIRNAME}${sep}`;
+  const older = operationalMetaDir?.includes(inState)
+    ? operationalMetaDir.slice(0, operationalMetaDir.lastIndexOf(inState)) + `${sep}${LEGACY_STATE_DIRNAME}${sep}` + operationalMetaDir.slice(operationalMetaDir.lastIndexOf(inState) + inState.length)
+    : null;
   return [
     ...(operationalMetaDir ? [join(operationalMetaDir, CAPTURE_DISABLED_MARKER)] : []),
+    ...(older ? [join(older, CAPTURE_DISABLED_MARKER)] : []),
     join(projectDir, '_metrics', CAPTURE_DISABLED_MARKER),
   ];
 }

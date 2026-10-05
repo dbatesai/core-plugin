@@ -116,7 +116,9 @@ export function registerProject(coreDir, dir, { home, confirmNew = false, offerA
   const root = canonical(dir);
   // The user is registering this folder: an older `.core` in it takes its visible name before any
   // adoption check reads it.
-  settleStateFolderName(root, { coreDir: core });
+  const settled = settleStateFolderName(root, { coreDir: core });
+  // Not renamed: nothing here can be judged yet, so it is neither offered nor enrolled as new.
+  if (settled?.startsWith('not-renamed')) return { action: 'held', root, reason: `state-folder-${settled}` };
   if (offerAdopt) {
     const h = harness || detectStateHarness();
     const cand = adoptionCandidate({ root, harness: h, coreDir: core });

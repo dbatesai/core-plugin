@@ -1787,3 +1787,36 @@ test('an opt-out in an older .core beside a trusted _core manifest still switche
     assert.equal(metricsEnabled({ project: p, env: { ...env, CORE_METRICS_ENABLED: '1' }, home: s.home }), true, 'the environment still decides first');
   } finally { s.cleanup(); }
 });
+
+test('registration is held, not new, when the older .core cannot be renamed', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'StuckRegister');
+    mkdirSync(join(p, '.core', H), { recursive: true });
+    const real = fs.renameSync;
+    fs.renameSync = (from, ...a) => { if (String(from) === join(p, '.core')) throw Object.assign(new Error('busy'), { code: 'EBUSY' }); return real(from, ...a); };
+    syncBuiltinESMExports();
+    let r;
+    try { r = registerProject(s.coreDir, p, { offerAdopt: true, harness: H }); } finally { fs.renameSync = real; syncBuiltinESMExports(); }
+    assert.deepEqual([r.action, r.reason], ['held', 'state-folder-not-renamed:EBUSY']);
+    assert.equal(existsSync(join(s.coreDir, 'projects.json')) && readFileSync(join(s.coreDir, 'projects.json'), 'utf8').includes(p), false);
+  } finally { s.cleanup(); }
+});
+
+test('a capture-disabled marker left in an older .core still turns capture off, even with the environment opting in', async () => {
+  const { metricsEnabled, captureDisabledMarkerPath } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Marker');
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    const env = { CORE_HARNESS: H, CORE_METRICS_ENABLED: '1' };
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), true, 'control');
+    mkdirSync(join(p, '.core', H, 'metrics'), { recursive: true });
+    writeFileSync(join(p, '.core', H, 'metrics', 'capture-disabled.json'), '{}');
+    assert.ok(captureDisabledMarkerPath(p, { home: s.home, env }));
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), false);
+  } finally { s.cleanup(); }
+});

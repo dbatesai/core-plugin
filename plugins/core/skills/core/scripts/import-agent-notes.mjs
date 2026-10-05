@@ -16,6 +16,7 @@
  * read. Anything not finished is reported with its stage and error, and the run exits 1.
  *
  *   node import-agent-notes.mjs --root <project> [--research]
+ *   node import-agent-notes.mjs --root <project> --check   (which local notes are readable; reads nothing else)
  */
 import { lstatSync, readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync, linkSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -23,6 +24,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ensureProjectArtifactDir, assertArtifactFile, projectArtifactRoot } from './project-artifacts.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { STATE_DIRNAME } from './state-dirname.mjs';
 
 export const RECEIPT = 'import-receipt.json';
 const DONE = new Set(['copied', 'absent', 'local-present', 'source-is-link']);
@@ -61,7 +63,7 @@ function copyTree(src, dest, rel, out) {
 
 // The hashes of what is at `dest` now, in copyTree's shape; null when anything in it is a link or
 // neither a file nor a folder.
-function hashTree(dest, rel = '', files = {}) {
+function hashTree(dest, rel = '', files = Object.create(null)) {
   const st = lstatOrNull(dest);
   if (!st || st.isSymbolicLink()) return null;
   if (st.isFile()) { files[rel || '.'] = sha(readFileSync(dest)); return files; }
@@ -83,8 +85,10 @@ function readReceipt(file) {
 
 function saveReceipt(file, receipt) {
   const tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-  writeFileSync(tmp, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    renameSync(tmp, file);
+  } catch (e) { throw stageErr('receipt', e); }
 }
 
 // Publishes without replacing: a file by hard link (fails if anything is there), a folder by rename
@@ -122,7 +126,14 @@ function runFamily({ name, source, dest, kind, dir }, receipt, save, now) {
       if (staging === 'ours') rmSync(join(dir, prior.staging), { recursive: true });
       return record({ ...prior, result: 'copied', staging: undefined });
     }
-    if (staging === 'ours') rmSync(join(dir, prior.staging), { recursive: true });
+    // The recorded snapshot is what gets published: the source may have changed or gone since.
+    if (staging !== 'ours' || !lstatOrNull(join(dir, prior.staging, 'payload'))) {
+      return { family: name, result: 'held', stage: 'recover', reason: 'the recorded copy is no longer staged; nothing was re-read' };
+    }
+    try { publish(join(dir, prior.staging, 'payload'), dest, kind); }
+    catch (e) { return { family: name, result: 'held', stage: 'publish', code: e.code, reason: 'the copy is staged and recorded as pending' }; }
+    rmSync(join(dir, prior.staging), { recursive: true });
+    return record({ ...prior, result: 'copied', staging: undefined });
   }
   const local = lstatOrNull(dest);
   if (local) {
@@ -134,7 +145,7 @@ function runFamily({ name, source, dest, kind, dir }, receipt, save, now) {
   if (!src) return record({ result: 'absent' });
   if (src.isSymbolicLink()) return record({ result: 'source-is-link', source });
   const staging = `.importing-${name}-${randomBytes(4).toString('hex')}`;
-  const out = { files: {}, omitted: [] };
+  const out = { files: Object.create(null), omitted: [] };
   try {
     try { mkdirSync(join(dir, staging), { mode: 0o700 }); } catch (e) { throw stageErr('write', e); }
     copyTree(source, join(dir, staging, 'payload'), '', out);
@@ -150,11 +161,12 @@ function runFamily({ name, source, dest, kind, dir }, receipt, save, now) {
 }
 
 /** Which local notes can be read as they are: a real file, or a real folder for agents and task-configs. */
-function noteCustody(dir) {
+export function noteCustody(dir) {
   const notes = {};
   for (const { to, kind } of FAMILIES) {
     const st = lstatOrNull(join(dir, to));
     notes[to] = !st ? 'absent' : st.isSymbolicLink() ? 'link' : (kind === 'file' ? st.isFile() : st.isDirectory()) ? 'ok' : 'wrong-type';
+    if (notes[to] === 'ok' && kind === 'dir' && !hashTree(join(dir, to))) notes[to] = 'contains-link';
   }
   return notes;
 }
@@ -179,7 +191,7 @@ export function importAgentNotes({ root, home = requireTrustedHome(), research =
   const results = [];
   for (const p of plan) {
     try { results.push(runFamily(p, receipt, save, now)); }
-    catch (e) { results.push({ family: p.name, result: 'not-copied', stage: 'receipt', code: e.code || 'error' }); }
+    catch (e) { results.push({ family: p.name, result: 'not-copied', stage: e.stage || 'recover', code: e.code || 'error' }); }
   }
   const unfinished = results.some((r) => r.result !== 'already-decided' && !DONE.has(r.result));
   return { status: unfinished ? 'partial' : 'ok', dir, results, notes: noteCustody(dir) };
@@ -189,13 +201,17 @@ if (isCliEntry(import.meta.url)) {
   const a = process.argv.slice(2);
   const at = a.indexOf('--root');
   try {
-    const r = importAgentNotes({ root: at >= 0 ? a[at + 1] : process.cwd(), research: a.includes('--research') });
+    const root = at >= 0 ? a[at + 1] : process.cwd();
+    // --check reads only the project's own notes folder: no import, nothing outside, nothing written.
+    const r = a.includes('--check')
+      ? { status: 'ok', dir: join(projectArtifactRoot(resolve(root)), STATE_DIRNAME, '_agent'), results: [], notes: noteCustody(join(projectArtifactRoot(resolve(root)), STATE_DIRNAME, '_agent')) }
+      : importAgentNotes({ root, research: a.includes('--research') });
     for (const x of r.results) if (x.result !== 'already-decided') {
       const why = [x.source && `from ${x.source}`, x.stage && `at ${x.stage}`, x.code, x.reason, x.omitted?.length && `not copied: ${x.omitted.join(', ')}`].filter(Boolean).join('; ');
       process.stdout.write(`${x.family}: ${x.result}${why ? ` (${why})` : ''}\n`);
     }
     const ok = Object.entries(r.notes).filter(([, v]) => v === 'ok').map(([k]) => k);
-    const refused = Object.entries(r.notes).filter(([, v]) => v === 'link' || v === 'wrong-type').map(([k, v]) => `${k} (${v})`);
+    const refused = Object.entries(r.notes).filter(([, v]) => v !== 'ok' && v !== 'absent').map(([k, v]) => `${k} (${v})`);
     process.stdout.write(`readable: ${ok.join(', ') || 'none'}${refused.length ? `; do not read: ${refused.join(', ')}` : ''}\n`);
     process.stdout.write(`${r.status} ${r.dir}\n`);
     process.exit(r.status === 'ok' ? 0 : 1);

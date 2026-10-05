@@ -406,3 +406,18 @@ test('a restored project with an unfinished migration is not offered, and a yes 
     } finally { s.cleanup(); }
   }
 });
+
+test('an interrupted adoption whose plan names the archive under the older .core resumes after the rename', async () => {
+  const { localRootKey } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredProject(s);
+    const real = realpathSync(restored);
+    mkdirSync(join(real, '_core', H, 'superseded', 'adopted-1'), { recursive: true });
+    const plan = join(coreB, 'local', localRootKey(real), `pending-adopt-${H}.json`);
+    mkdirSync(join(plan, '..'), { recursive: true });
+    writeFileSync(plan, JSON.stringify({ archive: join(real, '.core', H, 'superseded', 'adopted-1'), oldPath: '/elsewhere' }));
+    const cand = adoptionCandidate({ root: restored, harness: H, coreDir: coreB });
+    assert.equal(cand?.resume?.archive, join(real, '_core', H, 'superseded', 'adopted-1'));
+  } finally { s.cleanup(); }
+});

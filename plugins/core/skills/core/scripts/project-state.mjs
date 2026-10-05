@@ -24,7 +24,7 @@ import {
   appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
   rmSync, statSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
-import { dirname, join, resolve, sep, isAbsolute } from 'node:path';
+import { basename, dirname, join, resolve, sep, isAbsolute } from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -1060,6 +1060,9 @@ function pendingAdoption({ root, harness, coreDir }) {
   try {
     const plan = JSON.parse(readFileSync(pendingAdoptFile({ root, harness, coreDir }), 'utf8'));
     const superseded = join(root, STATE_DIRNAME, harness, 'superseded');
+    // A plan written before the state folder took its visible name names the archive under the older name.
+    const older = join(root, LEGACY_STATE_DIRNAME, harness, 'superseded');
+    if (plan && typeof plan.archive === 'string' && dirname(plan.archive) === older) plan.archive = join(superseded, basename(plan.archive));
     if (!plan || typeof plan.archive !== 'string' || dirname(plan.archive) !== superseded) return null;
     if (!lstatSync(superseded).isDirectory() || !lstatSync(plan.archive).isDirectory()) return null;
     return plan;

@@ -1140,3 +1140,12 @@ rtest("--out in the project's _core/_scratch/ makes that folder with its ignore 
     assert.equal(readFileSync(join(root, '_core', '_scratch', '.gitignore'), 'utf8'), '*\n');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a cache nested inside _core/_scratch/ gets the scratch ignore file before anything is written there', async () => {
+  const { ensureScratchFor } = await import('../../plugins/core/skills/core/scripts/project-artifacts.mjs');
+  const { root } = fixtureProject();
+  try {
+    ensureScratchFor(root, join(root, '_core', '_scratch', 'nested', 'metrics-cache.json'));
+    assert.equal(readFileSync(join(root, '_core', '_scratch', '.gitignore'), 'utf8'), '*\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
