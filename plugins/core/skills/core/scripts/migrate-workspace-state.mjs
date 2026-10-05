@@ -177,8 +177,9 @@ function expandHome(p, home) {
 
 function lastActive(coreDir, id, indexEntry) {
   const file = join(coreDir, 'workspaces', id, 'last-active');
-  // Read only from a real legacy folder: a workspace name that is a link is never read through.
-  if (isRealFolder(join(coreDir, 'workspaces', id))) try {
+  // Read only its own ordinary file in a real legacy folder: a link, a second name or a FIFO at
+  // either level is never opened, and the registry field answers instead.
+  if (isRealFolder(join(coreDir, 'workspaces', id)) && legacyLeafState(file) === 'file') try {
     const t = Date.parse(readFileSync(file, 'utf8').trim());
     if (!Number.isNaN(t)) return t;
   } catch { /* fall back to the registry field */ }
@@ -412,18 +413,28 @@ function withManifest(coreDir, table, applyHarness, mutate) {
 }
 
 /**
- * Whether git tracks `rel`: true, false, or 'unknown'. Only git's own answers count as "no": exit 1
- * from --error-unmatch (the path is not tracked), or its "not a git repository". Any other failure
- * (git missing, an I/O error, a timeout) is unknown, and unknown never licenses rewriting the file.
+ * Whether git tracks `rel`: true, false, or 'unknown'. Only two answers count as "no": exit 1 from
+ * --error-unmatch (the path is not tracked), or git's "not a git repository" when no `.git` entry
+ * exists at the root or above it. A `.git` that git cannot use is damaged metadata, not absence.
+ * Any other failure (git missing, an I/O error, a timeout) is unknown, and unknown never licenses
+ * rewriting the file. The question is asked of the project's own repository and index: inherited
+ * GIT_* settings are not passed on.
  */
 function gitTracks(root, rel) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith('GIT_')));
   try {
-    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000 });
+    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000, env });
     return true;
   } catch (e) {
     if (e?.status === 1) return false;
-    if (e?.status === 128 && /not a git repository/i.test(String(e.stderr || ''))) return false;
+    if (e?.status === 128 && /not a git repository/i.test(String(e.stderr || '')) && !gitEntryAtOrAbove(root)) return false;
     return 'unknown';
+  }
+}
+function gitEntryAtOrAbove(root) {
+  for (let dir = root; ; dir = dirname(dir)) {
+    try { lstatSync(join(dir, '.git')); return true; } catch (e) { if (e.code !== 'ENOENT') return true; }
+    if (dirname(dir) === dir) return false;
   }
 }
 
@@ -487,7 +498,8 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
 }
 
 function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
-  if (!RECORDABLE.has(result.status) || result.metrics_held || !inputs) return;
+  // A root pointer kept because git could not say is unresolved: every run re-inspects it and says so.
+  if (!RECORDABLE.has(result.status) || result.metrics_held || result.root_pointer || !inputs) return;
   // Only a classification made from bytes that were all read is recorded.
   if (inputs.index_sha256 === 'unreadable' || inputs.path_entries.some((e) => e.manifest_sha256 === 'unreadable')) return;
   try {

@@ -1464,3 +1464,76 @@ test("the project's tracked root workspace.json is kept when git cannot say whet
     assert.match(readFileSync(join(c.p, 'workspace.json'), 'utf8'), /"moved"/);
   } finally { c.s.cleanup(); }
 });
+
+test('a last-active file that is a link or a FIFO is never opened while the plan is built; an ordinary one is read', { skip: isWin }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  for (const shape of ['ordinary', 'a link', 'a FIFO']) {
+    const a = migrationFixture();
+    try {
+      const leaf = join(a.s.coreDir, 'workspaces', 'legacy', 'last-active');
+      rmSync(leaf, { force: true });
+      if (shape === 'ordinary') writeFileSync(leaf, '2026-01-01T00:00:00Z\n');
+      if (shape === 'a link') { writeFileSync(join(a.s.coreDir, '..', 'foreign-stamp'), '2031-01-01T00:00:00Z\n'); symlinkSync(join(a.s.coreDir, '..', 'foreign-stamp'), leaf); }
+      if (shape === 'a FIFO') execFileSync('mkfifo', [leaf]);
+      const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, watched: leaf, call: 'manifest' });
+      if (shape === 'ordinary') assert.ok(r.opens >= 1, 'control: the ordinary file is read, so the counter sees this path');
+      else assert.equal(r.opens, 0, `${shape} was not opened`);
+    } finally { a.s.cleanup(); }
+  }
+});
+
+test('a root pointer kept because git could not say is re-inspected and reported on every repeat, never served from the record', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore' });
+  const failGit = `import cp from 'node:child_process'; const ex = cp.execFileSync; cp.execFileSync = (c, a, o) => { if (c === 'git' && Array.isArray(a) && a.includes('--error-unmatch')) throw Object.assign(new Error('injected'), { code: 'EIO' }); return ex(c, a, o); };`;
+  const a = migrationFixture();
+  try {
+    git(a.p, 'init', '-q'); git(a.p, 'add', 'workspace.json');
+    applyMigration({ root: a.p, harness: 'codex', coreDir: a.s.coreDir, table: a.table });
+    const before = readFileSync(join(a.p, 'workspace.json'), 'utf8');
+    for (const n of [1, 2, 3, 4]) {
+      const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, preloadExtra: failGit });
+      assert.equal(r.fast, false, `run ${n} is not fast`);
+      assert.equal(r.root_pointer, 'kept (tracking-unknown)', `run ${n} says so`);
+    }
+    assert.equal(readFileSync(join(a.p, 'workspace.json'), 'utf8'), before);
+    // once git answers, the pointer is resolved and repeats become fast again
+    await runMigrationChild({ ...a, coreDir: a.s.coreDir });
+    await runMigrationChild({ ...a, coreDir: a.s.coreDir });
+    assert.equal((await runMigrationChild({ ...a, coreDir: a.s.coreDir })).fast, true, 'control: a resolved pointer is recorded');
+  } finally { a.s.cleanup(); }
+});
+
+test('a tracked root pointer survives damaged git metadata and an inherited alternate index; with no repository at all it is replaced', { skip: isWin }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore' });
+  // .git replaced by a pointer to a missing git dir: git says "not a git repository", but metadata exists
+  const a = migrationFixture();
+  try {
+    git(a.p, 'init', '-q'); git(a.p, 'add', 'workspace.json');
+    applyMigration({ root: a.p, harness: 'codex', coreDir: a.s.coreDir, table: a.table });
+    const before = readFileSync(join(a.p, 'workspace.json'), 'utf8');
+    rmSync(join(a.p, '.git'), { recursive: true }); writeFileSync(join(a.p, '.git'), 'gitdir: missing-git-dir\n');
+    const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir });
+    assert.equal(readFileSync(join(a.p, 'workspace.json'), 'utf8'), before, 'the pointer bytes are intact');
+    assert.equal(r.root_pointer, 'kept (tracking-unknown)');
+  } finally { a.s.cleanup(); }
+  // an inherited GIT_INDEX_FILE naming another index does not change the answer about this project
+  const b = migrationFixture();
+  try {
+    git(b.p, 'init', '-q'); git(b.p, 'add', 'workspace.json');
+    applyMigration({ root: b.p, harness: 'codex', coreDir: b.s.coreDir, table: b.table });
+    const before = readFileSync(join(b.p, 'workspace.json'), 'utf8');
+    const r = await runMigrationChild({ ...b, coreDir: b.s.coreDir, preloadExtra: `process.env.GIT_INDEX_FILE = ${JSON.stringify(join(b.p, 'no-such-index'))};` });
+    assert.equal(readFileSync(join(b.p, 'workspace.json'), 'utf8'), before, 'tracked in the project index, so kept');
+    assert.equal(r.root_pointer, null);
+  } finally { b.s.cleanup(); }
+  // control: no git metadata anywhere → replaced, nothing to report
+  const c = migrationFixture();
+  try {
+    applyMigration({ root: c.p, harness: 'codex', coreDir: c.s.coreDir, table: c.table });
+    const r = await runMigrationChild({ ...c, coreDir: c.s.coreDir });
+    assert.match(readFileSync(join(c.p, 'workspace.json'), 'utf8'), /"moved"/);
+    assert.equal(r.root_pointer, null);
+  } finally { c.s.cleanup(); }
+});
