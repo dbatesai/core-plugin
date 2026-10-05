@@ -80,7 +80,7 @@ test('a saved probe goes only into the history of its own harness, with real row
     const rec = (o = {}) => recordSnapshot({ cwd: f.root, root: f.root, from, home: f.home, env: { CORE_HARNESS: 'claude-code' }, ...o });
     saved('codex', [{ capability_id: 'x', identity_status: 'PASS' }]);
     await assert.rejects(() => rec(), /not a startup probe result for claude-code/, 'no --harness: the detected history decides');
-    await assert.rejects(() => rec({ harness: 'codex' }), /conflicts with the history/);
+    await assert.rejects(() => rec({ harness: 'codex', stateHarness: 'claude-code' }), /conflicts with the history/);
     for (const row of [{ capability_id: ' ', identity_status: 'PASS' }, { capability_id: 'x', identity_status: 'MAYBE' }]) {
       saved('claude-code', [row]);
       await assert.rejects(() => rec(), /no probe rows/);
