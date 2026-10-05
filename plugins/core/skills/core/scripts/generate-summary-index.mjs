@@ -66,31 +66,36 @@ function isCandidateDir(name) {
  * The store and its derived-cache folder must be real directories inside the project. A project can
  * arrive with `_memories` or `_memories/_lib` (or a file in `_lib`) as a link to somewhere else,
  * which would bring outside content into retrieval and send cache writes out of the project. Links
- * are judged with lstat, before anything follows them. An absent store is fine.
- * @returns {null | { code: 'STORE_OUTSIDE_ROOT', path: string }}
+ * are judged with lstat, before anything follows them. Only a path that is plainly absent (ENOENT)
+ * passes unchecked: when a check itself fails for any other reason the boundary is unproven, and
+ * that is a refusal too, never a pass.
+ * @returns {null | { code: 'STORE_OUTSIDE_ROOT' | 'STORE_BOUNDARY_UNVERIFIED', path: string, reason?: string }}
  */
 export function storeBoundaryProblem(storePath) {
   const root = resolve(storePath);
   const mem = join(root, '_memories');
   const bad = (path) => ({ code: 'STORE_OUTSIDE_ROOT', path });
+  const unproven = (path, e) => ({ code: 'STORE_BOUNDARY_UNVERIFIED', path, reason: String(e?.code || e?.message || e) });
   let st;
-  try { st = lstatSync(mem); } catch { return null; }   // absent or unreadable: the capture reports it
+  try { st = lstatSync(mem); } catch (e) { return e?.code === 'ENOENT' ? null : unproven(mem, e); }
   if (st.isSymbolicLink()) return bad(mem);
-  if (!st.isDirectory()) return null;
-  try { if (!realpathSync.native(mem).startsWith(realpathSync.native(root) + sep)) return bad(mem); } catch { return null; }
+  if (!st.isDirectory()) return null;   // a plain file is no store; the capture reports it
+  try { if (!realpathSync.native(mem).startsWith(realpathSync.native(root) + sep)) return bad(mem); } catch (e) { return unproven(mem, e); }
   const lib = join(mem, '_lib');
-  try { st = lstatSync(lib); } catch { return null; }
+  try { st = lstatSync(lib); } catch (e) { return e?.code === 'ENOENT' ? null : unproven(lib, e); }
   if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
-  let entries = [];
-  try { entries = readdirSync(lib, { withFileTypes: true }); } catch { return null; }
+  let entries;
+  try { entries = readdirSync(lib, { withFileTypes: true }); } catch (e) { return unproven(lib, e); }
   const link = entries.find((e) => e.isSymbolicLink());
   return link ? bad(join(lib, link.name)) : null;
 }
 
-/** Throws STORE_OUTSIDE_ROOT when the store or its cache folder leaves the project. */
+/** Throws when the store or its cache folder leaves the project, or when that can't be established. */
 export function assertStoreBoundary(storePath) {
   const problem = storeBoundaryProblem(storePath);
-  if (problem) throw Object.assign(new Error(`store refused: ${problem.path} is a link or leaves the project folder`), problem);
+  if (!problem) return;
+  const why = problem.code === 'STORE_OUTSIDE_ROOT' ? 'is a link or leaves the project folder' : `could not be checked (${problem.reason}), so it is not known to be inside the project folder`;
+  throw Object.assign(new Error(`store refused: ${problem.path} ${why}`), problem);
 }
 
 /**

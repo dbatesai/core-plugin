@@ -485,7 +485,7 @@ export function main(argv) {
   try { trace = buildRetrievalTrace(query, storePath, { topN }); }
   catch (e) {
     // A refusal is not an empty result: it has its own exit code and says why.
-    if (e?.code === 'STORE_OUTSIDE_ROOT') { process.stderr.write(`refused: ${e.message}\n`); return 3; }
+    if (e?.code === 'STORE_OUTSIDE_ROOT' || e?.code === 'STORE_BOUNDARY_UNVERIFIED') { process.stderr.write(`refused: ${e.message}\n`); return 3; }
     throw e;
   }
   const hits = trace.stages?.final || [];

@@ -570,3 +570,39 @@ test('after pickup-archive the automatic hooks run again; another harness with p
     assert.equal(projectOnlyHint(p.root), true);
   } finally { p.cleanup(); }
 });
+
+test('explicit retrieval: when the boundary check itself fails (not plain absence) retrieval refuses before reading the store; an absent store is still an ordinary empty result', { skip: isWin || isRoot }, async () => {
+  const { storeBoundaryProblem } = await import('../../plugins/core/skills/core/scripts/generate-summary-index.mjs');
+  const RC = join(CORE, 'scripts/retrieve-context.mjs');
+  // _memories/_lib exists but can't be listed: the link check on its files can't run.
+  const a = project();
+  try {
+    const lib = join(a.root, '_memories', '_lib'); mkdirSync(lib); writeFileSync(join(lib, 'unit-summaries.json'), '{}');
+    chmodSync(lib, 0o000);
+    try {
+      assert.deepEqual([storeBoundaryProblem(a.root).code, storeBoundaryProblem(a.root).reason], ['STORE_BOUNDARY_UNVERIFIED', 'EACCES']);
+      const r = confined(a.root, [RC, a.root, 'what colour are widgets']);
+      assert.equal(r.status, 3);
+      assert.match(r.stderr, /refused: store refused.*could not be checked \(EACCES\)/);
+      assert.equal(r.stdout, '', 'no unit was returned from a store whose boundary is unproven');
+      assert.deepEqual(r.violations, []);
+    } finally { chmodSync(lib, 0o755); }
+  } finally { a.cleanup(); }
+  // The project folder can't be searched, so _memories can't even be lstat'ed (EACCES, not ENOENT).
+  const b = project();
+  try {
+    chmodSync(b.root, 0o000);
+    try {
+      assert.equal(storeBoundaryProblem(b.root).code, 'STORE_BOUNDARY_UNVERIFIED');
+      const r = spawnSync(process.execPath, [RC, b.root, 'what colour are widgets'], { encoding: 'utf8', cwd: b.base });
+      assert.equal(r.status, 3);
+      assert.equal(r.stdout, '');
+    } finally { chmodSync(b.root, 0o755); }
+  } finally { b.cleanup(); }
+  // Plain absence is not a refusal.
+  const c = project({ withUnits: false });
+  try {
+    assert.equal(storeBoundaryProblem(c.root), null);
+    assert.equal(confined(c.root, [RC, c.root, 'anything']).status, 0);
+  } finally { c.cleanup(); }
+});
