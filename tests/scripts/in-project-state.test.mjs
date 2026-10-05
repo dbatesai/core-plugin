@@ -1373,3 +1373,94 @@ test('a repeat run after a covered legacy workspace, or the legacy store, became
     } finally { s.cleanup(); }
   }
 });
+
+// ---------- the manifest file itself, and "is this tracked?" when git can't say ----------
+
+async function runMigrationChild({ p, coreDir, table, watched = null, preloadExtra = '', call = 'apply' }) {
+  const { spawnSync } = await import('node:child_process');
+  const { pathToFileURL, fileURLToPath } = await import('node:url');
+  const mod = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs')).href;
+  const preload = 'data:text/javascript,' + encodeURIComponent(`import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module'; globalThis.opens = 0; for (const k of ['readFileSync', 'openSync', 'copyFileSync']) { const o = fs[k]; fs[k] = (f, ...a) => { if (String(f) === ${JSON.stringify(watched)}) globalThis.opens++; return o(f, ...a); }; } ${preloadExtra} syncBuiltinESMExports();`);
+  const body = call === 'manifest'
+    ? `const r = m.buildManifest({ coreDir: ${JSON.stringify(coreDir)}, table: ${JSON.stringify(table)} }); console.log(JSON.stringify({ entries: r.entries.length, opens: globalThis.opens }));`
+    : `const r = m.applyMigration({ root: ${JSON.stringify(p)}, harness: ${JSON.stringify(H)}, coreDir: ${JSON.stringify(coreDir)}, table: ${JSON.stringify(table)} }); console.log(JSON.stringify({ status: r.status, code: r.code || null, path: r.path || null, fast: r.fast === true, root_pointer: r.root_pointer || null, opens: globalThis.opens }));`;
+  const r = spawnSync(process.execPath, ['--import', preload, '--input-type=module', '-e', `const m = await import(${JSON.stringify(mod)}); ${body}`], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(r.signal, null, 'did not block');
+  return JSON.parse(r.stdout);
+}
+
+for (const shape of ['a link', 'a second hard link', 'a FIFO']) {
+  test(`a legacy manifest file that is ${shape} is never opened: the plan skips it, a first migration is held with nothing copied, and a repeat is not fast`, { skip: isWin }, async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { linkSync } = await import('node:fs');
+    const plant = (leaf, foreignDir) => {
+      mkdirSync(foreignDir, { recursive: true });
+      const moved = join(foreignDir, 'workspace.json');
+      if (shape === 'a FIFO') { rmSync(leaf); execFileSync('mkfifo', [leaf]); return; }
+      renameSync(leaf, moved);
+      if (shape === 'a link') symlinkSync(moved, leaf); else linkSync(moved, leaf);
+    };
+    // plan + first migration
+    const a = migrationFixture();
+    try {
+      const leaf = join(a.s.coreDir, 'workspaces', 'legacy', 'workspace.json');
+      plant(leaf, join(a.s.coreDir, '..', 'foreign-leaf'));
+      assert.equal((await runMigrationChild({ ...a, coreDir: a.s.coreDir, watched: leaf, call: 'manifest' })).opens, 0, 'the plan did not open it');
+      const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, watched: leaf });
+      assert.equal(r.status, 'legacy-held');
+      assert.equal(r.path, leaf);
+      assert.equal(r.opens, 0, 'the migration did not open or copy it');
+      const inProject = join(a.p, '.core', H);
+      assert.equal(existsSync(join(inProject, RECEIPT_NAME)), false, 'no completion receipt');
+      assert.ok(existsSync(join(inProject, '.migrating')), 'the state is fenced');
+      assert.deepEqual(readdirSync(inProject).filter((n) => n !== '.migrating' && n !== 'stamp' && !n.startsWith('.')).sort(), [], 'nothing was copied in before the hold');
+    } finally { a.s.cleanup(); }
+    // healthy migration first, then the leaf changes: the repeat must not be fast and must not open it
+    const b = migrationFixture();
+    try {
+      assert.equal(applyMigration({ root: b.p, harness: H, coreDir: b.s.coreDir, table: b.table }).status, 'migrated');
+      applyMigration({ root: b.p, harness: H, coreDir: b.s.coreDir, table: b.table });
+      assert.equal(applyMigration({ root: b.p, harness: H, coreDir: b.s.coreDir, table: b.table }).fast, true, 'control: unchanged repeat is fast');
+      const leaf = join(b.s.coreDir, 'workspaces', 'legacy', 'workspace.json');
+      plant(leaf, join(b.s.coreDir, '..', 'foreign-leaf'));
+      const r = await runMigrationChild({ ...b, coreDir: b.s.coreDir, watched: leaf });
+      assert.equal(r.fast, false);
+      assert.equal(r.opens, 0);
+    } finally { b.s.cleanup(); }
+  });
+}
+
+test("the project's tracked root workspace.json is kept when git cannot say whether it is tracked; an untracked one is still replaced", async () => {
+  const { execFileSync } = await import('node:child_process');
+  const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore' });
+  const failGit = `import cp from 'node:child_process'; const ex = cp.execFileSync; cp.execFileSync = (c, a, o) => { if (c === 'git' && Array.isArray(a) && a.includes('--error-unmatch')) throw Object.assign(new Error('injected'), { code: 'EIO' }); return ex(c, a, o); };`;
+  // tracked + git inspection fails → kept, and said
+  const a = migrationFixture();
+  try {
+    git(a.p, 'init', '-q'); git(a.p, 'add', 'workspace.json');
+    applyMigration({ root: a.p, harness: 'codex', coreDir: a.s.coreDir, table: a.table });   // the other harness first, so this run releases
+    const before = readFileSync(join(a.p, 'workspace.json'), 'utf8');
+    const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, preloadExtra: failGit });
+    assert.equal(r.status, 'migrated');
+    assert.equal(readFileSync(join(a.p, 'workspace.json'), 'utf8'), before, 'the pointer bytes are intact');
+    assert.equal(r.root_pointer, 'kept (tracking-unknown)');
+  } finally { a.s.cleanup(); }
+  // control: tracked, git healthy → kept (existing promise), nothing to report
+  const b = migrationFixture();
+  try {
+    git(b.p, 'init', '-q'); git(b.p, 'add', 'workspace.json');
+    applyMigration({ root: b.p, harness: 'codex', coreDir: b.s.coreDir, table: b.table });
+    const before = readFileSync(join(b.p, 'workspace.json'), 'utf8');
+    const r = await runMigrationChild({ ...b, coreDir: b.s.coreDir });
+    assert.equal(readFileSync(join(b.p, 'workspace.json'), 'utf8'), before);
+    assert.equal(r.root_pointer, null);
+  } finally { b.s.cleanup(); }
+  // control: a git repo that does not track it → replaced
+  const c = migrationFixture();
+  try {
+    git(c.p, 'init', '-q');
+    applyMigration({ root: c.p, harness: 'codex', coreDir: c.s.coreDir, table: c.table });
+    await runMigrationChild({ ...c, coreDir: c.s.coreDir });
+    assert.match(readFileSync(join(c.p, 'workspace.json'), 'utf8'), /"moved"/);
+  } finally { c.s.cleanup(); }
+});

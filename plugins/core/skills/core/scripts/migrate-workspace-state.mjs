@@ -95,6 +95,11 @@ function legacyFolderState(path) {
   try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink() ? 'folder' : 'other'; }
   catch (e) { return e.code === 'ENOENT' ? 'absent' : 'other'; }
 }
+/** 'file' (an ordinary single-named file), 'absent', or 'other' (a link, a second name, a FIFO, not examinable). */
+function legacyLeafState(path) {
+  try { const st = lstatSync(path); return st.isFile() && !st.isSymbolicLink() && st.nlink === 1 ? 'file' : 'other'; }
+  catch (e) { return e.code === 'ENOENT' ? 'absent' : 'other'; }
+}
 function isRealFolder(path) { try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink(); } catch { return false; } }
 
 /** A legacy folder that is absent is fine; one that is a link, not a folder, or can't be examined is held. */
@@ -104,6 +109,11 @@ function assertLegacyFolder(path) {
   catch (e) { if (e.code === 'ENOENT') return; throw new LegacyStateError('LEGACY_UNREADABLE', path, `cannot examine (${e.code || e.message})`); }
   if (st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', path, 'the legacy folder is a link');
   if (!st.isDirectory()) throw new LegacyStateError('LEGACY_UNREADABLE', path, 'not a folder');
+}
+
+/** Every entry is an ordinary single-named file or a folder: walked in full before anything is copied. */
+function assertLegacyContents(path) {
+  if (isRealFolder(path)) listFiles(path, { strict: true });
 }
 
 function listFiles(dir, { strict = false } = {}) {
@@ -118,6 +128,9 @@ function listFiles(dir, { strict = false } = {}) {
       try { st = lstatSync(p); }
       catch (e) { if (strict) throw new LegacyStateError('LEGACY_UNREADABLE', p, `cannot stat (${e.code || e.message})`); continue; }
       if (strict && st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', p, 'symlink inside the legacy workspace');
+      // A file with a second name is the same bytes living somewhere else; a FIFO or device would
+      // block or misbehave when read. Neither is this workspace's own ordinary file.
+      if (strict && !st.isDirectory() && (!st.isFile() || st.nlink !== 1)) throw new LegacyStateError('LEGACY_UNREADABLE', p, st.isFile() ? 'a file with a second name inside the legacy workspace' : 'not an ordinary file inside the legacy workspace');
       if (st.isDirectory()) walk(p);
       else out.push(relative(dir, p).replace(/\\/g, '/'));
     }
@@ -204,7 +217,11 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     // before, and marked 'unreadable' so that result is never recorded.
     let manifest = {};
     let manifestSha = 'absent';
-    if (dirExists) {
+    if (dirExists && legacyLeafState(join(dir, 'workspace.json')) === 'other') {
+      // Not this workspace's own ordinary file: never opened, classified as empty, and marked so the
+      // result is not recorded. The copy step holds on it by name.
+      manifestSha = 'unreadable';
+    } else if (dirExists) {
       try {
         const raw = readFileSync(join(dir, 'workspace.json'));
         manifestSha = createHash('sha256').update(raw).digest('hex');
@@ -394,11 +411,20 @@ function withManifest(coreDir, table, applyHarness, mutate) {
   }, { retries: 80, retryDelayMs: 100 });
 }
 
+/**
+ * Whether git tracks `rel`: true, false, or 'unknown'. Only git's own answers count as "no": exit 1
+ * from --error-unmatch (the path is not tracked), or its "not a git repository". Any other failure
+ * (git missing, an I/O error, a timeout) is unknown, and unknown never licenses rewriting the file.
+ */
 function gitTracks(root, rel) {
   try {
-    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: 'ignore', timeout: 3000 });
+    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000 });
     return true;
-  } catch { return false; }
+  } catch (e) {
+    if (e?.status === 1) return false;
+    if (e?.status === 128 && /not a git repository/i.test(String(e.stderr || ''))) return false;
+    return 'unknown';
+  }
 }
 
 /**
@@ -445,6 +471,8 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
     // or this workspace is no longer a real folder, nothing under it is opened and the full path
     // (which holds or skips it) decides.
     if (legacyFolderState(join(coreDir, 'workspaces')) === 'other' || legacyFolderState(join(coreDir, 'workspaces', e.workspace_id)) === 'other') return null;
+    // The same for the manifest file itself: only its own ordinary file is opened.
+    if (legacyLeafState(join(coreDir, 'workspaces', e.workspace_id, 'workspace.json')) === 'other') return null;
     const now = fileSha(join(coreDir, 'workspaces', e.workspace_id, 'workspace.json'));
     if (now === 'unreadable' || now !== e.manifest_sha256) return null;
   }
@@ -529,6 +557,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
         // marker, the copy and the receipt change, so a refusal leaves the earlier receipt as it was.
         for (const e of late) { assertSafeWorkspaceId(e.workspace_id); assertLegacyFolder(join(coreDir, 'workspaces', e.workspace_id)); }
         atomicWriteFileSync(markerFile, `${iso}\n`);
+        for (const e of late) assertLegacyContents(join(coreDir, 'workspaces', e.workspace_id));
         const lateCopies = [];
         for (const e of late) {
           assertSafeWorkspaceId(e.workspace_id);
@@ -554,6 +583,10 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
       // marker, the copy and the MOVED note, so a refusal leaves both sides exactly as found.
       for (const e of [...(live ? [live] : []), ...dups]) { assertSafeWorkspaceId(e.workspace_id); assertLegacyFolder(join(coreDir, 'workspaces', e.workspace_id)); }
       atomicWriteFileSync(markerFile, `${iso}\n`);
+      // Every source is walked in full before the first byte is copied: a link, a second-named file
+      // or a non-ordinary file anywhere inside holds the migration with nothing copied. The marker is
+      // already down, so the project's state stays fenced until the legacy folder is put right.
+      for (const e of [...(live ? [live] : []), ...dups]) assertLegacyContents(join(coreDir, 'workspaces', e.workspace_id));
       const toCopy = [...(live ? [{ e: live, superseded: false }] : []), ...dups.map((e) => ({ e, superseded: true }))];
       for (const { e, superseded } of toCopy) {
         assertSafeWorkspaceId(e.workspace_id);
@@ -653,6 +686,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     });
 
     let released = false;
+    let pointerKept = null;   // why the project's root workspace.json was left as it was, when it was
     if (release.allDone) {
       for (const e of release.onPath) {
         const dir = join(coreDir, 'workspaces', e.workspace_id);
@@ -662,7 +696,9 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
         }
       }
       const pointerFile = join(real, 'workspace.json');
-      if (existsSync(pointerFile) && !gitTracks(real, 'workspace.json')) {
+      const tracked = existsSync(pointerFile) ? gitTracks(real, 'workspace.json') : false;
+      if (tracked === 'unknown') pointerKept = 'tracking-unknown';
+      if (existsSync(pointerFile) && tracked === false) {
         atomicWriteFileSync(pointerFile, JSON.stringify({ moved: '.core/', note: 'CORE state for this project now lives in .core/<harness>/.' }) + '\n');
       }
       const onIds = new Set(release.onPath.map((e) => e.workspace_id));
@@ -673,7 +709,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     return {
       status: copies === null ? 'already-migrated' : 'migrated',
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-      files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
+      files: copies ? copies.length : 0, released, ...(pointerKept ? { root_pointer: `kept (${pointerKept})` } : {}), ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
     };
   });
 }
