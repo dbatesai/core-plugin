@@ -105,3 +105,12 @@ test('generated self-test rounds and their trigger state are ignored once a roun
     assert.equal(readdirSync(join(root, '..')).includes('.gitignore'), false, 'nothing is written above the project');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('the trigger-state writer alone adds the rules before its first write', { skip: isWin }, async () => {
+  const { markAutoAuthorTriggered } = await import('../../plugins/core/skills/core/scripts/self-test-round.mjs');
+  const root = project();
+  try {
+    assert.equal(markAutoAuthorTriggered(root), true);
+    assert.equal(ignored(root, '_tests/self-test/auto-author-state.json'), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
