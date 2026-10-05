@@ -90,6 +90,11 @@ class LegacyStateError extends Error {
   }
 }
 
+/** 'folder' (a real directory), 'absent', or 'other' (a link, not a directory, or not examinable). */
+function legacyFolderState(path) {
+  try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink() ? 'folder' : 'other'; }
+  catch (e) { return e.code === 'ENOENT' ? 'absent' : 'other'; }
+}
 function isRealFolder(path) { try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink(); } catch { return false; } }
 
 /** A legacy folder that is absent is fine; one that is a link, not a folder, or can't be examined is held. */
@@ -436,6 +441,10 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
   if (index === 'unreadable' || index !== rec.index_sha256 || tableSha(table) !== rec.table_sha256) return null;
   for (const e of rec.path_entries) {
     if (!e || !isSafeWorkspaceId(e.workspace_id)) return null;
+    // A recorded check proves what was read then, not where this path leads now. If the legacy store
+    // or this workspace is no longer a real folder, nothing under it is opened and the full path
+    // (which holds or skips it) decides.
+    if (legacyFolderState(join(coreDir, 'workspaces')) === 'other' || legacyFolderState(join(coreDir, 'workspaces', e.workspace_id)) === 'other') return null;
     const now = fileSha(join(coreDir, 'workspaces', e.workspace_id, 'workspace.json'));
     if (now === 'unreadable' || now !== e.manifest_sha256) return null;
   }

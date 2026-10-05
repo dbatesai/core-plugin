@@ -1345,3 +1345,31 @@ test('a registered workspace name that is a link is never read through while the
     assert.doesNotMatch(text, /2031-01-01/, 'nor its last-active stamp');
   } finally { s.cleanup(); }
 });
+
+// The fast repeat check must not open a file under a legacy name that has since become a link.
+test('a repeat run after a covered legacy workspace, or the legacy store, became a link opens nothing under it and does not take the fast path', { skip: isWin }, async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { pathToFileURL } = await import('node:url');
+  const mod = pathToFileURL(join(dirname(new URL(import.meta.url).pathname), '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs')).href;
+  for (const which of ['workspace', 'parent']) {
+    const { s, p, table } = migrationFixture();
+    try {
+      assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+      applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+      assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).fast, true, 'control: an unchanged repeat is fast');
+      const name = which === 'workspace' ? join(s.coreDir, 'workspaces', 'legacy') : join(s.coreDir, 'workspaces');
+      const foreign = join(s.coreDir, '..', `foreign-${which}`);
+      renameSync(name, foreign); symlinkSync(foreign, name);   // same bytes, now reached only through a link
+      const before = treeOf(foreign);
+      const watched = join(s.coreDir, 'workspaces', 'legacy', 'workspace.json');
+      const preload = 'data:text/javascript,' + encodeURIComponent(`import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module'; globalThis.opens = 0; for (const k of ['readFileSync', 'openSync']) { const o = fs[k]; fs[k] = (f, ...a) => { if (String(f) === ${JSON.stringify(watched)}) globalThis.opens++; return o(f, ...a); }; } syncBuiltinESMExports();`);
+      const script = `const m = await import(${JSON.stringify(mod)}); const r = m.applyMigration({ root: ${JSON.stringify(p)}, harness: ${JSON.stringify(H)}, coreDir: ${JSON.stringify(s.coreDir)}, table: ${JSON.stringify(table)} }); console.log(JSON.stringify({ status: r.status, fast: r.fast === true, code: r.code || null, opens: globalThis.opens }));`;
+      const r = spawnSync(process.execPath, ['--import', preload, '--input-type=module', '-e', script], { encoding: 'utf8' });
+      const out = JSON.parse(r.stdout);
+      assert.equal(out.fast, false, `${which}: not the fast path`);
+      assert.equal(out.opens, 0, `${which}: the manifest under the link was never opened`);
+      if (which === 'parent') assert.deepEqual([out.status, out.code], ['legacy-held', 'LEGACY_SYMLINK']);
+      assert.deepEqual(treeOf(foreign), before, `${which}: nothing written where the link leads`);
+    } finally { s.cleanup(); }
+  }
+});
