@@ -39,7 +39,7 @@ import { loadValidEnrichments } from './enrichment-sidecar.mjs';
 import { truncate as sharedTruncate } from './text-truncate.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
-import { ensureStoreIgnores } from './store-ignores.mjs';
+import { ensureLibDir } from './store-ignores.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -242,8 +242,8 @@ export function loadFreshIndex(storePath) {
       }
     } catch { /* fall through to regenerate */ }
   }
-  mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
-  ensureStoreIgnores(root);
+  // A cache folder git would track, or whose rules are unsafe, gets no cache; the answer still stands.
+  try { ensureLibDir(root); } catch { return current; }
   atomicWriteFileSync(indexPath, JSON.stringify(current, null, 2) + '\n');
   return current;
 }
@@ -531,8 +531,7 @@ export function captureStore(storePath, { retainRaw = false, refreshCache = true
       let cached = null;
       try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
       if (!cached || cached.incomplete || (cached.read_errors || []).length || cached.source_sig !== source_sig) {
-        mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
-        ensureStoreIgnores(resolve(storePath));
+        ensureLibDir(resolve(storePath));
         atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
       }
     } catch { /* cache refresh is a convenience; the capture itself is complete */ }
@@ -554,7 +553,7 @@ export function generateSummaryIndex(storePath) {
   const out = captureStore(storePath, { refreshCache: false }).index;
   if (out.incomplete) return out;
   const libDir = join(resolve(storePath), '_memories', '_lib');
-  try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }
+  ensureLibDir(resolve(storePath));
   atomicWriteFileSync(join(libDir, 'unit-summaries.json'), JSON.stringify(out, null, 2) + '\n');
   return out;
 }

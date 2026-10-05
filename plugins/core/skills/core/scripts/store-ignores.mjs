@@ -11,11 +11,11 @@
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { ensureProjectCacheDir } from './project-artifacts.mjs';
 
 const HEADER = '# Written by CORE: its own working files in this folder, never project content.\n';
 export const STORE_IGNORES = [
-  ['_memories', ['_close.lock*', '._close.lock*', '.*.lock*', '_close-marker.json', '_maintenance-state.json', '_pm-state.json', '_capability-drift-log.md']],
-  ['_memories/_lib', ['*']],
+  ['_memories', ['_close.lock*', '._close.lock*', '.*.lock*', '.*.tmp-*', '_close-marker.json', '_maintenance-state.json', '_pm-state.json', '_capability-drift-log.md']],
   // Generated test rounds hold answer keys and run state: local evaluation, not project content.
   ['_tests/self-test', ['round-*/', 'auto-author-state.json']],
 ];
@@ -30,6 +30,16 @@ export function folderChain(root, rel) {
     if (st.isSymbolicLink() || !st.isDirectory()) return `${part} is not a real folder`;
   }
   return 'real';
+}
+
+/**
+ * The cache folder `_memories/_lib`, ready for a first write: a real folder whose own ignore file ends
+ * in `*`, with nothing in it tracked by git. Anything else (tracked or unknown tracking, an ignore file
+ * that is a link or re-includes a file, a linked parent) throws before any lock, temp or payload write.
+ */
+export function ensureLibDir(projectRoot) {
+  ensureStoreIgnores(projectRoot);
+  return ensureProjectCacheDir(projectRoot);
 }
 
 /** The rules whose files git would still show, judged by git itself with every rule in the repository.

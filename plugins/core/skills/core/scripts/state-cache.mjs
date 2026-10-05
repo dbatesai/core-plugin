@@ -46,7 +46,7 @@ import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { ensureProjectCacheDir, assertProjectCacheDir } from './project-artifacts.mjs';
 import { trackedProjectFiles } from './project-state.mjs';
-import { ensureStoreIgnores } from './store-ignores.mjs';
+import { ensureLibDir } from './store-ignores.mjs';
 
 export function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -497,8 +497,8 @@ export function stampFiles(projectDir, entries, { now } = {}) {
   const custody = cacheCustodyProblem(projectDir);
   if (custody) return { stamped: false, outcome: 'refused', recovery: 'recovery-required', reason: `cache-custody: ${custody}` };
   try {
-    mkdirSync(dirname(cachePath), { recursive: true });
-    ensureStoreIgnores(resolve(projectDir));
+    try { ensureLibDir(resolve(projectDir)); }
+    catch (e) { return { stamped: false, outcome: 'refused', recovery: 'recovery-required', reason: `cache-policy: ${e.code || e.message}` }; }
     const lockResult = withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
       const cache = readProjectCache(projectDir);
       // A damaged baseline is preserved, never overwritten: the rebuild below

@@ -36,6 +36,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
+import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
 import { ensureStoreIgnores } from './store-ignores.mjs';
@@ -52,6 +53,7 @@ export function projectMdWriterLockPath(projectDir) {
  *  budget: PROJECT.md writes are short, so contention (a hook + a manual close)
  *  clears fast. Same withFileLock primitive every other lock uses. */
 export function withProjectMdWriterLock(projectDir, fn, opts = {}) {
+  mkdirSync(join(resolve(projectDir), '_memories'), { recursive: true });
   ensureStoreIgnores(resolve(projectDir));
   return withFileLock(projectMdWriterLockPath(projectDir), fn, {
     retries: 40, retryDelayMs: 50, ...opts,

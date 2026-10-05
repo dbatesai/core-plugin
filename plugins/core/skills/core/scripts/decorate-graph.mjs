@@ -26,7 +26,7 @@
 // CLI:
 //   node decorate-graph.mjs <project-dir> [--check] [--dry-run]
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isCliEntry } from './cli-entry.mjs';
 import { loadSnapshot } from './generate-summary-index.mjs';
@@ -309,6 +309,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
  */
 export function decorateStoreLocked(projectDir, opts = {}) {
   const lockPath = join(resolve(projectDir), '_memories', '.decorate-graph.lock');
+  mkdirSync(join(resolve(projectDir), '_memories'), { recursive: true });
   ensureStoreIgnores(resolve(projectDir));
   return withFileLock(lockPath, () => decorateStore(projectDir, opts), { retries: 3, retryDelayMs: 50 });
 }
