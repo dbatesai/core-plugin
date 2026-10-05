@@ -414,6 +414,7 @@ export function projectMigrationFence({ root, harness }) {
 }
 
 let migrationDepth = 0;
+export const insideMigration = () => migrationDepth > 0;
 export function duringMigration(fn) {
   migrationDepth++;
   try { return fn(); } finally { migrationDepth--; }
@@ -549,6 +550,13 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
     case 'planted':
     case 'copied': {
       if (!forWrite) return null;
+      // Nothing is archived or re-stamped while a migration is unfinished: the marker and bytes stay as found.
+      const fence = !migrationDepth && projectMigrationFence({ root: real, harness });
+      if (fence) {
+        const reason = fence === 'migration-in-progress' ? 'migrating' : fence;
+        const held = local(reason);
+        return held && { ...held, status: reason };
+      }
       if (classifyStamp({ root: real, harness, coreDir }).status === 'verified') {
         return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
       }

@@ -47,7 +47,7 @@ import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest, writeBootstrap, readBootstrap,
-  classifyStamp, writeStamp, STATE_DIRNAME, adoptionCandidate, adoptForeignState,
+  classifyStamp, writeStamp, STATE_DIRNAME, adoptionCandidate, adoptForeignState, projectMigrationFence, insideMigration,
 } from './project-state.mjs';
 
 /**
@@ -186,6 +186,9 @@ export function settleState(coreDir, { root, harness = detectStateHarness(), dec
   const r = rootOrThrow(root, core);
   const verdict = classifyStamp({ root: r, harness, coreDir: core });
   if (verdict.status !== 'ask') return { root: r, status: verdict.status, changed: false };
+  // Neither answer re-stamps or sets anything aside while a migration is unfinished.
+  const fence = !insideMigration() && projectMigrationFence({ root: r, harness });
+  if (fence) return { root: r, status: 'held', reason: fence, changed: false };
   if (decision === 'accept-move') {
     writeStamp({ root: r, harness, coreDir: core });
     recordMove(core, verdict.oldPath, r);

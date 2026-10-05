@@ -742,10 +742,20 @@ export function workspaceMetrics(home, projectDir) {
     const gate = aggregateCalibration(projectDir, { home });
     calibration.is_calibrated = gate.is_calibrated;
     calibration.provisional = gate.provisional;
-    for (const harness of ['claude-code', 'codex']) {
+    // Each harness's row comes only from its own state; a harness with none gets no inherited claim.
+    calibration.by_harness = Object.fromEntries(['claude-code', 'codex'].map((harness) => {
       const row = gate.by_harness[harness];
-      if (row) calibration.by_harness[harness] = { ...calibration.by_harness[harness], is_calibrated: row.is_calibrated === true, labeled_count: num(row.labeled_count), overall_precision: num(row.overall_precision) };
-    }
+      return [harness, row ? {
+        is_calibrated: row.is_calibrated === true,
+        labeled_count: num(row.labeled_count),
+        min_labeled: num(row.min_labeled),
+        overall_precision: num(row.overall_precision),
+        coverage_complete: row.coverage_complete === true,
+        per_class_pass: row.per_class_pass === true,
+        blinded: row.blinded === true,
+        provenance_complete: row.provenance_complete === true,
+      } : { is_calibrated: false }];
+    }));
   }
 
   let capability = { available: false, reason: 'no capability-history.jsonl' };

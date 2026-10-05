@@ -373,3 +373,45 @@ test('a moved project whose migration is unfinished is fenced: no re-stamp, no w
     } finally { s.cleanup(); }
   }
 });
+
+test('a copied project with an unfinished migration is not archived or re-stamped; settling an ask waits too; a healthy copy is set aside as before', async () => {
+  const { stateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { settleState } = await import('../../plugins/core/skills/core/scripts/index-registry.mjs');
+  for (const fenced of [true, false]) {
+    const s = sandbox();
+    try {
+      const p = mk(s.base, 'Projects', 'P');
+      writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+      const copy = join(s.base, 'Projects', 'P-copy');
+      cpSync(p, copy, { recursive: true });
+      if (fenced) writeFileSync(join(copy, '.core', 'claude-code', '.migrating'), '');
+      register(s.coreDir, [p, copy]);
+      const before = snapshot(join(copy, '.core'));
+      if (fenced) {
+        assert.throws(() => stateDir({ root: copy, harness: 'claude-code', coreDir: s.coreDir, forWrite: true }));
+        assert.deepEqual(snapshot(join(copy, '.core')), before, 'marker, stamp and bytes kept as found');
+      } else {
+        const r = stateDir({ root: copy, harness: 'claude-code', coreDir: s.coreDir, forWrite: true });
+        assert.equal(r.status, 'copied'); assert.ok(r.setAside, 'control: a healthy copy is set aside');
+      }
+    } finally { s.cleanup(); }
+  }
+  // an 'ask' (old path and parent gone) with a marker: settling waits
+  const s = sandbox();
+  try {
+    const drive = mk(s.base, 'Volumes', 'Ext');
+    const p = mk(drive, 'P');
+    writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    const landed = join(mk(s.base, 'Projects'), 'P');
+    renameSync(p, landed);
+    rmSync(drive, { recursive: true, force: true });
+    writeFileSync(join(landed, '.core', 'claude-code', '.migrating'), '');
+    register(s.coreDir, [landed]);
+    const before = snapshot(join(landed, '.core'));
+    for (const decision of ['accept-move', 'fresh']) {
+      const r = settleState(s.coreDir, { root: landed, harness: 'claude-code', decision });
+      assert.equal(r.status, 'held', decision); assert.equal(r.changed, false);
+    }
+    assert.deepEqual(snapshot(join(landed, '.core')), before);
+  } finally { s.cleanup(); }
+});

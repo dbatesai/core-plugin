@@ -39,6 +39,7 @@ import { todayUTC, operationalMetricsDir, trustedMetricsDir } from './log-event.
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { detectStateHarness } from './project-state.mjs';
 
 export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
@@ -640,7 +641,12 @@ export function readinessReport({ project, home = homedir(), env = process.env, 
     : !metaDir ? 'No trusted calibration data is available.' : null;
   // Counts are this harness's; the conclusion comes from every harness's own state, not this file alone.
   const gate = available ? aggregateCalibration(project, { home, env }) : null;
-  if (gate) state = { ...state, is_calibrated: gate.is_calibrated, provisional: gate.provisional, notes: gate.notes };
+  if (gate) {
+    state = { ...state, is_calibrated: gate.is_calibrated, provisional: gate.provisional, notes: gate.notes };
+    // Precision from this harness's own entry, the one its own import measured.
+    const own = gate.by_harness[harness || detectStateHarness(env)];
+    if (own && Number.isFinite(own.overall_precision)) state.overall_precision = own.overall_precision;
+  }
   return {
     available,
     ...(reason ? { reason } : {}),
@@ -712,9 +718,11 @@ if (isCliEntry(import.meta.url)) {
     if (!worksheetFile) { process.stdout.write('calibrate-classifier: --import-labels requires a file path\n'); process.exit(1); }
     const metaDir = writableMetrics();
     const r = importLabels({ worksheetFile, metaDir, expectedHarness:harness, minLabeled: resolveMinLabeled(project) });
+    // The overall answer spans every harness's own state, in both output formats.
+    const gate = r.status === 'OK' ? aggregateCalibration(project) : null;
+    if (gate) { r.all_harnesses_calibrated = gate.is_calibrated; r.by_harness = gate.by_harness; }
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.status === 'OK' ? 0 : 1); }
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
-    const gate = aggregateCalibration(project);
     process.stdout.write(`calibrate-classifier: ${harness} ${r.is_calibrated ? 'cleared' : 'not cleared'} — ${r.notes}\n`);
     process.stdout.write(`  overall: ${gate.is_calibrated ? '✔ CALIBRATED' : '○ PROVISIONAL'} — ${gate.notes}\n`);
     process.exit(0);
