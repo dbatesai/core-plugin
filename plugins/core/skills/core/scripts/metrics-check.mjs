@@ -70,7 +70,7 @@ import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';
 import { newestRegisteredRound, measureRound } from './self-test-round.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
-import { turnCaptureStats } from './turn-capture.mjs';
+import { turnCaptureStats, readCaptureHealth, HEALTH_FILENAME } from './turn-capture.mjs';
 import { latestScorecards, scorecardLogPath } from './scorecard.mjs';
 import { evaluateTripwires } from './metrics-tripwires.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
@@ -905,6 +905,8 @@ export function checkAnswerEvidence(projectDir) {
   } catch (e) {
     problems.push({ file: logPath, detail: `scorecard log unreadable: ${String(e && e.message).slice(0, 120)}` });
   }
+  const health = readCaptureHealth(projectDir);
+  if (health.unreadable) problems.push({ file: HEALTH_FILENAME, detail: `current capture health is unreadable (${health.unreadable})` });
   return { corrupt: problems.length > 0, problems };
 }
 

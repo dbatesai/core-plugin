@@ -332,11 +332,21 @@ function bumpHealth(projectDir, { failed, reason, ts }) {
   } catch { /* best-effort — health must never fail the capture path */ }
 }
 
-/** Read the capture-health counters. Missing → zeros. */
+/**
+ * Read the capture-health counters. Missing → zeros. A file that is there but can't be trusted
+ * (unsafe location, unreadable, not a JSON object) → zeros plus `unreadable: <why>`, so no reader
+ * mistakes a broken instrument for a quiet one.
+ */
 export function readCaptureHealth(projectDir) {
   const file = join(resolveStoragePath(projectDir), HEALTH_FILENAME);
   const zero = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
-  try { return { ...zero, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { return zero; }
+  const custody = captureCustodyProblem(projectDir, { healthOnly: true });
+  if (custody) return { ...zero, unreadable: custody };
+  let parsed;
+  try { parsed = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (e) { return e.code === 'ENOENT' ? zero : { ...zero, unreadable: e.code || 'not valid JSON' }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ...zero, unreadable: 'not a JSON object' };
+  return { ...zero, ...parsed };
 }
 
 /**
