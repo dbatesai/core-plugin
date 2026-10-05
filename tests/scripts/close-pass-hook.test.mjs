@@ -49,7 +49,7 @@ function runHook(payload, env = {}) {
     import { syncBuiltinESMExports } from 'node:module';
     cp.spawn = (command, args) => {
       writeFileSync(${JSON.stringify(spawned)}, JSON.stringify({ command, args }));
-      return { unref() {} };
+      return { unref() {}, once(ev, fn) { if (ev === 'spawn') queueMicrotask(fn); return this; } };
     };
     syncBuiltinESMExports();
   `);
@@ -96,7 +96,7 @@ test('registered positive control reaches the deterministic close spawn boundary
   const f = registeredFixture(t);
   const result = runHook(f.payload, f.env);
   assert.equal(result.code, 0);
-  assert.equal(result.spawned?.command, 'node');
+  assert.equal(result.spawned?.command, process.execPath, 'the runner is this Node binary by path, not a PATH lookup');
   assert.ok(result.spawned.args.includes('process-request'));
   assert.ok(result.spawned.args.includes('registered-session'));
   assert.ok(result.events.some(e => e.hook === 'session-end' && e.action === 'spawn'));
@@ -179,4 +179,37 @@ test('always exits 0 even on garbage stdin (fail-open)', () => {
   } catch (e) {
     assert.fail('hook must never throw on bad input: ' + e.message);
   }
+});
+
+// The receipt must tell a launch that started from one that did not. These go through the REAL
+// spawn and its events; only the child's arguments (or its path) are swapped so nothing writes
+// into a fixture that is about to be removed.
+function runRealSpawn(t, rewrite, extraEnv = {}) {
+  const f = registeredFixture(t);
+  const log = isolatedHooksLog();
+  const probe = join(dirname(log), 'real-spawn-probe.mjs');
+  writeFileSync(probe, `
+    import cp from 'node:child_process';
+    import { syncBuiltinESMExports } from 'node:module';
+    const real = cp.spawn;
+    cp.spawn = (command, args, opts) => { const [c, a] = (${rewrite})(command, args); return real(c, a, opts); };
+    syncBuiltinESMExports();
+  `);
+  execFileSync(process.execPath, ['--import', pathToFileURL(probe).href, HOOK], {
+    input: JSON.stringify(f.payload), encoding: 'utf8',
+    env: { ...process.env, CORE_CLOSE_PASS_ACTIVE: '0', CORE_AUTO_CLOSE: '1', CORE_HOOKS_LOG_FILE: log, ...f.env, ...extraEnv },
+  });
+  return readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.hook === 'session-end');
+}
+
+test('SessionEnd with no node on PATH still starts its close (its own binary, by path) and only then says spawn', t => {
+  const rows = runRealSpawn(t, `(command) => [command, ['-e', '']]`, { PATH: '' });
+  assert.equal(rows.at(-1).action, 'spawn');
+});
+
+test('SessionEnd whose close cannot be launched says spawn-failed with the reason, never spawn', t => {
+  // A missing executable fails asynchronously, after spawn() has returned.
+  const rows = runRealSpawn(t, `(command, args) => ['/nonexistent/core-test-binary', args]`);
+  assert.deepEqual([rows.at(-1).action, rows.at(-1).reason], ['spawn-failed', 'ENOENT']);
+  assert.ok(!rows.some((r) => r.action === 'spawn'), 'no row claims the close started');
 });

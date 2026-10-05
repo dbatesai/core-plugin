@@ -95,19 +95,28 @@ function main() {
 
   // Spawn the DETERMINISTIC close for THIS EXACT SESSION. Detached + unref() so it
   // survives our exit; auth-strip and output logging live inside the runner.
-  try {
-    const child = spawn('node', decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' });
-    child.unref();
-    logHookEvent({
-      hook: 'session-end', action: 'spawn',
-      reason: 'session-reason=' + (reason || 'unknown'),
-      cwd: store, session: decision.sessionId,
+  // A launch can fail after spawn() returns (the executable is missing, a resource limit): that
+  // arrives as an 'error' event, not a throw. The receipt says `spawn` only once the child has
+  // actually started, and `spawn-failed` with the reason otherwise. The runner is this same Node
+  // binary, by its own path, so a PATH without `node` cannot lose it. Never blocks the exit.
+  return new Promise((done) => {
+    const failed = (why) => { logHookEvent({ hook: 'session-end', action: 'spawn-failed', reason: String(why || 'error'), cwd: store, session: decision.sessionId }); done(0); };
+    let child;
+    try { child = spawn(process.execPath, decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' }); }
+    catch (e) { return failed(e?.code || e?.message); }
+    const timer = setTimeout(() => failed('no-spawn-confirmation'), 2000);
+    child.once('error', (e) => { clearTimeout(timer); failed(e?.code || e?.message); });
+    child.once('spawn', () => {
+      clearTimeout(timer);
+      child.unref();
+      logHookEvent({
+        hook: 'session-end', action: 'spawn',
+        reason: 'session-reason=' + (reason || 'unknown'),
+        cwd: store, session: decision.sessionId,
+      });
+      done(0);
     });
-  } catch {
-    // node/runner unavailable, or spawn failed — startup catch-up covers it. Never block exit.
-    logHookEvent({ hook: 'session-end', action: 'spawn-failed', cwd: store });
-  }
-  return 0;
+  });
 }
 
 /**
@@ -153,5 +162,5 @@ export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
 // Only run as the hook entry — importing this module (tests import decideCloseAction) must
 // NOT execute main() / process.exit().
 if (isCliEntry(import.meta.url)) {
-  try { process.exit(main() || 0); } catch { process.exit(0); }
+  Promise.resolve().then(main).then((code) => process.exit(code || 0), () => process.exit(0));
 }

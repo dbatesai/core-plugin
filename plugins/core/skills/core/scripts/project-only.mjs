@@ -53,14 +53,19 @@ export const ARCHIVE_DIR = '_archive';
 /**
  * True when `cwd` holds an active project-only folder for any harness: a real directory under
  * `.core/_project-only/` with a harness name. Disable-only: it never grants anything. What a normal
- * session has picked up sits under `_archive/`, which is history and suppresses nothing.
+ * session has picked up sits under `_archive/`, which is history and suppresses nothing. A marker
+ * folder that can't be read counts as active: the hint only restricts, so unknown restricts.
  */
 export function projectOnlyHint(cwd) {
   try {
     if (!cwd) return false;
     return readdirSync(join(String(cwd), '.core', PROJECT_ONLY_DIR), { withFileTypes: true })
       .some((e) => e.isDirectory() && HARNESS_RE.test(e.name));
-  } catch { return false; }
+  } catch (e) {
+    // Plainly absent is "no". A marker folder that exists but can't be read is unknown, and since the
+    // hint only ever restricts, unknown counts as present.
+    return !(e?.code === 'ENOENT' || e?.code === 'ENOTDIR');
+  }
 }
 
 /** The root for a project-only operation: an existing directory resolved physically, or a refusal. */

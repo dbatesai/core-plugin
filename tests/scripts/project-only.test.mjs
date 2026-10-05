@@ -968,3 +968,26 @@ test('graph-walk refuses a seed that is not inside the store it is walked agains
     }
   } finally { p.cleanup(); }
 });
+
+test('the project-only hint is "no" when the marker is plainly absent and "yes" when it exists but cannot be read; graph-walk then applies its whole-store link check', { skip: isWin || isRoot }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const { projectOnlyHint } = await import('../../plugins/core/skills/core/scripts/project-only.mjs');
+  const p = project({ withUnits: false });
+  try {
+    assert.equal(projectOnlyHint(p.root), false, 'no .core at all');
+    mkdirSync(join(p.root, '.core')); assert.equal(projectOnlyHint(p.root), false, '.core without the marker');
+    const marker = join(p.root, '.core', PROJECT_ONLY_DIR); mkdirSync(marker);
+    assert.equal(projectOnlyHint(p.root), false, 'an empty marker folder is not active');
+    const mem = join(p.root, '_memories'); mkdirSync(mem);
+    const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
+    writeFileSync(join(mem, 'dc-1-seed.md'), u('dc-1-seed', 'dc-2-neighbour')); writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
+    const out = join(p.base, 'outside-obs'); mkdirSync(out); symlinkSync(out, join(mem, 'observations'));
+    chmodSync(marker, 0o000);
+    try {
+      assert.equal(projectOnlyHint(p.root), true, 'unreadable marker: unknown, so it restricts');
+      const r = spawnSync(process.execPath, [join(CORE, 'scripts/graph-walk.mjs'), join(mem, 'dc-1-seed.md'), '--memories', mem], { encoding: 'utf8' });
+      assert.equal(r.status, 3);
+      assert.match(r.stderr, /in project-only mode nothing under the store may be one/);
+    } finally { chmodSync(marker, 0o755); }
+  } finally { p.cleanup(); }
+});
