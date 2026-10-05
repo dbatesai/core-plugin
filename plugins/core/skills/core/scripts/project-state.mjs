@@ -533,11 +533,19 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
       writeStamp({ root: real, harness, coreDir });
       note({ kind: 'state-created' });
       return { dir: target.dir, location: 'project', status: 'created', trusted: true };
-    case 'moved':
+    case 'moved': {
+      // A moved project's half-finished migration is fenced the same way, before any re-stamp or write.
+      const fence = !migrationDepth && projectMigrationFence({ root: real, harness });
+      if (fence) {
+        const reason = fence === 'migration-in-progress' ? 'migrating' : fence;
+        const held = local(reason);
+        return held && { ...held, status: reason };
+      }
       if (!forWrite) return { dir: target.dir, location: 'project', status: 'moved', trusted: true };
       writeStamp({ root: real, harness, coreDir });
       note({ kind: 'state-moved', oldPath: verdict.oldPath });
       return { dir: target.dir, location: 'project', status: 'moved', trusted: true, oldPath: verdict.oldPath };
+    }
     case 'planted':
     case 'copied': {
       if (!forWrite) return null;

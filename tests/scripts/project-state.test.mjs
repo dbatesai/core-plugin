@@ -346,3 +346,30 @@ test('the install secret is created once, mode 0600, and reused', { skip: isWin 
     assert.equal(dirname(join(s.coreDir, 'install-id')), s.coreDir);
   } finally { s.cleanup(); }
 });
+
+test('a moved project whose migration is unfinished is fenced: no re-stamp, no write, stamp bytes kept; a healthy moved project is re-stamped', async () => {
+  const { stateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  for (const fenced of [true, false]) {
+    const s = sandbox();
+    try {
+      const p = mk(s.base, 'Projects', 'P');
+      writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+      if (fenced) writeFileSync(join(p, '.core', 'claude-code', '.migrating'), '');
+      const moved = join(s.base, 'Projects', 'P-renamed');
+      renameSync(p, moved);
+      register(s.coreDir, [moved]);
+      const stamp = join(moved, '.core', 'claude-code', 'stamp');
+      const before = readFileSync(stamp, 'utf8');
+      assert.equal(classifyStamp({ root: moved, harness: 'claude-code', coreDir: s.coreDir }).status, 'moved');
+      if (fenced) {
+        assert.equal(stateDir({ root: moved, harness: 'claude-code', coreDir: s.coreDir })?.status ?? null, null, 'a read is held: nothing local to read');
+        assert.throws(() => stateDir({ root: moved, harness: 'claude-code', coreDir: s.coreDir, forWrite: true }), 'a write is refused');
+        assert.equal(readFileSync(stamp, 'utf8'), before, 'the stamp is not re-written');
+      } else {
+        const r = stateDir({ root: moved, harness: 'claude-code', coreDir: s.coreDir, forWrite: true });
+        assert.equal(r.status, 'moved');
+        assert.notEqual(readFileSync(stamp, 'utf8'), before, 'control: a healthy moved project is re-stamped');
+      }
+    } finally { s.cleanup(); }
+  }
+});
