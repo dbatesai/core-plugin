@@ -590,6 +590,13 @@
       "surface": "shipped"
     },
     {
+      "name": "restrictive-mode",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/restrictive-mode.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "retrieval-harness",
       "kind": "script",
       "harness": "shared",

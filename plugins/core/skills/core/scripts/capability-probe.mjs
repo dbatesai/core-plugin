@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolvePluginRoot, detectConsumingHarnessSignal } from './resolve-plugin-root.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { outsideObservationOff } from './restrictive-mode.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const DESCRIPTOR_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'schemas', 'harness-capability-descriptor.json');
@@ -101,6 +102,10 @@ async function invokeProbe(capability, opts = {}) {
   }
   // Sub-directory delegates — capability/*.mjs scripts (e.g. target-surface probes)
   if (capability.delegate && capability.delegate.startsWith('capability/')) {
+    // These observe things outside the project. In a restrictive mode they aren't run at all, and the
+    // row says unknown, so an action that needs one stays blocked.
+    const off = outsideObservationOff(opts.cwd || process.cwd());
+    if (off) return conformRow(makeUnknownRow(capability, `not observed: ${off} mode looks at nothing outside the project`), opts);
     const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
     const delegatePath = join(SCRIPTS_DIR, capability.delegate);
     // opts._importer is a test seam (defaults to dynamic import) so the crash

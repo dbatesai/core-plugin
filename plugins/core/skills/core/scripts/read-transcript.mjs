@@ -36,6 +36,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, r
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { mapProjectPathToSlug } from './project-slug.mjs';
+import { outsideObservationOff } from './restrictive-mode.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
@@ -61,6 +62,9 @@ export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
  * | 'unsupported-harness' | null.
  */
 export function resolveTranscript(harness, { cwd = process.cwd(), home = homedir(), override = null, sessionId = null, env = process.env } = {}) {
+  // Project-only mode reads no transcript, named or found; the caller reports it as unavailable.
+  const off = outsideObservationOff(cwd);
+  if (off) return { path: null, resolution: null, reason: off };
   // An override is the caller naming an exact file; that is explicit authority, not selection.
   if (override) {
     return existsSync(override)

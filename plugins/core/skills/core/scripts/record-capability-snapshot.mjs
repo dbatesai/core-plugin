@@ -11,12 +11,12 @@
  * accumulated history in /finalize and /process-memory.
  *
  * CLI: node record-capability-snapshot.mjs [--cwd <path>] [--harness <h>]
- *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]
+ *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>] [--from <probe json>]
  *
  * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
-import { statSync } from 'node:fs';
+import { statSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
@@ -65,7 +65,9 @@ export async function recordSnapshot(opts = {}) {
   const target = { root, harness: opts.stateHarness || harness || detectStateHarness(opts.env || process.env) };
   const sessionId = resolveSessionId(opts);
 
-  const startup = await runStartup({ harness, cwd });
+  // The startup probe already ran this session: its saved result is recorded, not a second probe.
+  const startup = opts.from ? JSON.parse(readFileSync(opts.from, 'utf8')) : await runStartup({ harness, cwd });
+  if (!Array.isArray(startup?.rows)) throw new Error(`no probe rows in ${opts.from}`);
   const rows = startup.rows || [];
 
   const appendOpts = {};
@@ -116,15 +118,16 @@ export async function recordSnapshot(opts = {}) {
 }
 
 export async function main(argv) {
-  let harness = null, cwd = null, sessionId = null, project = null;
+  let harness = null, cwd = null, sessionId = null, project = null, from = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--harness') harness = argv[++i];
     else if (argv[i] === '--cwd') cwd = argv[++i];
     else if (argv[i] === '--session-id') sessionId = argv[++i];
     else if (argv[i] === '--project') project = argv[++i];
+    else if (argv[i] === '--from') from = argv[++i];
   }
   try {
-    const r = await recordSnapshot({ harness, cwd, sessionId, project });
+    const r = await recordSnapshot({ harness, cwd, sessionId, project, from });
     console.log(JSON.stringify(r));
     return 0;
   } catch (e) {

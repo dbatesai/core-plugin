@@ -41,6 +41,7 @@ import { classifyRegistration, classifyStamp } from './project-state.mjs';
 import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-units.mjs';
 import { generate as generateHarnessMd } from './generate-harness-md.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { outsideObservationOff } from './restrictive-mode.mjs';
 
 // ── CORE_ROOT (the plugin root) ──────────────────────────────────────────────
 // This script lives at <CORE_ROOT>/skills/core/scripts/configure-project.mjs, so
@@ -132,6 +133,8 @@ export function detectIdentity(projectPath, coreDir, harness = 'claude-code') {
 // found N" — never assert absence as "no connectors". Whether a configured server
 // is reachable+authed this session is session-live (agent-reported), not here.
 export function readConfiguredMcp(projectPath, harness, home = homedir()) {
+  const off = outsideObservationOff(projectPath);
+  if (off) return { harness, source: null, checked: false, servers: null, note: `not read: ${off} mode looks at nothing outside the project` };
   if (harness === 'codex') {
     // Codex configures MCP in ~/.codex/config.toml (TOML). We don't bundle a TOML
     // parser (dependency-free by design), so we DON'T claim to have read the

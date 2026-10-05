@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { detectHarness } from './configure-project.mjs';
 import { mapMemoryProjectPathToSlug } from './project-slug.mjs';
+import { outsideObservationOff } from './restrictive-mode.mjs';
 
 export const DEFAULT_MEMORY_CAP_BYTES = 24576; // ~24KB harness injection budget
 export const BYTES_PER_UNIT = 400;             // rough MEMORY.md entry size for the lost-count estimate
@@ -55,6 +56,8 @@ export function resolveAutoMemorySurface({
   home = homedir(),
   env = process.env,
 } = {}) {
+  const off = outsideObservationOff(cwd);
+  if (off) return { harness: harness || null, path: null, skipped: true, reason: off };
   if (explicitPath) return { harness: harness || null, path: explicitPath, skipped: false };
   const h = harness || detectHarness(env);
   if (h === 'claude-code') {

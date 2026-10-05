@@ -463,7 +463,7 @@ Fail-open but never silent: don't add `2>/dev/null` — the probe's stderr and t
 Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/process-memory` and `/metrics`: Fail-open but not silent: if both the project state and the project `_metrics/` fallback fail, the script prints a one-line error to stderr — leave that visible rather than discarding it, so a dead snapshot path surfaces instead of failing invisibly for months.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --cwd <root> || true
+node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --cwd <root> --from <hot>/capability-state.json || true
 ```
 
 **Scaffold the metrics store (never fatal, failure VISIBLE).** Once the project root is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write. Captured turns live in the project's own `_metrics/` on every platform, synced folder or not; a folder an earlier version used outside the project is read-only history that the metrics notice and the purge name. Idempotent and never fatal — but a scaffold failure is never discarded.
