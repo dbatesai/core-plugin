@@ -71,9 +71,11 @@ Narrate the printed manifest (content class `aggregates-only`, byte count, produ
 
 1. **Scope from the user's words:** "this project"/unspecified → current project; "all my projects"/"everything" → `--all`. Ambiguous → current project, said in one line.
 2. ```bash
-   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" <project-dir | --all>
+   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" "<project-dir>"
+   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" --all --scratch-project "<exported-project-dir>"
    ```
-3. **Verify before claiming:** the script prints `package: <path>` — confirm the file exists, then relay the landing path, the coverage line, and every `flag[...]` line (the flags are the point, not noise). Exit codes: **0** complete; **1** partial — the package shipped but some sources were unavailable; name exactly which and what that costs, never round up to complete; **2** aborted — the fail-closed leakage scan hit or the run failed; NOTHING shipped; never retry with the boundary loosened, never hand-build a package. **The script is the only writer** — a hand-patched package voids the anonymization boundary. If the user asks to de-anonymize "just this once": decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't. Turn-capture evidence content NEVER enters the package by construction (canary-tested).
+   With `--all`, use the current exported project as the explicit scratch host; if it is not in the exported set, resolve the host before running. Do not silently select the first registry entry.
+3. **Verify before claiming:** the script prints `package: <path>` — confirm the file exists, then relay the landing path, the coverage line, and every `flag[...]` line (the flags are the point, not noise). Exit codes: **0** complete; **1** partial — the package shipped but some sources were unavailable; name exactly which and what that costs, never round up to complete; **2** failed — inspect the result: a leakage abort ships nothing, but cleanup failure can leave verified output and retained scratch. Name both when reported; a retained staging folder is recoverable material, not proof of delivery. Never retry with the boundary loosened or hand-build a package. **The script is the only writer** — a hand-patched package voids the anonymization boundary. If the user asks to de-anonymize "just this once": decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't. Turn-capture evidence content NEVER enters the package by construction (canary-tested).
 
 ## `self-test` mode — a deliberate blind round now (was `/self-test`)
 
