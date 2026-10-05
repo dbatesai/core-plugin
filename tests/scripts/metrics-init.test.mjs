@@ -19,7 +19,7 @@ import {
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
-process.env.CORE_HARNESS ||= 'claude-code';
+process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
 
 // HOME is redirected per test; restore it afterwards.
 function withCleanEnv(fn) {

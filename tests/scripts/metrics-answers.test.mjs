@@ -14,7 +14,7 @@ import { gatherAnswers, renderAnswerView } from '../../plugins/core/skills/core/
 import { appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
-process.env.CORE_HARNESS ||= 'claude-code';
+process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
 
 // Opt-outs live in the project's trusted per-harness manifest. The manifest for an
 // unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
