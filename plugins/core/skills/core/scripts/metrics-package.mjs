@@ -1668,7 +1668,7 @@ if (isCliEntry(import.meta.url)) {
     process.stdout.write(`package: ${result.shipped.path}\n`);
     if (result.shipped.kind === 'folder') process.stdout.write(`note: zip unavailable (${result.shipped.reason}) — staged folder shipped instead\n`);
   }
-  for (const h of result.history_not_saved || []) process.stderr.write(`warning: the package was delivered, but its baseline was not saved for ${h.project} (${h.reason}); the next package for it has no comparison\n`);
+  for (const h of result.history_not_saved || []) process.stderr.write(`warning: the package was delivered, but this package's baseline was not saved for ${h.project} (${h.reason}); the next comparison will use an older baseline if one exists\n`);
   if (result.coverage) {
     const covered = result.coverage.filter(c => c.available).length;
     process.stdout.write(`coverage: ${covered}/${result.coverage.length} project(s)\n`);

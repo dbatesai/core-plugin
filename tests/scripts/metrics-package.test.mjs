@@ -331,7 +331,7 @@ test('the shipped report names why deltas are unavailable, and refused projects 
     assert.notEqual(refused[0].project, refused[1].project, 'two refused projects named repo keep distinct ids');
     const dir = readShippedPackage(r.shipped, join(root, 'unpacked'));
     assert.match(readFileSync(join(dir, 'manifest.json'), 'utf8'), /package-key-malformed/, 'the exact reason ships');
-    const report = readFileSync(join(dir, 'report.md'), 'utf8');
+    const report = readFileSync(join(dir, 'REPORT.md'), 'utf8');
     assert.match(report, /unavailable — history damaged/);
     assert.doesNotMatch(report, /first package/, 'a damaged history is never called a first package');
   } finally { rmSync(root, { recursive: true, force: true }); }

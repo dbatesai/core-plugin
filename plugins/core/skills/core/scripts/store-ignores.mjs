@@ -8,7 +8,7 @@
  * names are returned as a problem, so the gap is reported rather than hidden.
  * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md, curated gold sets) is never matched.
  */
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -71,6 +71,7 @@ export function ensureLibDir(projectRoot) {
   }
   const repo = ownRepository(projectRoot);
   if (repo === 'unknown') refuse('cache-tracking-unknown', 'the project\'s .git could not be examined');
+  // A .git that is a link or a pointer file keeps its repository outside the project: not consulted (stated limit).
   if (repo === 'yes') {
     const r = spawnSync('git', ['-C', projectRoot, 'ls-files', '-z', '--', '_memories/_lib/'], { encoding: 'utf8', timeout: 3000, env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: dirname(projectRoot) } });
     if (r.status !== 0) refuse('cache-tracking-unknown', 'git could not say whether it is tracked');
@@ -79,10 +80,19 @@ export function ensureLibDir(projectRoot) {
   return lib;
 }
 
-/** 'yes' when the project has its own repository at its root, 'no' when it plainly doesn't, else 'unknown'. */
+/**
+ * 'yes' when the project's repository is a real `.git` folder at its root; 'no' when there is none;
+ * 'elsewhere' when `.git` is a link or a pointer file (a worktree or submodule), whose repository lives
+ * outside the project and is not consulted; 'unknown' when `.git` can't be examined.
+ */
 function ownRepository(root) {
-  try { lstatSync(join(root, '.git')); return 'yes'; } catch (e) { return e.code === 'ENOENT' ? 'no' : 'unknown'; }
+  let st;
+  try { st = lstatSync(join(root, '.git')); } catch (e) { return e.code === 'ENOENT' ? 'no' : 'unknown'; }
+  return st.isDirectory() && !st.isSymbolicLink() ? 'yes' : 'elsewhere';
 }
+
+// A rule as a name test, so the CORE files actually present are checked too.
+const ruleRe = (rule) => new RegExp('^' + rule.replace(/\/$/, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
 
 /**
  * The rules whose files git would still show, asked of the project's own repository only (git is kept
@@ -92,7 +102,7 @@ function ownRepository(root) {
  */
 function visibleToGit(root, rel, dir, rules) {
   const repo = ownRepository(root);
-  if (repo === 'no') return [];
+  if (repo === 'no' || repo === 'elsewhere') return [];
   if (repo === 'unknown') return ['(could not check: the project\'s .git could not be examined)'];
   try {
     const st = lstatSync(join(dir, '.gitignore'));
@@ -101,13 +111,23 @@ function visibleToGit(root, rel, dir, rules) {
     if (readFileSync(join(dir, '.gitignore'), 'utf8') === HEADER + rules.join('\n') + '\n') return [];
   } catch (e) { return [`(could not check: ${e.code})`]; }
   const samples = rules.flatMap((rule) => (SAMPLES[rule] || [rule]).map((n) => [rule, `${rel}/${n}`]));
+  // The CORE files already here, whatever their generation or round number.
+  let present = [];
+  try { present = readdirSync(dir); } catch { /* the samples still run */ }
+  for (const name of present) for (const rule of rules) if (ruleRe(rule).test(name)) samples.push([rule, `${rel}/${name}${rule.endsWith('/') ? '/x' : ''}`]);
+  // An exception in the user's file can name a later generation or round than any here; that can't be
+  // checked ahead of time, so it is said rather than counted as covered.
+  let reincludes = false;
+  try { reincludes = readFileSync(join(dir, '.gitignore'), 'utf8').split(/\r?\n/).some((l) => l.trim().startsWith('!')); } catch { /* reported above */ }
   const r = spawnSync('git', ['-C', root, 'check-ignore', '--no-index', '-z', '--stdin'], {
     input: samples.map(([, p]) => p).join('\0') + '\0', encoding: 'utf8', timeout: 3000,
     env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: dirname(root) },
   });
   if (r.status !== 0 && r.status !== 1) return [`(could not check: git ${r.status ?? r.error?.code ?? 'failed'})`];
   const ignored = new Set(r.stdout.split('\0').filter(Boolean));
-  return [...new Set(samples.filter(([, p]) => !ignored.has(p)).map(([rule]) => rule))];
+  const visible = [...new Set(samples.filter(([, p]) => !ignored.has(p)).map(([rule]) => rule))];
+  if (reincludes && rules.some((rule) => rule.includes('*'))) visible.push('(it re-includes names, so later lock generations or rounds may be visible too)');
+  return visible;
 }
 
 /** Problems found, as short strings; empty when every rule file is in place. Never throws. */
@@ -126,8 +146,10 @@ export function ensureStoreIgnores(projectRoot) {
       writeFileSync(join(dir, '.gitignore'), HEADER + rules.join('\n') + '\n', { flag: 'wx' });
     } catch (e) {
       if (e.code !== 'EEXIST') { problems.push(`${rel}/.gitignore: ${e.code || e.message}`); continue; }
-      const visible = visibleToGit(projectRoot, rel, dir, rules);
+      const found = visibleToGit(projectRoot, rel, dir, rules);
+      const visible = found.filter((f) => !f.startsWith('(')), notes = found.filter((f) => f.startsWith('('));
       if (visible.length) problems.push(`${rel}/.gitignore is not CORE's and leaves ${visible.join(', ')} visible to git`);
+      for (const note of notes) problems.push(`${rel}/.gitignore ${note.slice(1, -1)}`);
     }
   }
   return problems;

@@ -314,3 +314,44 @@ test('a .git that cannot be examined is unknown: the cache folder is refused and
     assert.throws(() => ensureLibDir(root), (e) => e.code === 'cache-tracking-unknown');
   } finally { fs.lstatSync = orig; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a later lock generation or round re-included by the user is seen: present files are checked, and re-includes are named as unchecked', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const root = project();
+  try {
+    const all = '_close.lock*\n._close.lock*\n.*.lock*\n.*.tmp-*\n_close-marker.json\n_maintenance-state.json\n_pm-state.json\n_capability-drift-log.md\n';
+    writeFileSync(join(root, '_memories', '.gitignore'), all + '!_close.lock.g2.done\n');
+    let problems = ensureStoreIgnores(root).join();
+    assert.match(problems, /re-includes names, so later lock generations/, 'an exception is named as something that cannot be fully checked');
+    writeFileSync(join(root, '_memories', '_close.lock.g2.done'), '{}');
+    assert.match(ensureStoreIgnores(root).join(), /leaves _close\.lock\* visible/, 'the generation actually present is checked');
+    // rounds
+    mkdirSync(join(root, '_tests', 'self-test', 'round-2'), { recursive: true });
+    writeFileSync(join(root, '_tests', 'self-test', '.gitignore'), 'round-*/\nauto-author-state.json\n!round-2/\n');
+    assert.match(ensureStoreIgnores(root).join(), /_tests\/self-test\/\.gitignore is not CORE's and leaves round-\*\/ visible/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a .git that is a link or a pointer file keeps its repository outside: git is not run and the cache folder is not refused', { skip: isWin }, async () => {
+  const { symlinkSync, chmodSync } = await import('node:fs');
+  const { ensureLibDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  for (const shape of ['link', 'pointer file']) {
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'core-outside-repo-')));
+    execFileSync('git', ['-C', outside, 'init', '-q'], { env });
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
+    mkdirSync(join(root, '_memories'));
+    writeFileSync(join(root, '_memories', '.gitignore'), '# mine\n');
+    if (shape === 'link') symlinkSync(join(outside, '.git'), join(root, '.git'));
+    else writeFileSync(join(root, '.git'), `gitdir: ${join(outside, '.git')}\n`);
+    const bin = join(root, '..', `bin-${Date.now()}`); mkdirSync(bin);
+    const marker = join(bin, 'git-was-run');
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`); chmodSync(join(bin, 'git'), 0o755);
+    const path = process.env.PATH;
+    try {
+      process.env.PATH = `${bin}:${path}`;
+      assert.deepEqual(ensureStoreIgnores(root), [], shape);
+      assert.ok(ensureLibDir(root), `${shape}: the cache folder is made`);
+      assert.equal(existsSync(marker), false, `${shape}: git was never run against the outside repository`);
+    } finally { process.env.PATH = path; rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
+  }
+});
