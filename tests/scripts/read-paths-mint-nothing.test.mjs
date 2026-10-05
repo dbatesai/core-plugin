@@ -53,3 +53,21 @@ test('classifying, reading signed files and checking for adoption mint nothing o
     assert.ok(existsSync(join(s.coreB, 'install-secret')) && existsSync(join(s.coreB, 'install-id')));
   } finally { s.cleanup(); }
 });
+
+test('the metrics gate answers OFF, never throws, when the project list is unreadable or malformed; a readable empty list keeps the default', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { chmodSync } = await import('node:fs');
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'gate-')));
+  try {
+    const home = join(base, 'home'); const proj = join(base, 'proj');
+    mkdirSync(join(home, '.core'), { recursive: true }); mkdirSync(proj);
+    const list = join(home, '.core', 'projects.json');
+    writeFileSync(list, '{"projects":[]}');
+    assert.equal(metricsEnabled({ project: proj, home, env: {} }), true, 'control: readable list, default ON');
+    chmodSync(list, 0o000);
+    try { assert.equal(metricsEnabled({ project: proj, home, env: {} }), false); assert.equal(metricsEnabled({ project: proj, home, env: { CORE_METRICS_ENABLED: '1' } }), true, "the user's explicit environment opt-in is their own word and still wins"); }
+    finally { chmodSync(list, 0o644); }
+    writeFileSync(list, '{not json');
+    assert.equal(metricsEnabled({ project: proj, home, env: {} }), false);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});

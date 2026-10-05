@@ -249,10 +249,18 @@ export function trustedMetricsDir(projectDir, { home = homedir(), env = process.
  *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
  *      source can only ever switch capture off, never on.
  *   7. default → ON.
+ * A failure while reading the project list or manifest (steps 2–6) → OFF.
  */
 export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
+  // Everything below reads the project list and the project's manifest. When one of those reads
+  // fails (an unreadable or malformed project list), whether this project opted out is unknown,
+  // and unknown is OFF: capture never proceeds on a guess.
+  try { return metricsEnabledFromState({ project, env, home, flag }); } catch { return false; }
+}
+
+function metricsEnabledFromState({ project, env, home, flag }) {
   if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
