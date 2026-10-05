@@ -93,6 +93,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureScratchFor } from './project-artifacts.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
@@ -1481,18 +1482,19 @@ export async function renderBrowseArtifact(projectDir, {
   const memoriesRoot = join(root, '_memories');
   // Canonical containment, and the destination is claimed before the store is
   // read: a linked --out is rejected on its real target, not its spelling.
+  ensureScratchFor(root, outPath, metricsCachePath);
   const outAbs = resolveArtifactDestination(outPath, { forbiddenRoot: memoriesRoot });
   if (scope !== 'active' && scope !== 'all-including-archive') {
     throw Object.assign(new Error(`unknown --scope '${scope}' (valid: active, all-including-archive)`), { code: 'BAD_SCOPE' });
   }
   let metricsCacheAbs = null;
   if (metricsCachePath) {
-    metricsCacheAbs = resolve(metricsCachePath);
-    // Same read-only-store discipline as --out: the cache is operational
-    // state, never store content.
-    if (metricsCacheAbs === memoriesRoot || metricsCacheAbs.startsWith(memoriesRoot + sep)) {
-      throw Object.assign(new Error(
-        '--metrics-cache must not resolve inside _memories/ — the store is read-only to this generator'), { code: 'CACHE_IN_STORE' });
+    // Same read-only-store discipline as --out, judged on the real target: the cache is
+    // operational state, never store content, and a link into _memories/ is refused.
+    try { metricsCacheAbs = resolveArtifactDestination(metricsCachePath, { forbiddenRoot: memoriesRoot }); }
+    catch (e) {
+      throw Object.assign(new Error(e.message.replace('--out', '--metrics-cache')),
+        { code: e.code === 'OUT_IN_STORE' ? 'CACHE_IN_STORE' : e.code });
     }
   }
 

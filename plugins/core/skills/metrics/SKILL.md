@@ -1,6 +1,6 @@
 ---
 name: metrics
-description: Report CORE memory health with trust-labeled evidence for storage, retrieval, and blind self-tests. Default answers come from pinned scorecards; "/metrics full" gives the instrument readout and live round-trip proof on a throwaway store; "/metrics export" writes an anonymized metrics zip to the Desktop; "/metrics self-test" authors, verifies, and runs a blind test round. Use whenever the user runs /metrics (any mode), asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", "test the memory on this project", "run a blind retrieval self-test", "export a metrics package", "make an anonymized report I can share", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or full hygiene passes (/process-memory).
+description: Report CORE memory health with trust-labeled evidence for storage, retrieval, and blind self-tests. Default answers come from pinned scorecards; "/metrics full" gives the instrument readout and live round-trip proof on a throwaway store; "/metrics export" writes an anonymized metrics zip to the project's _outputs/metrics-package/; "/metrics self-test" authors, verifies, and runs a blind test round. Use whenever the user runs /metrics (any mode), asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", "test the memory on this project", "run a blind retrieval self-test", "export a metrics package", "make an anonymized report I can share", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or full hygiene passes (/process-memory).
 user-invocable: true
 allowed-tools:
   - Read
@@ -62,7 +62,7 @@ The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEA
 **Artifact display (harnesses with an artifact surface):** the full report displays artifact-first — a self-contained plain-language HTML page from the SAME canonical object:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <scratch-path>/core-metrics.html
+node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <project-dir>/_core/_scratch/core-metrics.html
 ```
 
 Narrate the printed manifest (content class `aggregates-only`, byte count, producer identity), publish **private** via the Artifact tool, keep a stable URL by republishing the same path, and record the outcome with `--record-publish` (the script refuses `published-private` without evidence + authorization fields). Consent: ask-first by default; narrate-and-proceed only under this user's own durably-recorded standing authorization. On Codex (no artifact surface on that harness): say so by name, give the `--out` path, never fake a publish.

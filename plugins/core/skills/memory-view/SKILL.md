@@ -24,10 +24,10 @@ Resolve scope from the user's words: default is **active units only** (condition
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" <project-dir> \
-  --out <scratch-path>/core-memory-browse.html [--scope ...] [--exclude-topic ...]
+  --out <project-dir>/_core/_scratch/core-memory-browse.html [--scope ...] [--exclude-topic ...]
 ```
 
-`--out` goes to a scratch/temp location — **never inside the project, never inside `_memories/`** (the script refuses the latter itself). The store is read-only to this whole flow, unconditionally — generation never writes a byte under `_memories/`, not even the derived `_lib/` index cache on a cold store. One invariant, no mode, no flag. Passing `--metrics-cache` together with `--no-metrics` is refused loudly (exit 2) — the two flags contradict, and the script no longer picks a silent winner. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2. The snapshot id covers exactly the scoped population the page embeds: an `all-including-archive` render's id also covers the archive bytes it shows; an active render's id is the plain store snapshot id.
+`--out` goes to the project's own scratch folder, `_core/_scratch/` (the script makes it, git-ignored, when the path names it) — **never inside `_memories/`**: the script refuses that on the real target, links included, and the same for `--metrics-cache`. The store is read-only to this whole flow, unconditionally — generation never writes a byte under `_memories/`, not even the derived `_lib/` index cache on a cold store. One invariant, no mode, no flag. Passing `--metrics-cache` together with `--no-metrics` is refused loudly (exit 2) — the two flags contradict, and the script no longer picks a silent winner. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2. The snapshot id covers exactly the scoped population the page embeds: an `all-including-archive` render's id also covers the archive bytes it shows; an active render's id is the plain store snapshot id.
 
 ## Step 2 — the manifest, and consent per the user's mode (EVERY publish)
 

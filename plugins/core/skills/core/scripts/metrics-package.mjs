@@ -29,7 +29,7 @@
  * CLI: node metrics-package.mjs <project-dir> [--all] [--out <dir>] [--json] [--home <dir>]
  *   --all   package every workspace registered in ~/.core/index.json whose path
  *           exists and contains _memories/
- *   --out   destination dir (default: the platform Desktop, else home)
+ *   --out   destination dir (default: <project>/_outputs/metrics-package/ of the --scratch-project)
  *   --scratch-project  project hosting local scratch (required with --all)
  *   --home  test seam: treat <dir> as the user home (tests must never touch ~)
  * Exit: 0 complete · 1 partial (sources or projects unavailable, package produced)
@@ -1406,11 +1406,6 @@ export function zipStaging(stagingDir, destZip) {
   return verifyZipMagic(destZip);
 }
 
-function desktopDir(home) {
-  const d = join(home, 'Desktop');
-  return existsSync(d) ? d : home;
-}
-
 // ---------- main ----------
 
 export function runPackage(argv, { homeOverride } = {}) {
@@ -1593,7 +1588,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     // ship
     // Once leakage checks pass, retain recoverable staging until delivery is verified.
     retainStaging = true;
-    const outDir = flagsIn.out ? resolve(flagsIn.out) : desktopDir(home);
+    const outDir = flagsIn.out ? resolve(flagsIn.out) : join(scratchProject, '_outputs', 'metrics-package');
     mkdirSync(outDir, { recursive: true });
     const stamp = generatedAt.replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
     let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
@@ -1655,7 +1650,6 @@ export function runPackage(argv, { homeOverride } = {}) {
     return Object.assign(result, {
       exit: result.scratch_cleanup ? 2 : (partial || result.history_not_saved) ? 1 : 0,
       ...(result.scratch_cleanup ? { error: 'metrics package scratch cleanup failed' } : {}),
-      desktop_fallback: !flagsIn.out && !existsSync(join(home, 'Desktop')),
     });
   } catch (e) {
     return Object.assign(result, { exit: 2, error: 'metrics package failed', error_code: e.code || 'package-error' });

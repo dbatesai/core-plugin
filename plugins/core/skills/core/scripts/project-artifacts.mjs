@@ -60,3 +60,10 @@ function ensureGeneratedDir(projectRoot, segments, create = true) {
   if (rules.at(-1) !== '*') refuse();
   return dir;
 }
+
+/** When a generated page or cache is named into the project's own scratch folder, make that folder
+ * (ignore file first) before anything is resolved or written there. */
+export function ensureScratchFor(projectRoot, ...paths) {
+  const scratch = join(resolve(projectRoot), STATE_DIRNAME, '_scratch');
+  if (paths.some((p) => p && dirname(resolve(p)) === scratch)) ensureProjectArtifactDir(projectRoot, '_scratch');
+}

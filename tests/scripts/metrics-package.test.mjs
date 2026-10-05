@@ -2,7 +2,7 @@ import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, chmodSync, realpathSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -742,5 +742,17 @@ test('project with no self-test round: package still ships, self-test.json is ho
     const headline = JSON.parse(readFileSync(join(projectDir, 'headline.json'), 'utf8'));
     assert.equal(headline.self_test_latest_headline, undefined);
     assert.ok(!headline.flags.some(f => f.code === 'self-test-trap-leak'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("with no --out the package lands in the project's _outputs/metrics-package/, never the Desktop", () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-test-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: true });
+    const result = runPackage([project, '--home', home]);
+    assert.ok(!result.error, `no fatal error: ${result.error}`);
+    assert.equal(dirname(result.shipped.path), join(realpathSync(project), '_outputs', 'metrics-package'));
+    assert.deepEqual(readdirSync(join(home, 'Desktop')), []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

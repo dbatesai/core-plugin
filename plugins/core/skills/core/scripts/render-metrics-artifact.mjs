@@ -63,6 +63,7 @@ import { gatherMetrics, parseRecognitionSignal } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureScratchFor } from './project-artifacts.mjs';
 import {
   generationReceiptLocation, runRecordCli, artifactContentDigest,
   publishArtifactWithReceipt, resolveArtifactDestination,
@@ -691,6 +692,7 @@ export async function renderMetricsArtifact(projectDir, {
   const root = resolve(projectDir);
   if (!outPath) throw Object.assign(new Error('--out <path> is required — there is no default output location'), { code: 'OUT_REQUIRED' });
   const memoriesRoot = join(root, '_memories');
+  ensureScratchFor(root, outPath);
   // Canonical containment: a linked --out is rejected on its real target, not
   // on its spelling.
   const outAbs = resolveArtifactDestination(outPath, { forbiddenRoot: memoriesRoot });

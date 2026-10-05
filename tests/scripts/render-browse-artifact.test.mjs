@@ -1116,3 +1116,27 @@ rtest('CLI: --metrics-cache with a pre-seeded cache embeds it, reports metrics_s
     assert.match(html, /Metrics as of 2026-07-29T00:00:00\.000Z/, 'labeled with the cache stamp');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a --metrics-cache path that links into _memories/ is refused on its real target; nothing is written to the store', { skip: process.platform === 'win32' }, async () => {
+  const { root, mem, home } = fixtureProject();
+  try {
+    const before = readdirSync(mem).sort();
+    symlinkSync(mem, join(root, 'cache-alias'));
+    await assert.rejects(
+      () => renderBrowseArtifact(root, {
+        outPath: join(root, 'out', 'view.html'), home, metricsProvider: stubMetrics,
+        metricsCachePath: join(root, 'cache-alias', 'derived-cache.json'),
+      }),
+      (e) => e.code === 'CACHE_IN_STORE');
+    assert.deepEqual(readdirSync(mem).sort(), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest("--out in the project's _core/_scratch/ makes that folder with its ignore file first", async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const r = await renderBrowseArtifact(root, { outPath: join(root, '_core', '_scratch', 'view.html'), home, metricsProvider: null });
+    assert.ok(existsSync(join(root, '_core', '_scratch', 'view.html')), JSON.stringify(Object.keys(r)));
+    assert.equal(readFileSync(join(root, '_core', '_scratch', '.gitignore'), 'utf8'), '*\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
