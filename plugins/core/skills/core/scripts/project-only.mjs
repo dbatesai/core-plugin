@@ -13,6 +13,12 @@
  * state. Everything in it is unsigned and says so; installed mode treats it as pending data
  * that the user may merge, never as trusted or completed work.
  *
+ * What the folder-only checks defend against: links that arrive with the folder, and links swapped
+ * in between separate calls. They don't defend against a process running as the same user that
+ * renames project folders during a call, between a check and the file operation it guards: Node has
+ * no check-and-act that is atomic with a directory, and such a process already has the user's own
+ * write access to the project and to wherever it would redirect CORE.
+ *
  * The folder's existence is also a disable-only hint for the automatic hooks: where it is
  * present they exit before any registry lookup or log write. The hint can only switch
  * automation off; it grants nothing.
