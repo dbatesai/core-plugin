@@ -1349,8 +1349,8 @@ test('a registered workspace name that is a link is never read through while the
 // The fast repeat check must not open a file under a legacy name that has since become a link.
 test('a repeat run after a covered legacy workspace, or the legacy store, became a link opens nothing under it and does not take the fast path', { skip: isWin }, async () => {
   const { spawnSync } = await import('node:child_process');
-  const { pathToFileURL } = await import('node:url');
-  const mod = pathToFileURL(join(dirname(new URL(import.meta.url).pathname), '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs')).href;
+  const { pathToFileURL, fileURLToPath } = await import('node:url');
+  const mod = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs')).href;
   for (const which of ['workspace', 'parent']) {
     const { s, p, table } = migrationFixture();
     try {
