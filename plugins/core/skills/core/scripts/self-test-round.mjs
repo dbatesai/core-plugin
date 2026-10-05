@@ -47,7 +47,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { loadSnapshot } from './generate-summary-index.mjs';
@@ -55,7 +55,7 @@ import { runHarness, validateGold } from './retrieval-harness.mjs';
 import { logEvent } from './log-event.mjs';
 import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality.mjs';
 import { producerIdentity } from './producer-identity.mjs';
-import { ensureStoreIgnores } from './store-ignores.mjs';
+import { ensureStoreIgnores, folderChain } from './store-ignores.mjs';
 
 // A round directory holds the answer key, the frozen question set, and the
 // corpus snapshot they were registered against — owner-only, best-effort
@@ -66,6 +66,9 @@ function harden(path, mode) {
   try { chmodSync(path, mode); } catch { /* mode is advisory here */ }
 }
 function makeRoundDir(dir, project) {
+  // Nothing is created through a linked _tests or self-test folder.
+  const chain = folderChain(resolve(project), relative(resolve(project), dir).split(sep).join('/'));
+  if (chain !== 'real' && chain !== 'absent') throw Object.assign(new Error(`self-test folder refused: ${chain}`), { code: 'SELF_TEST_UNSAFE' });
   mkdirSync(dir, { recursive: true, mode: ROUND_DIR_MODE });
   harden(dir, ROUND_DIR_MODE);
   ensureStoreIgnores(resolve(project));

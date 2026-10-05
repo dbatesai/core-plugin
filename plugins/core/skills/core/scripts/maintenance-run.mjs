@@ -66,7 +66,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   const root = resolve(projectPath);
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
-  if (apply) ensureStoreIgnores(root);
+  const ignoreProblems = apply ? ensureStoreIgnores(root) : [];
 
   let ledger = {};
   if (existsSync(ledgerPath)) {
@@ -75,6 +75,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
 
   const ranOps = [];
   const notes = [];
+  for (const problem of ignoreProblems) notes.push(`git ignore: ${problem}`);
   let attribution = null;
 
   // 1. Ghost duplicates — always (cheap). Reported, never removed.

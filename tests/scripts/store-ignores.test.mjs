@@ -64,10 +64,10 @@ test("a store's existing .gitignore is left byte-identical, and a second call ch
     const mine = '# mine\n!keep-this.json\n';
     writeFileSync(join(root, '_memories', '.gitignore'), mine);
     mkdirSync(join(root, '_memories', '_lib'));
-    assert.deepEqual(ensureStoreIgnores(root), []);
+    assert.match(ensureStoreIgnores(root).join(), /_memories\/\.gitignore is not CORE's and leaves .*_close\.lock\*.*visible to git/);
     assert.equal(readFileSync(join(root, '_memories', '.gitignore'), 'utf8'), mine);
     const lib = readFileSync(join(root, '_memories', '_lib', '.gitignore'), 'utf8');
-    assert.deepEqual(ensureStoreIgnores(root), []);
+    ensureStoreIgnores(root);
     assert.equal(readFileSync(join(root, '_memories', '_lib', '.gitignore'), 'utf8'), lib);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -129,4 +129,36 @@ test('a linked parent never leads the rules outside the project: _memories or _t
       assert.deepEqual(readdirSync(join(outside, child)), [], `${parent}/${child}: nothing written there either`);
     } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
   }
+});
+
+test("an existing ignore file that leaves CORE's working files visible is reported, kept byte-identical, and named in the maintenance notes; one the repository's rules cover is not reported", { skip: isWin }, async () => {
+  const { runMaintenance } = await import('../../plugins/core/skills/core/scripts/maintenance-run.mjs');
+  const root = project();
+  try {
+    const mine = '# user-owned rules only\n';
+    writeFileSync(join(root, '_memories', '.gitignore'), mine);
+    const problems = ensureStoreIgnores(root);
+    for (const rule of ['_close.lock*', '_close-marker.json', '_maintenance-state.json']) assert.ok(problems.join().includes(rule), rule);   // ._* may already be hidden by a global excludes file
+    assert.equal(acquireLock(root, { sessionId: 's1' }).ok, true); releaseLock(root, { sessionId: 's1' });
+    assert.equal(readFileSync(join(root, '_memories', '.gitignore'), 'utf8'), mine, 'the user file is untouched');
+    assert.match(git(root, 'status', '--porcelain', '--untracked-files=all'), /_close\.lock\.g1\.done/, 'the stated limit: the lock is visible to git');
+    const { notes } = runMaintenance(root, { apply: true, metrics: false });
+    assert.ok(notes.some((n) => /^git ignore: _memories\/\.gitignore is not CORE's/.test(n)), notes.join(' | '));
+    // the repository's own rules cover them: nothing to report
+    writeFileSync(join(root, '.gitignore'), '_memories/_close*\n_memories/.*.lock*\n_memories/_*.json\n_memories/_capability-drift-log.md\n');
+    assert.deepEqual(ensureStoreIgnores(root), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the self-test writers create nothing through a linked _tests folder', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const { newRound, markAutoAuthorTriggered } = await import('../../plugins/core/skills/core/scripts/self-test-round.mjs');
+  const root = project();
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-outside-')));
+  try {
+    symlinkSync(outside, join(root, '_tests'));
+    assert.equal(markAutoAuthorTriggered(root), false);
+    assert.throws(() => newRound(root), (e) => e.code === 'SELF_TEST_UNSAFE');
+    assert.deepEqual(readdirSync(outside), [], 'nothing written where the link leads');
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
 });
