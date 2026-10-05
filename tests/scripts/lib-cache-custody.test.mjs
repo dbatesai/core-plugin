@@ -99,3 +99,40 @@ test('a lock file that is a FIFO, a link or a second hard link is refused before
     } finally { f.cleanup(); }
   }
 });
+
+test('a held lock generation replaced by a FIFO or a link before release: release fails by name without reading it, and the operation result or error is kept', { skip: isWin }, () => {
+  const f = fixture();
+  try {
+    const lock = join(f.lib, '.probe.lock');
+    inChild(f.root, `const fl = await import(${JSON.stringify(scripts + 'file-lock.mjs')});
+      const { execFileSync } = await import('node:child_process');
+      const fs = await import('node:fs');
+      const lock = ${JSON.stringify(lock)}, foreign = ${JSON.stringify(f.foreign)};
+      const replace = (shape) => { const g = fl.currentLockFile(lock); fs.rmSync(g); if (shape === 'fifo') execFileSync('mkfifo', [g]); else fs.symlinkSync(foreign, g); return g; };
+      // healthy control
+      let got = fl.acquireFileLock(lock);
+      assert.equal(got.ok, true);
+      assert.equal(fl.releaseFileLock(lock, got.nonce).released, true);
+      for (const shape of ['fifo', 'link']) {
+        got = fl.acquireFileLock(lock);
+        assert.equal(got.ok, true, shape);
+        const g = replace(shape);
+        const rel = fl.releaseFileLock(lock, got.nonce);
+        assert.equal(rel.released, false, shape);
+        assert.equal(rel.reason, 'unsafe-lock-file', shape);
+        assert.ok(fs.lstatSync(g), shape + ': the planted file is left in place');
+        assert.equal(fl.releaseFileLock(lock, null, { force: true }).released, true, 'operator force release clears it');
+      }
+      // the operation's result survives a failed release
+      got = fl.acquireFileLock(lock);
+      assert.throws(() => fl.withAcquiredFileLock(lock, got.nonce, () => { replace('fifo'); return 'material'; }),
+        (err) => err.code === 'LOCK_RELEASE_FAILED' && err.operationResult === 'material' && err.releaseResult.reason === 'unsafe-lock-file');
+      fl.releaseFileLock(lock, null, { force: true });
+      // and so does the operation's own error
+      got = fl.acquireFileLock(lock);
+      assert.throws(() => fl.withAcquiredFileLock(lock, got.nonce, () => { replace('link'); throw new Error('boom'); }),
+        (err) => err.message === 'boom' && err.lockReleaseFailure.reason === 'unsafe-lock-file');
+      fl.releaseFileLock(lock, null, { force: true });`);
+    assert.equal(readFileSync(f.foreign, 'utf8'), FOREIGN);
+  } finally { f.cleanup(); }
+});

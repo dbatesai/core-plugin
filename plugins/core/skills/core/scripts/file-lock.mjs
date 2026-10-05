@@ -375,6 +375,12 @@ export function releaseFileLock(lockPath, nonce, { verify = null, force = false 
     return { released: true };
   }
   if (!gens.some(g => !g.done)) return { released: false, reason: 'absent' };
+  // A generation replaced by a pipe or a link is never read (a pipe would block): the release
+  // fails by name and the artifact is left for the operator.
+  let unsafe;
+  try { unsafe = foreignLockArtifact(lockPath); }
+  catch (e) { return { released: false, reason: 'release-failed', error: `lock folder could not be checked (${e.code || e})` }; }
+  if (unsafe) return { released: false, reason: 'unsafe-lock-file', error: `${unsafe} is a link, a pipe or has a name outside its folder`, unsafe };
   for (const g of gens) {
     if (g.done) continue;
     const lock = readJson(g.path);
