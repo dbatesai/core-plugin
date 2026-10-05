@@ -106,7 +106,7 @@ for (const errno of ['EACCES', 'ENOENT']) {
       return r;
     };
     const po = (...a) => [PO, ...a, '--root', root];
-    await step('startup', 'project-only.mjs startup', po('startup', '--session', 'pk-1'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['.core/.gitignore', '_core/_project-only/claude-code/bootstrap.json'] } });
+    await step('startup', 'project-only.mjs startup', po('startup', '--session', 'pk-1'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['_core/.gitignore', '_core/_project-only/claude-code/bootstrap.json'] } });
     await step('status', 'project-only.mjs status', po('status'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.pending === true ? null : 'pending not reported') } });
     await step('capture-status', 'project-only.mjs capture-status', po('capture-status'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.in_project?.rows === 1 && j?.outside_history === 'unknown' ? null : 'capture rows or outside-history wrong') } });
     await step('explicit-retrieval', 'retrieve-context.mjs <root> "<query>"', [join(CORE, 'scripts/retrieve-context.mjs'), root, 'what color are the widgets'], 'confined', { outcome: { exit: 0, stdout: /dc-1-widgets/ } });
