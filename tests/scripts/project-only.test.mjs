@@ -126,7 +126,7 @@ test('capture status reads only the folder and calls outside history unknown; de
     assert.deepEqual(s.violations, []);
     const out = JSON.parse(s.stdout);
     assert.deepEqual([out.in_project.rows, out.outside_history], [2, 'unknown']);
-    for (const [cmd, want] of [['purge', 'unavailable'], ['retention', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
+    for (const [cmd, want] of [['retention', 'unavailable'], ['process-memory', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
       const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), cmd, '--root', p.root]);
       assert.equal(JSON.parse(r.stdout).status, want, cmd);
       assert.deepEqual(r.violations, [], cmd);
@@ -632,5 +632,77 @@ test('explicit retrieval: when the boundary check itself fails (not plain absenc
   try {
     assert.equal(storeBoundaryProblem(c.root), null);
     assert.equal(confined(c.root, [RC, c.root, 'anything']).status, 0);
+  } finally { c.cleanup(); }
+});
+
+// ---------- purge from the folder alone ----------
+
+test('purge in project-only mode: a dry run changes nothing; --apply removes the captured turns, health file and judgment log from this folder only, keeps everything else, and never claims more than purged-in-project', async () => {
+  const { inspectFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const p = project();
+  try {
+    const m = join(p.root, '_metrics');
+    mkdirSync(join(m, 'turn-capture'), { recursive: true });
+    writeFileSync(join(m, 'turn-capture', '2026-10-01.jsonl'), '{"prompt":"secret"}\n');
+    writeFileSync(join(m, 'turn-capture', '.gitignore'), '*\n');
+    writeFileSync(join(m, 'turn-capture-health.json'), '{}');
+    writeFileSync(join(m, 'judgment-log.jsonl'), '{}\n');
+    writeFileSync(join(m, 'scorecard-log.jsonl'), '{"keep":1}\n');
+    const po = (...a) => { const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]); assert.deepEqual(r.violations, [], a.join(' ')); return JSON.parse(r.stdout); };
+    const before = tree(p.root);
+    const dry = po('purge');
+    assert.deepEqual([dry.outcome, dry.applied, dry.outside_history], ['dry-run', false, 'unknown']);
+    assert.deepEqual(dry.would_remove, ['_metrics/turn-capture', '_metrics/turn-capture-health.json', '_metrics/judgment-log.jsonl']);
+    assert.deepEqual(tree(p.root), before, 'a dry run writes and removes nothing');
+    const done = po('purge', '--apply');
+    assert.deepEqual([done.outcome, done.applied, done.outside_history], ['purged-in-project', true, 'unknown']);
+    assert.deepEqual(done.removed, dry.would_remove);
+    assert.equal(existsSync(join(m, 'turn-capture')), false);
+    assert.equal(existsSync(join(m, 'turn-capture-health.json')), false);
+    assert.equal(existsSync(join(m, 'judgment-log.jsonl')), false);
+    assert.equal(readFileSync(join(m, 'scorecard-log.jsonl'), 'utf8'), '{"keep":1}\n', 'other metrics are not purge targets');
+    assert.ok(existsSync(join(p.root, '_memories', 'dc-1-widgets.md')), 'memory is untouched');
+    assert.equal(inspectFileLock(join(m, '.turn-capture.lock'), { machine: null }).held, false, 'the purge lock is released');
+    assert.equal(po('purge', '--apply').outcome, 'nothing-in-project');
+    assert.equal(po('capture-status').in_project.state, 'none-in-project');
+  } finally { p.cleanup(); }
+});
+
+test('purge in project-only mode never follows a link: a linked _metrics is refused, a linked target is left alone and named, and a link inside the capture folder is removed without touching what it points at', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const po = (root, ...a) => { const r = confined(root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', root]); return { ...JSON.parse(r.stdout), violations: r.violations }; };
+  // _metrics itself is a link out
+  const a = project();
+  try {
+    const out = join(a.base, 'outside-metrics'); mkdirSync(join(out, 'turn-capture'), { recursive: true }); writeFileSync(join(out, 'turn-capture', '2026-10-01.jsonl'), 'x\n');
+    symlinkSync(out, join(a.root, '_metrics'));
+    const r = po(a.root, 'purge', '--apply');
+    assert.deepEqual([r.status, r.state], ['refused', 'refused-link']);
+    assert.deepEqual(r.violations, []);
+    assert.ok(existsSync(join(out, 'turn-capture', '2026-10-01.jsonl')), 'nothing outside was deleted');
+  } finally { a.cleanup(); }
+  // the capture folder is a link out; the health file is real
+  const b = project();
+  try {
+    const out = join(b.base, 'outside-capture'); mkdirSync(out); writeFileSync(join(out, '2026-10-01.jsonl'), 'x\n');
+    mkdirSync(join(b.root, '_metrics')); symlinkSync(out, join(b.root, '_metrics', 'turn-capture'));
+    writeFileSync(join(b.root, '_metrics', 'turn-capture-health.json'), '{}');
+    const r = po(b.root, 'purge', '--apply');
+    assert.equal(r.outcome, 'partly-purged-in-project');
+    assert.deepEqual(r.removed, ['_metrics/turn-capture-health.json']);
+    assert.deepEqual(r.refused, [{ path: '_metrics/turn-capture', reason: 'link-or-wrong-type' }]);
+    assert.deepEqual(r.violations, []);
+    assert.ok(existsSync(join(out, '2026-10-01.jsonl')));
+  } finally { b.cleanup(); }
+  // a link inside the real capture folder
+  const c = project();
+  try {
+    const target = join(c.base, 'outside-file.jsonl'); writeFileSync(target, 'keep\n');
+    mkdirSync(join(c.root, '_metrics', 'turn-capture'), { recursive: true });
+    symlinkSync(target, join(c.root, '_metrics', 'turn-capture', '2026-10-02.jsonl'));
+    const r = po(c.root, 'purge', '--apply');
+    assert.equal(r.outcome, 'purged-in-project');
+    assert.deepEqual(r.violations, []);
+    assert.equal(readFileSync(target, 'utf8'), 'keep\n', 'the file the link pointed at is untouched');
   } finally { c.cleanup(); }
 });

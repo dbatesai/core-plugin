@@ -28,7 +28,8 @@
  *      node project-only.mjs finalize-begin|finalize-certify|finalize-finish --root <dir> --session <id>
  *      node project-only.mjs finalize-record --root <dir> --session <id> --op <op> --status done|skipped|failed
  *      node project-only.mjs pickup|pickup-archive --root <dir> [--harness <h>]   (run from a normal session)
- *      purge, retention, process-memory, maintenance, metrics, metrics-export, configure-project and
+ *      node project-only.mjs purge --root <dir> [--apply]   (a dry run without --apply)
+ *      retention, process-memory, maintenance, metrics, metrics-export, configure-project and
  *      memory-view answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
@@ -197,7 +198,6 @@ export function captureStatus(ctx) {
 
 const NORMAL = 'is not available in project-only mode; it reads or writes outside the folder. Run it in a normal session';
 const UNAVAILABLE = {
-  purge: 'the captured-turn purge is not available in project-only mode yet; run it in a normal session',
   retention: 'retention is not available in project-only mode',
   'process-memory': `memory processing ${NORMAL}`,
   maintenance: `housekeeping (index refresh, scorecards) ${NORMAL}`,
@@ -206,6 +206,54 @@ const UNAVAILABLE = {
   'memory-view': `the memory view ${NORMAL}`,
   'metrics-export': `the metrics export ${NORMAL}`,
 };
+
+// ---------- purge ----------
+//
+// The explicit captured-turn purge, from the folder alone. It removes what this project holds:
+// the captured turns, the capture health file and the judgment log under `_metrics/`. It never
+// looks outside the folder, so copies an installed session or an earlier version kept elsewhere are
+// reported as unknown and the outcome is `purged-in-project`, never a bare "purged". A dry run
+// unless `apply` is set. A target that is a link is left alone and named.
+const PURGE_TARGETS = [['turn-capture', 'dir'], ['turn-capture-health.json', 'file'], ['judgment-log.jsonl', 'file']];
+
+export function purge(ctx, { apply = false } = {}) {
+  const metrics = join(ctx.root, '_metrics');
+  const base = { status: 'ok', mode: 'project-only', operation: 'purge', applied: false, outside_history: 'unknown' };
+  let st;
+  try { st = lstatSync(metrics); } catch (e) {
+    if (e.code === 'ENOENT') return { ...base, outcome: 'nothing-in-project', removed: [], would_remove: [], refused: [] };
+    return { status: 'refused', state: 'unreadable', reason: e.code };
+  }
+  if (st.isSymbolicLink() || !st.isDirectory() || !realpathSync.native(metrics).startsWith(ctx.root + sep)) return { status: 'refused', state: 'refused-link', reason: outside(metrics).message };
+  const present = []; const refused = [];
+  for (const [name, kind] of PURGE_TARGETS) {
+    let t;
+    try { t = lstatSync(join(metrics, name)); } catch (e) { if (e.code === 'ENOENT') continue; refused.push({ path: `_metrics/${name}`, reason: e.code }); continue; }
+    if (t.isSymbolicLink() || (kind === 'dir' ? !t.isDirectory() : !t.isFile())) { refused.push({ path: `_metrics/${name}`, reason: 'link-or-wrong-type' }); continue; }
+    present.push(name);
+  }
+  const rel = present.map((n) => `_metrics/${n}`);
+  if (!apply) return { ...base, outcome: 'dry-run', would_remove: rel, removed: [], refused };
+  const lockPath = join(metrics, '.turn-capture.lock');
+  for (const name of readdirSync(metrics)) {
+    if (!name.startsWith('.turn-capture.lock')) continue;
+    const g = lstatSync(join(metrics, name));
+    if (g.isSymbolicLink() || !g.isFile()) return { status: 'refused', state: 'refused-link', reason: outside(join(metrics, name)).message };
+  }
+  const lock = acquireFileLock(lockPath, { extra: { mode: 'project-only', op: 'purge' }, machine: null });
+  if (!lock.ok) return { status: 'refused', state: 'lock-held', reason: lock.reason };
+  const removed = [];
+  try {
+    for (const name of present) {
+      const target = join(metrics, name);
+      const again = lstatSync(target);   // checked again under the lock, just before the removal
+      if (again.isSymbolicLink()) { refused.push({ path: `_metrics/${name}`, reason: 'link-or-wrong-type' }); continue; }
+      rmSync(target, { recursive: true, force: true });   // removes a link found inside, never follows it
+      if (existsSync(target)) refused.push({ path: `_metrics/${name}`, reason: 'still-present' }); else removed.push(`_metrics/${name}`);
+    }
+  } finally { releaseFileLock(lockPath, lock.nonce); }
+  return { ...base, applied: true, outcome: refused.length ? 'partly-purged-in-project' : removed.length ? 'purged-in-project' : 'nothing-in-project', removed, would_remove: [], refused };
+}
 
 // ---------- /finalize project-only ----------
 //
@@ -382,15 +430,17 @@ export function main(argv) {
   useNoMachineIdentity();   // no lock in this process reads ~/.core/install-id
   const [cmd, ...rest] = argv;
   const opt = {};
-  for (let i = 0; i < rest.length; i++) if (rest[i].startsWith('--')) opt[rest[i].slice(2)] = rest[++i];
+  const FLAGS = new Set(['apply']);
+  for (let i = 0; i < rest.length; i++) if (rest[i].startsWith('--')) { const k = rest[i].slice(2); opt[k] = FLAGS.has(k) ? true : rest[++i]; }
   const out = (o) => { process.stdout.write(JSON.stringify(o) + '\n'); return o.status === 'ok' ? 0 : 2; };
   if (UNAVAILABLE[cmd]) return out({ status: 'unavailable', state: 'unavailable', operation: cmd, reason: UNAVAILABLE[cmd] });
   const run = {
     startup, status, 'capture-status': captureStatus, pickup, 'pickup-archive': pickupArchive,
+    purge: (ctx) => purge(ctx, { apply: opt.apply === true }),
     'finalize-begin': finalizeBegin, 'finalize-certify': finalizeCertify, 'finalize-finish': finalizeFinish,
     'finalize-record': (ctx) => finalizeRecord(ctx, { op: opt.op, opStatus: opt.status }),
   }[cmd];
-  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
+  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status, purge, pickup, pickup-archive and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
   const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd });
   if (!ctx.ok) return out({ status: 'refused', ...ctx });
   return out(run(ctx));

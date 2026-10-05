@@ -50,7 +50,7 @@ Then load project context from the folder by reading it: `PROJECT.md`, the unit 
 - the automatic end-of-session close (the user closes with `/finalize project-only`, which records a partial close: the native memory refresh can't run here);
 - collab sync;
 - the capability probe, legacy migration and drift check;
-- the captured-turn purge and retention (`project-only.mjs purge` answers `unavailable`);
+- automatic retention of captured turns (`project-only.mjs retention` answers `unavailable`). The explicit purge does work here: `project-only.mjs purge --root <root>` lists what it would remove from this folder and `--apply` removes it. It can't see copies kept outside the folder, so it reports those as unknown and says `purged-in-project`; tell the user that a normal session's purge is what covers the rest;
 - `/process-memory`, housekeeping, `/metrics` and its export, `/configure-project` and `/memory-view`. Each reads or writes outside the folder today, so don't run their scripts here; `project-only.mjs <name>` answers `unavailable` for each. Say so if the user asks for one, and that a normal session can run it.
 
 Compose a short readiness summary from the folder alone. Use the agent name if one came back; otherwise say none is recorded here. Then add one line: "Project-only mode: working from this folder alone; automatic retrieval, close and sync are off." Don't run the rest of this protocol.
