@@ -68,10 +68,13 @@ export async function recordSnapshot(opts = {}) {
   // The startup probe already ran this session: its saved result is recorded, not a second probe.
   const startup = opts.from ? JSON.parse(readFileSync(opts.from, 'utf8')) : await runStartup({ harness, cwd });
   if (opts.from) {
-    // A saved result is recorded only if it is this session's startup probe for this harness.
-    const want = harness || startup?.harness;
-    if (startup?.mode !== 'startup' || typeof startup.harness !== 'string' || startup.harness !== want) throw new Error(`${opts.from} is not a startup probe result for ${want}`);
-    if (!Array.isArray(startup.rows) || !startup.rows.length || !startup.rows.every((r) => r && typeof r.capability_id === 'string' && typeof r.identity_status === 'string')) throw new Error(`no probe rows in ${opts.from}`);
+    // A saved result is recorded only if it is a startup probe for the harness whose history it goes
+    // into, and an explicit --harness that names another harness is a conflict, not a choice.
+    const want = target.harness;
+    if (harness && harness !== want) throw new Error(`--harness ${harness} conflicts with the history it would be recorded in (${want})`);
+    if (startup?.mode !== 'startup' || startup.harness !== want) throw new Error(`${opts.from} is not a startup probe result for ${want}`);
+    const STATUSES = new Set(['PASS', 'DEGRADED', 'NOT-YET', 'UNKNOWN']);
+    if (!Array.isArray(startup.rows) || !startup.rows.length || !startup.rows.every((r) => r && typeof r.capability_id === 'string' && r.capability_id.trim() && STATUSES.has(r.identity_status))) throw new Error(`no probe rows in ${opts.from}`);
   }
   const rows = startup.rows || [];
 

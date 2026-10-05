@@ -1894,3 +1894,20 @@ test('a session log that is a link is not appended through', { skip: isWin }, as
     assert.equal(logEvent(p, 'hygiene-log.jsonl', { k: 1 }, { today: '2026-10-05' }).legacy, true, 'an ordinary log still appends');
   } finally { s.cleanup(); }
 });
+
+test('a session log line is written whole even when the system writes it in pieces', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { logEvent } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const s = sandbox();
+  const real = fs.writeSync;
+  try {
+    const p = s.mk('Projects', 'Short');
+    fs.writeSync = (fd, buf, off, len, ...rest) => (typeof buf === 'string' ? real(fd, buf.slice(0, 5)) : real(fd, buf, off, Math.min(len ?? buf.length, 5), ...rest));
+    syncBuiltinESMExports();
+    const r = logEvent(p, 'retrieval-log.jsonl', { kind: 'a-long-enough-event' }, { today: '2026-10-05', now: 'T' });
+    fs.writeSync = real; syncBuiltinESMExports();
+    assert.equal(r.legacy, true);
+    assert.deepEqual(JSON.parse(readFileSync(join(p, '_sessions', '2026-10-05', 'retrieval-log.jsonl'), 'utf8')), { ts: 'T', kind: 'a-long-enough-event' });
+  } finally { fs.writeSync = real; syncBuiltinESMExports(); s.cleanup(); }
+});

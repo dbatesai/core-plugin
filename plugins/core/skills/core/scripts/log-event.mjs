@@ -21,7 +21,7 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeSync, closeSync, constants as fsConstants } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
@@ -419,7 +419,8 @@ function appendLeaf(file, text) {
   try { st = lstatSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   if (st && (!st.isFile() || st.nlink !== 1)) throw Object.assign(new Error('log file is a link or not a regular file'), { code: 'LOG_UNSAFE' });
   const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), 0o644);
-  try { writeSync(fd, text); } finally { closeSync(fd); }
+  // writeFileSync on a descriptor keeps writing until every byte is down, or throws.
+  try { writeFileSync(fd, text); } finally { closeSync(fd); }
 }
 
 export function logEvent(projectDir, filename, event, { today, now } = {}) {

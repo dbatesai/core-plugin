@@ -12,6 +12,7 @@ import { readConfiguredMcp } from '../../plugins/core/skills/core/scripts/config
 import { resolveAutoMemorySurface } from '../../plugins/core/skills/core/scripts/check-context-integrity.mjs';
 import { recordSnapshot } from '../../plugins/core/skills/core/scripts/record-capability-snapshot.mjs';
 import { mapProjectPathToSlug } from '../../plugins/core/skills/core/scripts/project-slug.mjs';
+import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 
 function fixture({ projectOnly }) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-restrictive-')));
@@ -67,5 +68,25 @@ test('the snapshot recorder records the startup probe it is handed instead of pr
     saved({ mode: 'pre-action' });
     await assert.rejects(rec, /not a startup probe result/);
     for (const rows of [[], 'not a list', [{ capability_id: 'x' }]]) { saved({ rows }); await assert.rejects(rec, /no probe rows/); }
+  } finally { rmSync(f.base, { recursive: true, force: true }); }
+});
+
+test('a saved probe goes only into the history of its own harness, with real rows, and lands there', async () => {
+  const f = fixture({ projectOnly: false });
+  try {
+    registerProject(join(f.home, '.core'), f.root);
+    const from = join(f.base, 'capability-state.json');
+    const saved = (harness, rows) => writeFileSync(from, JSON.stringify({ harness, mode: 'startup', complete: true, rows, summary: {} }));
+    const rec = (o = {}) => recordSnapshot({ cwd: f.root, root: f.root, from, home: f.home, env: { CORE_HARNESS: 'claude-code' }, ...o });
+    saved('codex', [{ capability_id: 'x', identity_status: 'PASS' }]);
+    await assert.rejects(() => rec(), /not a startup probe result for claude-code/, 'no --harness: the detected history decides');
+    await assert.rejects(() => rec({ harness: 'codex' }), /conflicts with the history/);
+    for (const row of [{ capability_id: ' ', identity_status: 'PASS' }, { capability_id: 'x', identity_status: 'MAYBE' }]) {
+      saved('claude-code', [row]);
+      await assert.rejects(() => rec(), /no probe rows/);
+    }
+    saved('claude-code', [{ capability_id: 'x', identity_status: 'UNKNOWN' }]);
+    const r = await rec();
+    assert.equal(r.appended, 1, JSON.stringify(r));
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
