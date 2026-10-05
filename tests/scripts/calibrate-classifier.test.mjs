@@ -535,7 +535,11 @@ test('the import command in --json reports the cross-harness result, and the pac
     const forged = JSON.parse(readFileSync(join(ccDir, 'calibration-state.json'), 'utf8'));
     forged.by_harness.codex = { ...forged.by_harness['claude-code'] };
     writeFileSync(join(ccDir, 'calibration-state.json'), JSON.stringify(forged));
-    const ws = workspaceMetrics(home, project);
+    // The package reads the selected harness's metrics; pin it so the test doesn't depend on the machine running it.
+    const ambient = process.env.CORE_HARNESS;
+    process.env.CORE_HARNESS = 'claude-code';
+    let ws;
+    try { ws = workspaceMetrics(home, project); } finally { if (ambient === undefined) delete process.env.CORE_HARNESS; else process.env.CORE_HARNESS = ambient; }
     assert.equal(ws.calibration.by_harness.codex.is_calibrated, false, 'a harness with no state of its own inherits no claim');
     assert.equal(ws.calibration.is_calibrated, false);
     const second = runImport('codex');

@@ -415,3 +415,22 @@ test('a copied project with an unfinished migration is not archived or re-stampe
     assert.deepEqual(snapshot(join(landed, '.core')), before);
   } finally { s.cleanup(); }
 });
+
+test('a malformed or missing stamp under an unfinished migration refuses the write, marker and bytes kept', async () => {
+  const { stateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  for (const shape of ['malformed', 'missing']) {
+    const s = sandbox();
+    try {
+      const p = mk(s.base, 'Projects', 'P');
+      writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+      register(s.coreDir, [p]);
+      const stamp = join(p, '.core', 'claude-code', 'stamp');
+      if (shape === 'malformed') writeFileSync(stamp, 'not a stamp\n'); else rmSync(stamp);
+      writeFileSync(join(p, '.core', 'claude-code', '.migrating'), '');
+      writeFileSync(join(p, '.core', 'claude-code', 'notes.md'), 'half-copied\n');
+      const before = snapshot(join(p, '.core'));
+      assert.throws(() => stateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir, forWrite: true }), shape);
+      assert.deepEqual(snapshot(join(p, '.core')), before, `${shape}: marker and bytes kept`);
+    } finally { s.cleanup(); }
+  }
+});

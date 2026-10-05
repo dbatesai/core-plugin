@@ -377,3 +377,25 @@ test('the narrow account-local adoption exception writes consent/recovery record
   assert.ok(observed.some(path => /\/pending-adopt-claude-code\.json\.tmp-/.test(path)), 'actual atomic companion observed');
   assert.ok(observed.every(path => /^[^/]+\/(declined-adopt|adopted-sibling-stamps|pending-adopt-claude-code\.json|pending-adopt-claude-code\.json\.tmp-[^/]+)$/.test(path)), JSON.stringify(observed));
 });
+
+test('a restored project with an unfinished migration is not offered, and a yes is held: nothing archived, re-stamped or registered; without the marker adoption works as before', () => {
+  for (const fenced of [true, false]) {
+    const s = sandbox();
+    try {
+      const { coreB, restored } = restoredProject(s);
+      if (fenced) writeFileSync(join(restored, '.core', H, '.migrating'), '');
+      const before = treeHashes(join(restored, '.core'));
+      const registryBefore = fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null;
+      if (fenced) {
+        assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'not offered while fenced');
+        const r = adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
+        assert.equal(r.status, 'held'); assert.equal(r.reason, 'migration-in-progress');
+        assert.deepEqual(treeHashes(join(restored, '.core')), before, 'marker, foreign stamp and files exactly as found');
+        assert.equal(fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null, registryBefore, 'nothing registered');
+      } else {
+        assert.ok(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), 'control: offered');
+        assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
+      }
+    } finally { s.cleanup(); }
+  }
+});

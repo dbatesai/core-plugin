@@ -1107,6 +1107,8 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   const registered = readRegisteredRoots({ coreDir: core }).has(real);
   if (!registered && classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
   if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
+  // Nothing is offered while a migration is unfinished: adopting would archive and re-stamp half-copied state.
+  if (!migrationDepth && projectMigrationFence({ root: real, harness })) return null;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   // an adoption this machine started here and didn't finish is resumed, whatever the stamp now says
   const resume = pendingAdoption({ root: real, harness, coreDir });
@@ -1151,6 +1153,9 @@ function setAsideUnparseable(file) {
  */
 export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), decision }) {
   if (decision !== 'yes' && decision !== 'no') throw new Error(`adoptForeignState: decision must be 'yes' or 'no', got ${JSON.stringify(decision)}`);
+  // A yes is held, before anything is read or moved, while a migration is unfinished.
+  const fence = decision === 'yes' && !migrationDepth && projectMigrationFence({ root: canonical(root), harness: assertHarnessName(harness) });
+  if (fence) return { status: 'held', reason: fence };
   const cand = adoptionCandidate({ root, harness, coreDir });
   if (!cand) return { status: 'not-a-candidate' };
   const real = cand.root;
