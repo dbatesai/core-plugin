@@ -195,12 +195,29 @@ test('computeRows: calibration pool is labeled_count/min_needed, direct trust, t
   assert.equal(cal.section, SECTION.READINESS);
 });
 
-test('computeRows: calibration unavailable falls back to 0/100 without crashing', () => {
-  const rows = computeRows(baseOut({ readiness: { recognition_signal: null, calibration: {} } }));
-  const cal = rows.find((r) => r.label === 'Calibration pool');
-  assert.equal(cal.value, '0/100 labeled');
-  assert.equal(cal.pct, 0);
+test('unavailable calibration stays unavailable in its row, narrative and full report', () => {
+  const out = baseOut({ readiness: { recognition_signal: null, calibration: { available: false, reason: 'synthetic calibration read denied' } } });
+  const cal = computeRows(out).find(r => r.label === 'Calibration pool');
+  assert.equal(cal.trust, TRUST.NOT_EVALUATED);
+  assert.equal(cal.noGauge, true);
+  assert.match(cal.value, /unavailable.*synthetic calibration read denied/i);
+  const narrative = buildNarrative(out);
+  assert.match(narrative, /calibration.*unavailable.*synthetic calibration read denied/i);
+  assert.doesNotMatch(narrative, /currently 0/);
+  const report = renderReport(out);
+  assert.match(report, /not-evaluated.*unavailable.*synthetic calibration read denied/);
+  assert.doesNotMatch(report, /0\/100 labeled|currently 0/);
 });
+
+test('genuine available zero calibration remains a direct measured zero', () => {
+  const out = baseOut({ readiness: { recognition_signal: null, calibration: { available: true, labeled_count: 0, min_needed: 100 } } });
+  const cal = computeRows(out).find(r => r.label === 'Calibration pool');
+  assert.equal(cal.trust, TRUST.DIRECT);
+  assert.equal(cal.value, '0/100 labeled');
+  assert.notEqual(cal.noGauge, true);
+  assert.match(buildNarrative(out), /currently 0/);
+});
+
 
 test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tagged readiness', () => {
   const out = baseOut({

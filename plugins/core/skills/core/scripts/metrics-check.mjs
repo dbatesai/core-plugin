@@ -532,8 +532,9 @@ export function computeRows(out) {
     section: SECTION.READINESS,
     label: 'Calibration pool',
     pct: calPct,
-    trust: TRUST.DIRECT,
-    value: `${labeled}/${minNeeded} labeled`,
+    trust: cal.available ? TRUST.DIRECT : TRUST.NOT_EVALUATED,
+    ...(cal.available ? {} : { noGauge: true }),
+    value: cal.available ? `${labeled}/${minNeeded} labeled` : `unavailable — ${cal.reason || 'no calibration data available'}`,
   });
 
   return rows;
@@ -554,6 +555,9 @@ export function buildNarrative(out) {
   const cal = out.readiness?.calibration || {};
   const labeled = cal.available ? (cal.labeled_count ?? 0) : 0;
   const minNeeded = cal.available ? (cal.min_needed ?? 100) : 100;
+  const calibrationSummary = cal.available
+    ? `the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`
+    : `calibration data is unavailable (${cal.reason || 'no calibration data available'}); the classifier stays unofficial`;
   const recognition = parseRecognitionSignal(out.readiness?.recognition_signal?.text);
 
   // A mechanics hard-fail leads with the failure and the single next action —
@@ -602,9 +606,9 @@ export function buildNarrative(out) {
   if (recognition.available) {
     const trend = recognition.arrow === '↑' ? 'down' : recognition.arrow === '↓' ? 'up' : 'steady';
     const worthLook = recognition.arrow === '↑' ? ' (worth a look)' : '';
-    parts.push(`measurement readiness: recognition is trending ${trend} this session${worthLook}, and the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
+    parts.push(`measurement readiness: recognition is trending ${trend} this session${worthLook}, and ${calibrationSummary}`);
   } else {
-    parts.push(`measurement readiness: recognition has no signal yet this session, and the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
+    parts.push(`measurement readiness: recognition has no signal yet this session, and ${calibrationSummary}`);
   }
   const s2Body = parts.join('; ') + '.';
   const s2 = `Retrieval regression: ${s2Body.charAt(0).toUpperCase()}${s2Body.slice(1)}`;
