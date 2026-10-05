@@ -352,3 +352,81 @@ test('a lock generation file that is a link is refused before the lock is read',
     assert.ok(readFileSync(outsideFile).equals(before) && existsSync(outsideFile));
   } finally { p.cleanup(); }
 });
+
+// ---------- pickup in a normal session ----------
+
+test('pickup: nothing pending reports so and writes nothing', () => {
+  const p = project();
+  try {
+    const before = tree(p.root);
+    const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), 'pickup', '--root', p.root]);
+    assert.deepEqual(r.violations, []);
+    assert.deepEqual(JSON.parse(r.stdout), { status: 'ok', mode: 'pickup', pending: false });
+    assert.deepEqual(tree(p.root), before);
+  } finally { p.cleanup(); }
+});
+
+test('pickup reports project-only sessions as unverified data: partial closes listed, nothing adopted, a normal close stays owed, archive renames and keeps every byte', () => {
+  const p = project();
+  try {
+    const po = (...a) => { const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]); assert.deepEqual(r.violations, [], a.join(' ')); return JSON.parse(r.stdout); };
+    po('startup', '--session', 's-1');
+    mkdirSync(join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code'), { recursive: true });
+    writeFileSync(join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code', 'manifest.json'), JSON.stringify({ agent_name: 'Fern', metrics_enabled: false }));
+    po('finalize-begin', '--session', 's-1');
+    for (const op of ['material-capture', 'render-project-md', 'session-summary']) po('finalize-record', '--session', 's-1', '--op', op, '--status', 'done');
+    po('finalize-certify', '--session', 's-1');
+    po('finalize-finish', '--session', 's-1');
+
+    const r = po('pickup');
+    assert.equal(r.pending, true);
+    assert.equal(r.unverified, true);
+    assert.deepEqual([r.agent_name, r.capture], ['Fern', 'disabled']);
+    assert.deepEqual(r.partial_closes.map((c) => [c.session_id, c.outcome]), [['s-1', 'partial']]);
+    assert.deepEqual(r.adopted, { completion: false, enrollment: false });
+    assert.deepEqual(r.owed_in_normal_session, ['memory-refresh']);
+    assert.equal(r.unfinished_close, null);
+    assert.equal(existsSync(join(p.root, '.core', 'claude-code')), false, 'pickup never creates the signed envelope');
+    assert.equal(existsSync(join(p.root, '_metrics', 'close')), false, 'and never writes a normal close receipt');
+    assert.equal(existsSync(join(p.root, '_memories', '_close-marker.json')), false, 'or the owed-work marker');
+
+    const pending = join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code');
+    const before = tree(pending);
+    const a = po('pickup-archive');
+    assert.equal(a.archived, true);
+    assert.equal(existsSync(pending), false);
+    const after = tree(a.to);
+    delete after[join(a.to, 'picked-up.json')];
+    assert.deepEqual(Object.values(after).sort(), Object.values(before).sort(), 'every pending byte is kept at the new name');
+    assert.deepEqual(po('pickup'), { status: 'ok', mode: 'pickup', pending: false }, 'an archived folder is not pending again');
+  } finally { p.cleanup(); }
+});
+
+test('pickup-archive refuses while a project-only close has begun and not certified', () => {
+  const p = project();
+  try {
+    const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
+    po('finalize-begin', '--session', 's-9');
+    const r = po('pickup');
+    assert.equal(r.unfinished_close, 's-9');
+    const a = po('pickup-archive');
+    assert.deepEqual([a.status, a.state], ['refused', 'close-in-progress']);
+    assert.ok(existsSync(join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code', 'close', 'marker.json')));
+  } finally { p.cleanup(); }
+});
+
+test('pickup refuses a pending folder that is a link out of the project, and archive moves nothing', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const p = project();
+  const outsideDir = join(p.base, 'elsewhere');
+  try {
+    mkdirSync(outsideDir);
+    writeFileSync(join(outsideDir, 'manifest.json'), JSON.stringify({ agent_name: 'Planted' }));
+    mkdirSync(join(p.root, '.core', PROJECT_ONLY_DIR), { recursive: true });
+    symlinkSync(outsideDir, join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code'));
+    const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
+    assert.equal(po('pickup').state, 'refused-link');
+    assert.equal(po('pickup-archive').state, 'refused-link');
+    assert.ok(existsSync(join(outsideDir, 'manifest.json')), 'nothing outside was moved');
+  } finally { p.cleanup(); }
+});

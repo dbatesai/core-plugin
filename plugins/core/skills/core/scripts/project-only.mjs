@@ -27,6 +27,7 @@
  *      node project-only.mjs status|capture-status --root <dir> [--harness <h>]
  *      node project-only.mjs finalize-begin|finalize-certify|finalize-finish --root <dir> --session <id>
  *      node project-only.mjs finalize-record --root <dir> --session <id> --op <op> --status done|skipped|failed
+ *      node project-only.mjs pickup|pickup-archive --root <dir> [--harness <h>]   (run from a normal session)
  *      purge and retention answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
@@ -291,6 +292,67 @@ export function finalizeFinish(ctx) {
   return r.released ? { status: 'ok', released: true } : { status: 'refused', state: 'release-failed', reason: r.reason };
 }
 
+// ---------- pickup in a normal session ----------
+//
+// A normal session reads what project-only sessions left in the pending folder as data, never as
+// authority: the report names what is there, nothing in it is adopted as a completed close, and it
+// never registers the folder or touches the signed envelope. The agent merges the typed fields it
+// wants (an agent name when the signed manifest has none; a capture opt-out, which only restricts)
+// through the normal manifest writer, then archives the folder. Archiving renames, never deletes.
+function pendingChain(ctx) {
+  for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
+    const st = lstatSync(d);   // ENOENT propagates: nothing pending
+    if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
+  }
+}
+
+export function pickup(ctx) {
+  try { pendingChain(ctx); }
+  catch (e) {
+    if (e.code === 'ENOENT') return { status: 'ok', mode: 'pickup', pending: false };
+    if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message };
+    return { status: 'refused', state: 'unreadable', reason: e.code || e.message };
+  }
+  const manifest = readPendingManifest(ctx);
+  const boot = readJson(ctx, join(pendingDir(ctx), 'bootstrap.json'));
+  const marker = readMarker(ctx);
+  const receipts = [];
+  const rdir = join(closeDir(ctx), 'receipts');
+  let receiptsState = 'ok';
+  try {
+    closeChain(ctx, [rdir]);
+    for (const f of readdirSync(rdir).filter((n) => n.endsWith('.json')).sort()) {
+      const r = readJson(ctx, join(rdir, f));
+      if (r.state === 'ok' && typeof r.value.session_id === 'string') receipts.push({ session_id: r.value.session_id, outcome: r.value.outcome === 'partial' ? 'partial' : 'unrecognized', certified_at: String(r.value.certified_at || '') });
+    }
+  } catch (e) { if (e.code !== 'ENOENT') receiptsState = e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'unreadable'; }
+  const certified = new Set(receipts.map((r) => r.session_id));
+  const unfinished = marker.session_id && !certified.has(marker.session_id) ? marker.session_id : null;
+  return {
+    status: 'ok', mode: 'pickup', pending: true, root: ctx.root, harness: ctx.harness,
+    unverified: true,
+    agent_name: manifest.agent_name, manifest: manifest.state, capture: manifest.capture,
+    last_session: boot.state === 'ok' && typeof boot.value.session === 'string' ? boot.value.session : null,
+    partial_closes: receipts, receipts: receiptsState, unfinished_close: unfinished,
+    // Every project-only close was partial: a normal close is still owed for the native refresh.
+    adopted: { completion: false, enrollment: false },
+    owed_in_normal_session: ['memory-refresh'],
+  };
+}
+
+/** Moves the pending folder aside once its data has been merged (or the user declines to). */
+export function pickupArchive(ctx, { now = new Date() } = {}) {
+  const r = pickup(ctx);
+  if (r.status !== 'ok' || !r.pending) return r;
+  if (r.unfinished_close) return { status: 'refused', state: 'close-in-progress', session_id: r.unfinished_close, reason: 'a project-only close has begun and not certified; finish or release it first' };
+  const stamp = now.toISOString().replace(/[:.]/g, '-');
+  const dest = join(ctx.root, '.core', PROJECT_ONLY_DIR, `${ctx.harness}-picked-up-${stamp}`);
+  writeOwn(pendingDir(ctx), 'picked-up.json', JSON.stringify({ picked_up_at: now.toISOString(), merged: 'by the normal session; nothing here was adopted as completed work' }, null, 2) + '\n');
+  if (existsSync(dest)) return { status: 'refused', state: 'destination-exists', reason: dest };
+  renameSync(pendingDir(ctx), dest);
+  return { status: 'ok', mode: 'pickup', archived: true, to: dest };
+}
+
 export function main(argv) {
   useNoMachineIdentity();   // no lock in this process reads ~/.core/install-id
   const [cmd, ...rest] = argv;
@@ -299,7 +361,7 @@ export function main(argv) {
   const out = (o) => { process.stdout.write(JSON.stringify(o) + '\n'); return o.status === 'ok' ? 0 : 2; };
   if (UNAVAILABLE[cmd]) return out({ status: 'unavailable', state: 'unavailable', operation: cmd, reason: UNAVAILABLE[cmd] });
   const run = {
-    startup, status, 'capture-status': captureStatus,
+    startup, status, 'capture-status': captureStatus, pickup, 'pickup-archive': pickupArchive,
     'finalize-begin': finalizeBegin, 'finalize-certify': finalizeCertify, 'finalize-finish': finalizeFinish,
     'finalize-record': (ctx) => finalizeRecord(ctx, { op: opt.op, opStatus: opt.status }),
   }[cmd];
