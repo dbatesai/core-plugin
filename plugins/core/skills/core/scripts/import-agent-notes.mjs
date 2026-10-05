@@ -95,18 +95,34 @@ function publish(staged, dest, kind) {
   renameSync(staged, dest);
 }
 
+// 'absent', 'ours' (the exact name this importer makes for the family, holding nothing but its intact
+// payload, or nothing once a folder was published out of it) or 'foreign' (anything else).
+function stagingState(dir, family, prior) {
+  if (typeof prior.staging !== 'string' || !new RegExp(`^\\.importing-${family}-[0-9a-f]{8}$`).test(prior.staging)) return prior.staging == null ? 'absent' : 'foreign';
+  const path = join(dir, prior.staging);
+  const st = lstatOrNull(path);
+  if (!st) return 'absent';
+  if (!st.isDirectory()) return 'foreign';
+  const names = readdirSync(path);
+  if (names.some((n) => n !== 'payload')) return 'foreign';
+  if (!names.length) return 'ours';
+  return sameFiles(hashTree(join(path, 'payload')), prior.files) ? 'ours' : 'foreign';
+}
+
 function runFamily({ name, source, dest, kind, dir }, receipt, save, now) {
   const prior = receipt.families[name];
   if (prior && DONE.has(prior.result)) return { family: name, result: 'already-decided' };
   const record = (entry) => { receipt.families[name] = { ...entry, at: now.toISOString() }; save(); return { family: name, ...entry }; };
   if (prior?.result === 'pending') {
-    const stagingDir = typeof prior.staging === 'string' && /^\.importing-[\w-]+$/.test(prior.staging) ? join(dir, prior.staging) : null;
+    // The receipt is only a claim: staging is removed only when it is provably this import's own.
+    const staging = stagingState(dir, name, prior);
+    if (staging === 'foreign') return { family: name, result: 'held', stage: 'recover', reason: 'the pending record names a folder that is not this import\'s intact copy; left as found' };
     if (lstatOrNull(dest)) {
       if (!sameFiles(hashTree(dest), prior.files)) return { family: name, result: 'held', stage: 'publish', reason: 'something other than the pending copy is at the destination' };
-      if (stagingDir) rmSync(stagingDir, { recursive: true, force: true });
+      if (staging === 'ours') rmSync(join(dir, prior.staging), { recursive: true });
       return record({ ...prior, result: 'copied', staging: undefined });
     }
-    if (stagingDir) rmSync(stagingDir, { recursive: true, force: true });
+    if (staging === 'ours') rmSync(join(dir, prior.staging), { recursive: true });
   }
   const local = lstatOrNull(dest);
   if (local) {

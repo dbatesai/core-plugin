@@ -110,11 +110,11 @@ test('an unfinished family is staged, recorded as pending, finished when its cop
 
     // published but not yet recorded as done: finished when the copy is intact
     receipt = JSON.parse(readFileSync(join(agent, 'import-receipt.json'), 'utf8'));
-    receipt.families.topics = { ...receipt.families.topics, result: 'pending', staging: '.importing-topics-dead' };
-    mkdirSync(join(agent, '.importing-topics-dead'));
+    receipt.families.topics = { ...receipt.families.topics, result: 'pending', staging: '.importing-topics-deadbeef' };
+    mkdirSync(join(agent, '.importing-topics-deadbeef'));
     writeFileSync(join(agent, 'import-receipt.json'), JSON.stringify(receipt));
     assert.equal(importAgentNotes({ root, home }).results.find((x) => x.family === 'topics').result, 'copied');
-    assert.equal(existsSync(join(agent, '.importing-topics-dead')), false);
+    assert.equal(existsSync(join(agent, '.importing-topics-deadbeef')), false);
 
     // something else at the destination: held, the local bytes kept
     receipt.families.topics.result = 'pending';
@@ -165,5 +165,26 @@ test('a linked local note is held and reported as not readable', { skip: process
     assert.equal(r.results.find((x) => x.family === 'topics').result, 'held');
     assert.equal(r.notes['topics.md'], 'link');
     assert.equal(r.notes['dm-profile.md'], 'ok');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('a pending record that names a folder not provably this import\'s own is held and the folder left as found', () => {
+  const { base, home, root, agent } = setup();
+  try {
+    rmSync(join(home, '.core', 'agents'), { recursive: true });
+    mkdirSync(join(agent, '.importing-user-notes'), { recursive: true });
+    writeFileSync(join(agent, '.importing-user-notes', 'keep.md'), 'user-owned staging data\n');
+    mkdirSync(join(agent, '.importing-task-configs-0badc0de', 'payload'), { recursive: true });
+    writeFileSync(join(agent, '.importing-task-configs-0badc0de', 'payload', 'x.md'), 'not what was recorded\n');
+    writeFileSync(join(agent, '.gitignore'), '*\n');
+    writeFileSync(join(agent, 'import-receipt.json'), JSON.stringify({ version: 1, families: {
+      agents: { result: 'pending', staging: '.importing-user-notes', files: {} },
+      'task-configs': { result: 'pending', staging: '.importing-task-configs-0badc0de', files: { 'x.md': sha('recorded\n') } },
+    } }));
+    const r = importAgentNotes({ root, home });
+    assert.equal(r.status, 'partial');
+    for (const fam of ['agents', 'task-configs']) assert.equal(r.results.find((x) => x.family === fam).result, 'held', fam);
+    assert.equal(readFileSync(join(agent, '.importing-user-notes', 'keep.md'), 'utf8'), 'user-owned staging data\n');
+    assert.equal(readFileSync(join(agent, '.importing-task-configs-0badc0de', 'payload', 'x.md'), 'utf8'), 'not what was recorded\n');
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
