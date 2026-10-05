@@ -1766,3 +1766,24 @@ test('a generated _core folder is not created beside an older .core that is not 
     assert.ok(ensureProjectArtifactDir(p, '_hooks'));
   } finally { s.cleanup(); }
 });
+
+test('an opt-out in an older .core beside a trusted _core manifest still switches metrics and capture off; the environment still decides first', async () => {
+  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Leftover');
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    const env = { CORE_HARNESS: H };
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), true, 'control: on by default');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true);
+    mkdirSync(join(p, '.core', H), { recursive: true });
+    writeFileSync(join(p, '.core', H, 'workspace.json'), '{"turn_capture":false}');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'capture off');
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), true, 'metrics untouched by a capture-only switch');
+    writeFileSync(join(p, '.core', H, 'workspace.json'), '{"metrics_enabled":false}');
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), false, 'metrics off');
+    assert.equal(metricsEnabled({ project: p, env: { ...env, CORE_METRICS_ENABLED: '1' }, home: s.home }), true, 'the environment still decides first');
+  } finally { s.cleanup(); }
+});

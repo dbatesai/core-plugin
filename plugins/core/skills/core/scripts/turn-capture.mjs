@@ -119,7 +119,8 @@ export function turnCaptureEnabled({ project, env = process.env, home = homedir(
         harness: detectStateHarness(env), coreDir, throwReadErrors: true });
       if (m && m.turn_capture === false) return false;
       const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
-      if (!m && manifestTurnCaptureOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
+      // Read even beside a trusted manifest: an older `.core` left in the project may still say off.
+      if (manifestTurnCaptureOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
       // An older or copied project's root manifest may only switch capture off,
       // and has the same read-failure rule until the signed manifest carries it.
       if (readCaptureOptOuts(join(root, 'workspace.json')).turn_capture === false) return false;

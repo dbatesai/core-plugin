@@ -332,7 +332,8 @@ function metricsEnabledFromState({ project, env, home, flag }) {
     if (m && m.metrics_enabled === false) return false; // per-project opt-out
     if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
     const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
-    if (!m && manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
+    // Read even beside a trusted manifest: an older `.core` left in the project may still say off.
+    if (manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
     if (readCaptureOptOuts(join(root, 'workspace.json')).metrics_enabled === false) return false;
   }
   return true; // default-ON: instrument by default; opt out via env or workspace flag
