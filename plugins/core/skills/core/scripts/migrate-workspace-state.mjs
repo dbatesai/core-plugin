@@ -175,16 +175,28 @@ function expandHome(p, home) {
   return p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p;
 }
 
+/**
+ * When this workspace was last active: { t, unknown }. Its own ordinary last-active file in a real
+ * legacy folder wins; a genuinely absent file falls back to the registry field. A link, a second
+ * name, a FIFO or a read error is never opened or trusted, and is reported in `unknown`: the
+ * registry date is still returned, but a choice between duplicates must not rest on it.
+ */
 function lastActive(coreDir, id, indexEntry) {
-  const file = join(coreDir, 'workspaces', id, 'last-active');
-  // Read only its own ordinary file in a real legacy folder: a link, a second name or a FIFO at
-  // either level is never opened, and the registry field answers instead.
-  if (isRealFolder(join(coreDir, 'workspaces', id)) && legacyLeafState(file) === 'file') try {
-    const t = Date.parse(readFileSync(file, 'utf8').trim());
-    if (!Number.isNaN(t)) return t;
-  } catch { /* fall back to the registry field */ }
+  const dir = join(coreDir, 'workspaces', id), file = join(dir, 'last-active');
+  let unknown = null;
+  if (legacyFolderState(dir) === 'other') unknown = 'the workspace folder is a link or not a folder';
+  else if (legacyFolderState(dir) === 'folder') {
+    const leaf = legacyLeafState(file);
+    if (leaf === 'other') unknown = 'last-active is a link, has a second name, or is not an ordinary file';
+    else if (leaf === 'file') {
+      try {
+        const t = Date.parse(readFileSync(file, 'utf8').trim());
+        if (!Number.isNaN(t)) return { t, unknown: null };
+      } catch (e) { if (e.code !== 'ENOENT') unknown = `last-active could not be read (${e.code || 'error'})`; }
+    }
+  }
   const t = Date.parse(indexEntry?.last_active || '');
-  return Number.isNaN(t) ? null : t;
+  return { t: Number.isNaN(t) ? null : t, unknown };
 }
 
 /** Build the manifest. Pure read. */
@@ -258,7 +270,9 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     } else if (!pathExists) {
       e.class = 'orphan-gone'; e.reason = 'registered path no longer exists';
     }
-    e._last = lastActive(coreDir, id, reg);
+    const active = lastActive(coreDir, id, reg);
+    e._last = active.t;
+    if (active.unknown) e.last_active_unknown = active.unknown;
     return e;
   });
 
@@ -293,14 +307,16 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const pointer = readJson(join(group[0].path, 'workspace.json'), {});
     let live = group.find((e) => e.workspace_id === pointer.workspace_id);
     let why = live ? `project pointer names ${live.workspace_id}` : null;
-    if (!live) {
+    const unsure = group.find((e) => e.last_active_unknown);
+    if (!live && unsure) why = `last-active of ${unsure.workspace_id} unknown: ${unsure.last_active_unknown}`;
+    else if (!live) {
       const dated = group.filter((e) => e._last !== null).sort((a, b) => b._last - a._last);
       if (dated.length === group.length && dated[0]._last !== dated[1]._last) {
         live = dated[0]; why = `newest last-active (${new Date(live._last).toISOString()})`;
       }
     }
     for (const e of group) {
-      if (!live) { e.class = 'hold'; e.reason = `duplicate-no-tiebreak with ${group.filter((x) => x !== e).map((x) => x.workspace_id).join(', ')}`; }
+      if (!live) { e.class = 'hold'; e.reason = `duplicate-no-tiebreak with ${group.filter((x) => x !== e).map((x) => x.workspace_id).join(', ')}${why ? ` (${why})` : ''}`; }
       else if (e === live) { e.class = 'migrate'; e.reason = `live duplicate: ${why}`; }
       else { e.class = 'supersede'; e.reason = `duplicate of ${live.workspace_id}: ${why}`; }
     }
@@ -415,19 +431,22 @@ function withManifest(coreDir, table, applyHarness, mutate) {
 /**
  * Whether git tracks `rel`: true, false, or 'unknown'. Only two answers count as "no": exit 1 from
  * --error-unmatch (the path is not tracked), or git's "not a git repository" when no `.git` entry
- * exists at the root or above it. A `.git` that git cannot use is damaged metadata, not absence.
+ * exists at the root or above it and the caller named no repository of its own (GIT_DIR or
+ * GIT_WORK_TREE). A `.git` that git cannot use is damaged metadata, not absence; a named repository
+ * this check does not consult may track the file.
  * Any other failure (git missing, an I/O error, a timeout) is unknown, and unknown never licenses
  * rewriting the file. The question is asked of the project's own repository and index: inherited
  * GIT_* settings are not passed on.
  */
 function gitTracks(root, rel) {
+  const named = Object.keys(process.env).some((k) => ['GIT_DIR', 'GIT_WORK_TREE'].includes(k.toUpperCase()));
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith('GIT_')));
   try {
     execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000, env });
     return true;
   } catch (e) {
     if (e?.status === 1) return false;
-    if (e?.status === 128 && /not a git repository/i.test(String(e.stderr || '')) && !gitEntryAtOrAbove(root)) return false;
+    if (e?.status === 128 && /not a git repository/i.test(String(e.stderr || '')) && !named && !gitEntryAtOrAbove(root)) return false;
     return 'unknown';
   }
 }

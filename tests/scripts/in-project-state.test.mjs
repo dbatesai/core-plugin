@@ -1568,3 +1568,70 @@ test('a git index that git itself rejects is never read as "nothing tracked": ge
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
 });
+
+test('a last-active that cannot be trusted never decides between duplicates: the pair is held and says why; a genuinely absent one falls back to the registry date', { skip: isWin }, async () => {
+  const { buildManifest } = await import('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs');
+  const { chmodSync } = await import('node:fs');
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  const shapes = ['ordinary', 'absent', 'a link', ...(isRoot ? [] : ['unreadable'])];
+  for (const shape of shapes) {
+    const { s, p, table } = migrationFixture();
+    try {
+      rmSync(join(p, 'workspace.json'));   // no project pointer, so last-active is the tiebreak
+      const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'))
+        .map((e) => (e.workspace_id === 'legacy-old' ? { ...e, last_active: '2026-01-01T00:00:00Z' } : e));
+      writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index));
+      const leaf = join(s.coreDir, 'workspaces', 'legacy-old', 'last-active');
+      rmSync(leaf, { force: true });
+      const foreign = join(s.coreDir, '..', 'foreign-stamp');
+      writeFileSync(foreign, '2031-01-01T00:00:00Z\n');
+      if (shape === 'ordinary') writeFileSync(leaf, '2031-01-01T00:00:00Z\n');
+      if (shape === 'a link') symlinkSync(foreign, leaf);
+      if (shape === 'unreadable') { writeFileSync(leaf, '2031-01-01T00:00:00Z\n'); chmodSync(leaf, 0o000); }
+      const m = buildManifest({ coreDir: s.coreDir, table });
+      const old = m.entries.find((e) => e.workspace_id === 'legacy-old'), cur = m.entries.find((e) => e.workspace_id === 'legacy');
+      if (shape === 'ordinary') { assert.equal(old.class, 'migrate', 'control: its own newer stamp selects it'); assert.equal(old.last_active_unknown, undefined); }
+      if (shape === 'absent') { assert.equal(cur.class, 'migrate', 'absent falls back to the registry date'); assert.equal(old.last_active_unknown, undefined); }
+      if (shape === 'a link' || shape === 'unreadable') {
+        assert.equal(cur.class, 'hold', shape); assert.equal(old.class, 'hold', shape);
+        assert.match(cur.reason, /last-active of legacy-old unknown/);
+        assert.ok(old.last_active_unknown, 'the entry carries the reason');
+        assert.equal(readFileSync(foreign, 'utf8'), '2031-01-01T00:00:00Z\n');
+      }
+    } finally { s.cleanup(); }
+  }
+});
+
+test('with GIT_DIR or GIT_WORK_TREE set, a project with no repository of its own keeps its root pointer; one with its own repository still gets a real answer', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore' });
+  const external = (dir) => `process.env.GIT_DIR = ${JSON.stringify(join(dir, 'elsewhere.git'))};`;
+  // no repository of its own, an explicit external one → kept, and said
+  const a = migrationFixture();
+  try {
+    applyMigration({ root: a.p, harness: 'codex', coreDir: a.s.coreDir, table: a.table });
+    const before = readFileSync(join(a.p, 'workspace.json'), 'utf8');
+    const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, preloadExtra: external(a.s.coreDir) });
+    assert.equal(readFileSync(join(a.p, 'workspace.json'), 'utf8'), before);
+    assert.equal(r.root_pointer, 'kept (tracking-unknown)');
+  } finally { a.s.cleanup(); }
+  // its own repository, untracked, GIT_DIR set → its own answer: replaced, nothing to report
+  const b = migrationFixture();
+  try {
+    git(b.p, 'init', '-q');
+    applyMigration({ root: b.p, harness: 'codex', coreDir: b.s.coreDir, table: b.table });
+    const r = await runMigrationChild({ ...b, coreDir: b.s.coreDir, preloadExtra: external(b.s.coreDir) });
+    assert.match(readFileSync(join(b.p, 'workspace.json'), 'utf8'), /"moved"/);
+    assert.equal(r.root_pointer, null);
+  } finally { b.s.cleanup(); }
+  // its own repository, tracked, GIT_WORK_TREE set → kept as tracked, nothing to report
+  const c = migrationFixture();
+  try {
+    git(c.p, 'init', '-q'); git(c.p, 'add', 'workspace.json');
+    applyMigration({ root: c.p, harness: 'codex', coreDir: c.s.coreDir, table: c.table });
+    const before = readFileSync(join(c.p, 'workspace.json'), 'utf8');
+    const r = await runMigrationChild({ ...c, coreDir: c.s.coreDir, preloadExtra: `process.env.GIT_WORK_TREE = ${JSON.stringify(c.s.coreDir)};` });
+    assert.equal(readFileSync(join(c.p, 'workspace.json'), 'utf8'), before);
+    assert.equal(r.root_pointer, null);
+  } finally { c.s.cleanup(); }
+});
