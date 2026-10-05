@@ -126,7 +126,7 @@ test('capture status reads only the folder and calls outside history unknown; de
     assert.deepEqual(s.violations, []);
     const out = JSON.parse(s.stdout);
     assert.deepEqual([out.in_project.rows, out.outside_history], [2, 'unknown']);
-    for (const [cmd, want] of [['retention', 'unavailable'], ['metrics', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
+    for (const [cmd, want] of [['metrics-export', 'unavailable'], ['metrics', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
       const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), cmd, '--root', p.root]);
       assert.equal(JSON.parse(r.stdout).status, want, cmd);
       assert.deepEqual(r.violations, [], cmd);
@@ -531,6 +531,17 @@ test('explicit retrieval: a regular store answers; a store or cache folder that 
       assert.deepEqual(r.violations, []);
       assert.deepEqual(readdirSync(out), [], 'nothing was written outside');
     } finally { b.cleanup(); }
+    // a unit file, and a subfolder, that are links out: never read, and the real units still answer
+    const d2 = project();
+    try {
+      const out = planted(d2.base);
+      symlinkSync(join(out, 'dc-9-planted.md'), join(d2.root, '_memories', 'dc-9-planted.md'));
+      symlinkSync(out, join(d2.root, '_memories', 'observations'));
+      const r = run(d2.root, [RC, d2.root, 'synthetic widget colour purple']);
+      assert.equal(r.status, 0);
+      assert.doesNotMatch(r.stdout, /dc-9-planted/);
+      assert.deepEqual(r.violations, []);
+    } finally { d2.cleanup(); }
     // a file inside a real _lib is a link out
     const c = project();
     try {
@@ -744,6 +755,9 @@ test('process-memory in project-only mode refuses a store, cache folder, lock fi
     'linked _lib': (p, out) => { symlinkSync(out, join(p.root, '_memories', '_lib')); },
     'linked lock file': (p, out) => { writeFileSync(join(out, 'l'), ''); symlinkSync(join(out, 'l'), join(p.root, '_memories', '.decorate-graph.lock')); },
     'linked index': (p, out) => { writeFileSync(join(out, 'i.md'), 'outside'); symlinkSync(join(out, 'i.md'), join(p.root, '_memories', 'INDEX-decisions.md')); },
+    'linked unit file': (p, out) => { symlinkSync(join(out, 'dc-9-planted.md'), join(p.root, '_memories', 'dc-9-planted.md')); },
+    'linked subfolder': (p, out) => { symlinkSync(out, join(p.root, '_memories', 'observations')); },
+    'linked file in a nested folder': (p, out) => { mkdirSync(join(p.root, '_memories', 'observations', '2026-10'), { recursive: true }); symlinkSync(join(out, 'dc-9-planted.md'), join(p.root, '_memories', 'observations', '2026-10', 'obs-x.md')); },
     'linked PROJECT.md': (p, out) => { writeFileSync(join(out, 'P.md'), 'outside'); rmSync(join(p.root, 'PROJECT.md')); symlinkSync(join(out, 'P.md'), join(p.root, 'PROJECT.md')); },
   };
   for (const [name, plant] of Object.entries(cases)) {
@@ -757,6 +771,35 @@ test('process-memory in project-only mode refuses a store, cache folder, lock fi
       assert.deepEqual([r.status, r.state], ['refused', 'refused-link'], name);
       assert.deepEqual(r.violations, [], name);
       assert.deepEqual(tree(out), before, `${name}: nothing outside changed`);
+      assert.equal(existsSync(join(p.root, '_memories', 'INDEX-decisions.md')) && /planted/.test(readFileSync(join(p.root, '_memories', 'INDEX-decisions.md'), 'utf8')), false, `${name}: no outside unit reached an index`);
     } finally { p.cleanup(); }
   }
+});
+
+test('retention in project-only mode is explicit: a dry run lists files past the window and removes nothing; --apply removes only those; a linked capture folder is refused', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const p = project();
+  try {
+    const dir = join(p.root, '_metrics', 'turn-capture'); mkdirSync(dir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(join(dir, '2020-01-01.jsonl'), 'old\n'); writeFileSync(join(dir, `${today}.jsonl`), 'new\n');
+    const po = (...a) => { const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]); assert.deepEqual(r.violations, [], a.join(' ')); return JSON.parse(r.stdout); };
+    const dry = po('retention');
+    assert.deepEqual([dry.outcome, dry.candidates, dry.window_days], ['dry-run', ['_metrics/turn-capture/2020-01-01.jsonl'], 30]);
+    assert.ok(existsSync(join(dir, '2020-01-01.jsonl')));
+    const done = po('retention', '--apply');
+    assert.deepEqual([done.outcome, done.removed], ['removed-in-project', ['_metrics/turn-capture/2020-01-01.jsonl']]);
+    assert.equal(existsSync(join(dir, '2020-01-01.jsonl')), false);
+    assert.equal(readFileSync(join(dir, `${today}.jsonl`), 'utf8'), 'new\n');
+    assert.equal(po('retention', '--apply').outcome, 'nothing-past-window');
+  } finally { p.cleanup(); }
+  const q = project();
+  try {
+    const out = join(q.base, 'outside-capture'); mkdirSync(out); writeFileSync(join(out, '2020-01-01.jsonl'), 'old\n');
+    mkdirSync(join(q.root, '_metrics')); symlinkSync(out, join(q.root, '_metrics', 'turn-capture'));
+    const r = confined(q.root, [join(CORE, 'scripts/project-only.mjs'), 'retention', '--apply', '--root', q.root]);
+    assert.equal(JSON.parse(r.stdout).state, 'refused-link');
+    assert.deepEqual(r.violations, []);
+    assert.ok(existsSync(join(out, '2020-01-01.jsonl')));
+  } finally { q.cleanup(); }
 });

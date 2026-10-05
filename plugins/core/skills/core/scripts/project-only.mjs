@@ -30,7 +30,8 @@
  *      node project-only.mjs pickup|pickup-archive --root <dir> [--harness <h>]   (run from a normal session)
  *      node project-only.mjs purge --root <dir> [--apply]   (a dry run without --apply)
  *      node project-only.mjs process-memory --root <dir> [--apply]   (the script half only)
- *      retention, metrics, metrics-export, configure-project and
+ *      node project-only.mjs retention --root <dir> [--apply]   (explicit only; never on a schedule)
+ *      metrics, metrics-export, configure-project and
  *      memory-view answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
@@ -199,7 +200,6 @@ export function captureStatus(ctx) {
 
 const NORMAL = 'is not available in project-only mode; it reads or writes outside the folder. Run it in a normal session';
 const UNAVAILABLE = {
-  retention: 'retention is not available in project-only mode',
   metrics: `the metrics report ${NORMAL}`,
   'configure-project': `project configuration ${NORMAL}`,
   'memory-view': `the memory view ${NORMAL}`,
@@ -254,6 +254,32 @@ export function purge(ctx, { apply = false } = {}) {
   return { ...base, applied: true, outcome: refused.length ? 'partly-purged-in-project' : removed.length ? 'purged-in-project' : 'nothing-in-project', removed, would_remove: [], refused };
 }
 
+/**
+ * Explicit retention: removes this folder's captured-turn files older than the window. Never runs
+ * on a schedule. A dry run unless `apply` is set; the capture folder chain must be real directories.
+ */
+export async function retention(ctx, { apply = false } = {}) {
+  const metrics = join(ctx.root, '_metrics');
+  const base = { status: 'ok', mode: 'project-only', operation: 'retention', applied: false, outside_history: 'unknown' };
+  try {
+    for (const d of [metrics, join(metrics, 'turn-capture')]) {
+      const st = lstatSync(d);
+      if (st.isSymbolicLink() || !st.isDirectory() || !realpathSync.native(d).startsWith(ctx.root + sep)) return { status: 'refused', state: 'refused-link', reason: outside(d).message };
+    }
+    for (const name of readdirSync(metrics)) {
+      if (name.startsWith('.turn-capture.lock') && lstatSync(join(metrics, name)).isSymbolicLink()) return { status: 'refused', state: 'refused-link', reason: outside(join(metrics, name)).message };
+    }
+  } catch (e) {
+    if (e.code === 'ENOENT') return { ...base, outcome: 'nothing-in-project', window_days: null, candidates: [], removed: [] };
+    return { status: 'refused', state: 'unreadable', reason: e.code };
+  }
+  const { runTurnCaptureRetention } = await import('./turn-capture.mjs');
+  const r = runTurnCaptureRetention(ctx.root, { apply });
+  const rel = (f) => `_metrics/turn-capture/${String(f).split(/[\\/]/).pop()}`;
+  if (apply && !r.verified) return { status: 'refused', state: 'retention-incomplete', removed: r.deleted.map(rel), reason: 'some files could not be removed' };
+  return { ...base, applied: apply, outcome: apply ? (r.deleted.length ? 'removed-in-project' : 'nothing-past-window') : 'dry-run', window_days: r.windowDays, cutoff: r.cutoff, candidates: r.candidates.map(rel), removed: r.deleted.map(rel) };
+}
+
 // ---------- memory processing, the script half ----------
 //
 // What `/process-memory` does by script, from the folder alone: check the units, refresh the link
@@ -268,21 +294,32 @@ const PM_NOT_RUN = [
   'graduation and look-back (agent reasoning under the protocol, not a script)',
 ];
 
+/** The first link found anywhere under `dir` (never followed), or null. An unlistable folder throws. */
+function firstLinkUnder(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isSymbolicLink()) return p;
+    if (e.isDirectory()) { const inner = firstLinkUnder(p); if (inner) return inner; }
+  }
+  return null;
+}
+
 export async function processMemory(ctx, { apply = false } = {}) {
   const { storeBoundaryProblem } = await import('./generate-summary-index.mjs');
   const problem = storeBoundaryProblem(ctx.root);
   if (problem) return { status: 'refused', state: problem.code === 'STORE_OUTSIDE_ROOT' ? 'refused-link' : 'boundary-unverified', reason: problem.path };
   const mem = join(ctx.root, '_memories');
-  let names;
-  try { const st = lstatSync(mem); if (!st.isDirectory()) throw Object.assign(new Error('no store'), { code: 'ENOENT' }); names = readdirSync(mem); }
+  try { const st = lstatSync(mem); if (!st.isDirectory()) throw Object.assign(new Error('no store'), { code: 'ENOENT' }); }
   catch (e) { return e.code === 'ENOENT' ? { status: 'refused', state: 'no-store', reason: 'no _memories/ in this folder' } : { status: 'refused', state: 'unreadable', reason: e.code }; }
-  // Lock files and the files these steps rewrite must not be links out of the folder.
-  for (const [dir, list] of [[mem, names], [ctx.root, ['PROJECT.md', 'PROJECT-ARCHIVE.md']]]) {
-    for (const name of list) {
-      if (dir === mem && !(name.includes('.lock') || name.startsWith('INDEX-') || name === '_maintenance-state.json')) continue;
-      let g; try { g = lstatSync(join(dir, name)); } catch { continue; }
-      if (g.isSymbolicLink()) return { status: 'refused', state: 'refused-link', reason: outside(join(dir, name)).message };
-    }
+  // The steps below read every unit and rewrite lock, index and cache files, and not all of their
+  // readers skip links. So nothing anywhere under `_memories` may be a link, and neither may the
+  // synthesis files beside it: a link is refused and named before any step runs.
+  let link;
+  try { link = firstLinkUnder(mem); } catch (e) { return { status: 'refused', state: 'boundary-unverified', reason: `${e.code || e.message}: part of _memories could not be listed` }; }
+  if (link) return { status: 'refused', state: 'refused-link', reason: outside(link).message };
+  for (const name of ['PROJECT.md', 'PROJECT-ARCHIVE.md']) {
+    let g; try { g = lstatSync(join(ctx.root, name)); } catch { continue; }
+    if (g.isSymbolicLink()) return { status: 'refused', state: 'refused-link', reason: outside(join(ctx.root, name)).message };
   }
   const { iterActiveUnits, checkSchema, checkIntegrity } = await import('./check-units.mjs');
   const { decorateStoreLocked } = await import('./decorate-graph.mjs');
@@ -485,10 +522,11 @@ export function main(argv) {
     startup, status, 'capture-status': captureStatus, pickup, 'pickup-archive': pickupArchive,
     purge: (ctx) => purge(ctx, { apply: opt.apply === true }),
     'process-memory': (ctx) => processMemory(ctx, { apply: opt.apply === true }),
+    retention: (ctx) => retention(ctx, { apply: opt.apply === true }),
     'finalize-begin': finalizeBegin, 'finalize-certify': finalizeCertify, 'finalize-finish': finalizeFinish,
     'finalize-record': (ctx) => finalizeRecord(ctx, { op: opt.op, opStatus: opt.status }),
   }[cmd];
-  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status, purge, process-memory, pickup, pickup-archive and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
+  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status, purge, retention, process-memory, pickup, pickup-archive and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
   const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd });
   if (!ctx.ok) return out({ status: 'refused', ...ctx });
   const result = run(ctx);
