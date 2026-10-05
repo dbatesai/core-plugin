@@ -1879,3 +1879,18 @@ test('hot writers refuse a linked _sessions or _metrics and write nothing throug
     assert.ok(existsSync(join(q, '.core', H, 'metrics', 'capture-disabled.json')), 'left in place');
   } finally { s.cleanup(); }
 });
+
+test('a session log that is a link is not appended through', { skip: isWin }, async () => {
+  const { logEvent } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'LogLink');
+    mkdirSync(join(p, '_sessions', '2026-10-05'), { recursive: true });
+    const outside = join(s.base, 'outside.jsonl');
+    writeFileSync(outside, 'untouched\n');
+    symlinkSync(outside, join(p, '_sessions', '2026-10-05', 'retrieval-log.jsonl'));
+    assert.equal(logEvent(p, 'retrieval-log.jsonl', { k: 1 }, { today: '2026-10-05' }).reason, 'legacy-append-failed');
+    assert.equal(readFileSync(outside, 'utf8'), 'untouched\n');
+    assert.equal(logEvent(p, 'hygiene-log.jsonl', { k: 1 }, { today: '2026-10-05' }).legacy, true, 'an ordinary log still appends');
+  } finally { s.cleanup(); }
+});

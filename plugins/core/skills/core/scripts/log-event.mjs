@@ -21,7 +21,7 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeSync, closeSync, constants as fsConstants } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
@@ -58,8 +58,8 @@ export function resolveStoragePath(projectDir) {
 export function prepareStorageDir(projectDir) {
   const base = resolveStoragePath(projectDir);
   const chain = folderChain(projectDir, '_metrics');
-  if (chain !== 'real' && chain !== 'absent') throw Object.assign(new Error(`not stored: _metrics: ${chain}`), { code: 'STORAGE_UNSAFE' });
   if (chain === 'absent') mkdirSync(base);
+  // A linked or unreadable `_metrics` comes back as a problem here, before any lock or data is written.
   const problems = ensureStoreIgnores(projectDir, { families: [METRICS_IGNORE], verify: false });
   if (problems.length) throw Object.assign(new Error(`not stored: ${problems.join('; ')}`), { code: 'STORAGE_UNSAFE' });
   return base;
@@ -412,6 +412,16 @@ export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, m
 // Returns a write outcome — {legacy, reason?} — so producers can tell a
 // delivered event from a silently-swallowed one. Still best-effort: never
 // throws, never blocks the host.
+// Appends only to a single-named regular file, or creates it; never through a link. O_NOFOLLOW where the
+// platform has it, and the lstat check everywhere.
+function appendLeaf(file, text) {
+  let st = null;
+  try { st = lstatSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (st && (!st.isFile() || st.nlink !== 1)) throw Object.assign(new Error('log file is a link or not a regular file'), { code: 'LOG_UNSAFE' });
+  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), 0o644);
+  try { writeSync(fd, text); } finally { closeSync(fd); }
+}
+
 export function logEvent(projectDir, filename, event, { today, now } = {}) {
   const outcome = { legacy: false };
   if (!existsSync(projectDir)) { outcome.reason = 'project-dir-missing'; return outcome; }
@@ -432,7 +442,7 @@ export function logEvent(projectDir, filename, event, { today, now } = {}) {
   const record = { ts, ...event };
 
   try {
-    appendFileSync(join(sessionDir, filename), JSON.stringify(record) + '\n');
+    appendLeaf(join(sessionDir, filename), JSON.stringify(record) + '\n');
     outcome.legacy = true;
   } catch {
     outcome.reason = 'legacy-append-failed'; // best-effort by design — reported, not thrown
