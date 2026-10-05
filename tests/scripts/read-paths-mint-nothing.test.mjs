@@ -98,16 +98,17 @@ test('the metrics gate answers OFF, never throws, when the project list is malfo
       const m = await import(${JSON.stringify(pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts/log-event.mjs')).href)});
       const a = m.metricsEnabled({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: {} });
       const b = m.metricsEnabled({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: {} });
+      const why = m.metricsGateFailure;
       const c = m.metricsEnabled({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: { CORE_METRICS_ENABLED: '1' } });
-      process.stdout.write(JSON.stringify({ a, b, c, why: m.metricsGateFailure }));
+      process.stdout.write(JSON.stringify({ a, b, c, why, after_good_read: m.metricsGateFailure }));
     `], { encoding: 'utf8' });
     const ok = probe(`writeFileSync(list, '{"projects":[]}');`);
-    assert.deepEqual(JSON.parse(ok.stdout), { a: true, b: true, c: true, why: null }, 'control: a readable list keeps the default');
+    assert.deepEqual(JSON.parse(ok.stdout), { a: true, b: true, c: true, why: null, after_good_read: null }, 'control: a readable list keeps the default');
     assert.equal(ok.stderr, '');
     for (const [label, code, why] of [['malformed JSON', `writeFileSync(list, '{not json');`, 'SyntaxError'], ['a directory where the list should be', `mkdirSync(list);`, 'EISDIR']]) {
       const r = probe(code);
       assert.equal(r.status, 0, `${label}: ${r.stderr}`);
-      assert.deepEqual(JSON.parse(r.stdout), { a: false, b: false, c: true, why }, label);
+      assert.deepEqual(JSON.parse(r.stdout), { a: false, b: false, c: true, why, after_good_read: null }, `${label}: the reason is for the failing call and clears when a later call reads cleanly`);
       assert.equal(r.stderr.split('\n').filter((l) => l.startsWith('CORE metrics gate:')).length, 1, `${label}: said once, not per call`);
     }
   } finally { rmSync(base, { recursive: true, force: true }); }
