@@ -3,10 +3,7 @@
 // cross-machine locks, and the no-hand-built-path gate. Every test runs in temp dirs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, chmodSync, statSync,
-  utimesSync, symlinkSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, chmodSync, statSync, utimesSync, symlinkSync, renameSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -1270,4 +1267,43 @@ test('a legacy manifest that changes between being classified and being fingerpr
     const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir });
     assert.deepEqual([r.status, r.fast], ['migrated', undefined], 'the record named the classified codex bytes, so the flip invalidates it');
   } finally { fs.readFileSync = orig; syncBuiltinESMExports(); s.cleanup(); }
+});
+
+// ---------- the legacy source folders themselves must be real folders ----------
+
+const treeOf = (dir) => { const o = {}; const walk = (d, pre) => { for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { if (e.isDirectory()) { o[pre + e.name + '/'] = 'dir'; walk(join(d, e.name), pre + e.name + '/'); } else if (e.isFile()) o[pre + e.name] = readFileSync(join(d, e.name), 'utf8'); else o[pre + e.name] = 'other'; } }; walk(dir, ''); return o; };
+
+test('a legacy workspace folder that is a link is held: nothing is copied into the project and nothing is written where the link leads', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  const legacy = join(s.coreDir, 'workspaces', 'legacy');
+  const foreign = join(s.coreDir, '..', 'foreign-legacy');
+  try {
+    renameSync(legacy, foreign);            // the real content now lives somewhere else…
+    symlinkSync(foreign, legacy);           // …and the legacy name is only a link to it
+    const before = treeOf(foreign);
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'LEGACY_SYMLINK');
+    assert.equal(r.path, legacy);
+    assert.deepEqual(treeOf(foreign), before, 'no MOVED note or anything else was written there');
+    assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false, 'no completion receipt');
+    assert.equal(existsSync(join(p, '.core', H, '.migrating')), false, 'refused before the marker: the project is as it was');
+  } finally { s.cleanup(); }
+});
+
+test('a legacy workspaces folder that is itself a link is held before it is listed', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  const ws = join(s.coreDir, 'workspaces');
+  const foreign = join(s.coreDir, '..', 'foreign-workspaces');
+  try {
+    renameSync(ws, foreign);
+    symlinkSync(foreign, ws);
+    const before = treeOf(foreign);
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'LEGACY_SYMLINK');
+    assert.equal(r.path, ws);
+    assert.deepEqual(treeOf(foreign), before);
+    assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false);
+  } finally { s.cleanup(); }
 });

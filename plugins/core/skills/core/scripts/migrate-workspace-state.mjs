@@ -90,6 +90,15 @@ class LegacyStateError extends Error {
   }
 }
 
+/** A legacy folder that is absent is fine; one that is a link, not a folder, or can't be examined is held. */
+function assertLegacyFolder(path) {
+  let st;
+  try { st = lstatSync(path); }
+  catch (e) { if (e.code === 'ENOENT') return; throw new LegacyStateError('LEGACY_UNREADABLE', path, `cannot examine (${e.code || e.message})`); }
+  if (st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', path, 'the legacy folder is a link');
+  if (!st.isDirectory()) throw new LegacyStateError('LEGACY_UNREADABLE', path, 'not a folder');
+}
+
 function listFiles(dir, { strict = false } = {}) {
   const out = [];
   const walk = (d) => {
@@ -465,6 +474,9 @@ function applyMigrationInner(opts = {}) {
 
 function fullMigration({ root, harness, coreDir, table, now, seen }) {
   assertHarnessName(harness);
+  // The legacy store's own folder is checked before it is listed: a link there would make every
+  // read below somebody else's files.
+  assertLegacyFolder(join(coreDir, 'workspaces'));
   const real = canonical(root);
   const iso = now.toISOString();
   const lockFile = join(real, '_memories', '_close.lock');
@@ -523,6 +535,9 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     }
 
     if (copies) {
+      // Each workspace about to be copied from must itself be a real folder. Checked before the
+      // marker, the copy and the MOVED note, so a refusal leaves both sides exactly as found.
+      for (const e of [...(live ? [live] : []), ...dups]) { assertSafeWorkspaceId(e.workspace_id); assertLegacyFolder(join(coreDir, 'workspaces', e.workspace_id)); }
       atomicWriteFileSync(markerFile, `${iso}\n`);
       const toCopy = [...(live ? [{ e: live, superseded: false }] : []), ...dups.map((e) => ({ e, superseded: true }))];
       for (const { e, superseded } of toCopy) {
