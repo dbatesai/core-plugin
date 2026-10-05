@@ -184,7 +184,7 @@ export function finishClose(store, { sessionId = null, status = 'closed', storeS
   if (release && release.released === false && release.reason === 'release-failed') {
     marker.release_error = release.error || 'release-failed';
     try { atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n'); } catch { /* marker already closed */ }
-    logHookEvent({ hook: 'close-finish', action: 'error', reason: `lock release failed: ${marker.release_error}`, cwd: store });
+    logHookEvent({ hook: 'close-finish', action: 'error', reason: `lock release failed: ${marker.release_error}`, projectRoot: store, cwd: store });
   }
   return { ...marker, release };
 }

@@ -12,12 +12,8 @@ const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const CLOSE_PASS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
 
-// Isolate every hook test log (the first isolation pass missed this file): a
-// subprocess hook run that doesn't override CORE_HOOKS_LOG_FILE defaults to
-// the real machine-wide ~/.core/hooks-log.jsonl.
-// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
-// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
-// isn't auto-cleaned — every created dir is tracked and removed below.
+// Probe modules live in separately tracked test directories; receipts live in the
+// explicit fixture project. Foreign overrides cannot redirect a production receipt.
 const _isolatedLogDirs = [];
 function isolatedHooksLog() {
   const dir = mkdtempSync(join(trustedTestTmpRoot(), 'close-pass-hook-log-'));
@@ -26,23 +22,17 @@ function isolatedHooksLog() {
 }
 after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
-// SEPARATE leak: several tests below call
-// close-pass.mjs's runClose/beginClose IN-PROCESS via dynamic import — not a
-// subprocess — so the execFileSync-level CORE_HOOKS_LOG_FILE override above
-// never applies to them. logHookEvent() inside close-pass.mjs reads
-// process.env.CORE_HOOKS_LOG_FILE from THIS test-runner process directly.
-// Setting it once at module load (this file's tests don't assert on the
-// log's content, only that they never touch the real one) covers every
-// in-process call for the lifetime of this file.
+// A foreign override in this test process must not redirect in-process close receipts.
 process.env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
 
 // Run the real hook entry and record its exact skip receipt. Stub only the
 // child spawn boundary, so the registered positive control proves every prior
 // gate was reached without launching a detached writer into a removed fixture.
 function runHook(payload, env = {}) {
-  const log = isolatedHooksLog();
-  const probe = join(dirname(log), 'spawn-probe.mjs');
-  const spawned = join(dirname(log), 'spawned.json');
+  const log = join(payload.cwd, '.core', '_hooks', 'hooks-log.jsonl');
+  const probeDir = dirname(isolatedHooksLog());
+  const probe = join(probeDir, 'spawn-probe.mjs');
+  const spawned = join(probeDir, 'spawned.json');
   writeFileSync(probe, `
     import cp from 'node:child_process';
     import { writeFileSync } from 'node:fs';
@@ -186,8 +176,9 @@ test('always exits 0 even on garbage stdin (fail-open)', () => {
 // into a fixture that is about to be removed.
 function runRealSpawn(t, rewrite, extraEnv = {}) {
   const f = registeredFixture(t);
-  const log = isolatedHooksLog();
-  const probe = join(dirname(log), 'real-spawn-probe.mjs');
+  const log = join(f.store, '.core', '_hooks', 'hooks-log.jsonl');
+  const probeDir = dirname(isolatedHooksLog());
+  const probe = join(probeDir, 'real-spawn-probe.mjs');
   writeFileSync(probe, `
     import cp from 'node:child_process';
     import { syncBuiltinESMExports } from 'node:module';
@@ -212,4 +203,9 @@ test('SessionEnd whose close cannot be launched says spawn-failed with the reaso
   const rows = runRealSpawn(t, `(command, args) => ['/nonexistent/core-test-binary', args]`);
   assert.deepEqual([rows.at(-1).action, rows.at(-1).reason], ['spawn-failed', 'ENOENT']);
   assert.ok(!rows.some((r) => r.action === 'spawn'), 'no row claims the close started');
+});
+
+test('pure resume helper returns its skip decision without caller receipt context', async () => {
+  const { decideCloseAction } = await import('../../plugins/core/skills/core/hooks/close-pass-hook.mjs');
+  assert.deepEqual(decideCloseAction({ reason: 'resume' }), { action: 'skip', reason: 'session-reason=resume' });
 });

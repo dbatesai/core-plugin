@@ -166,7 +166,7 @@ test('Link 4a: self-test log rows carry producer identity', async () => {
 // outside, and the shape no test previously asserted.
 test('every metrics-on invocation stamps a turn_capture status on its receipt', () => {
   const store = tempStore();
-  const logFile = isolatedHooksLog();
+  const logFile = join(store, '.core', '_hooks', 'hooks-log.jsonl');
   runHook('omega speedmaster on sale', { CORE_HOOKS_LOG_FILE: logFile }, store);
   const rows = readFileSync(logFile, 'utf8').trim().split('\n')
     .filter(Boolean).map((l) => JSON.parse(l))

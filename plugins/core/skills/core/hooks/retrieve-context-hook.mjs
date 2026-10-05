@@ -118,12 +118,15 @@ export async function main() {
   // before the registry gate and the logger, which live outside the folder.
   if (projectOnlyHint(payload.cwd || process.cwd())) return 0;
 
+  const receiptCwd = payload.cwd || process.cwd();
+  const logContext = { cwd: receiptCwd, projectRoot: resolveRegisteredRoot(receiptCwd) };
+
   // Default-ON, opt-out gate. Runs unless explicitly
   // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
-  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
+  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out', logContext);
 
   const prompt = String(payload.prompt || '');
-  if (!prompt.trim()) return receipt('skip', 'empty-prompt');
+  if (!prompt.trim()) return receipt('skip', 'empty-prompt', logContext);
 
   // Trust: a folder's own `_memories/` authorizes nothing, because a cloned repo can carry
   // one. Only a project registered in ~/.core is injected (the same anchor the SessionEnd
@@ -132,11 +135,11 @@ export async function main() {
   let cwd = resolve(payload.cwd || process.cwd());
   try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
   const store = resolveRegisteredRoot(cwd);
-  if (!store) return receipt('skip', 'not-registered-workspace', { cwd });
-  if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
+  if (!store) return receipt('skip', 'not-registered-workspace', { cwd, projectRoot: null });
+  if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { projectRoot: store, cwd: store });
   try {
-    if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
-  } catch { return receipt('skip', 'store-unavailable', { cwd: store }); }
+    if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store });
+  } catch { return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store }); }
 
   // ONE pipeline run serves both jobs: buildRetrievalTrace runs the same staged pipeline as
   // retrieveContext and carries the delivered pack — the hook injects pack.text
@@ -153,8 +156,8 @@ export async function main() {
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
-  } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
-  if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
+  } catch { return receipt('failed', 'pipeline-error', { projectRoot: store, cwd: store }); }
+  if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
   const zeroHit = final.length === 0;
@@ -377,7 +380,7 @@ export async function main() {
     reason = 'delivery-failed';
   }
   return receipt(action, reason, {
-    cwd: store,
+    projectRoot: store, cwd: store,
     ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
     ...(retrievalId ? { retrieval_id: retrievalId } : {}),
     // Evidence-capture outcome: a closed status code — never raw prompt/pack

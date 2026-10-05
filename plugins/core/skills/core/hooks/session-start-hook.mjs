@@ -31,7 +31,7 @@
  * Ships with the plugin as prescriptive code; .mjs only. Claude Code SessionStart; Codex has a
  * different session model (harnesses/codex.md) and bootstraps via its own startup mandate.
  *
- * I/O: ignores stdin; prints the directive to stdout. Always exits 0 — a startup hook must
+ * I/O: reads stdin for the project working directory; prints the directive to stdout. Always exits 0 — a startup hook must
  * never block the session opening.
  */
 
@@ -41,6 +41,7 @@ import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
 import { trustedHome } from '../scripts/trusted-home.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
+import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
 import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 // trustedHome() (shared anchor in scripts/trusted-home.mjs): the OS-account home,
@@ -73,13 +74,13 @@ export function userAuthorizedSkills(readFile = readFileSync, home = trustedHome
   } catch { return new Set(); }
 }
 
-export function autostartSkill(env = process.env, authorized = null) {
+export function autostartSkill(env = process.env, authorized = null, logContext = {}) {
   const v = env.CORE_AUTOSTART_SKILL;
   if (!v || v === '/core') return '/core';
   if (!SKILL_SHAPE.test(v)) return '/core';                       // not a skill reference
   const allow = authorized ?? userAuthorizedSkills();
   if (!allow.has(v)) {
-    logHookEvent({ hook: 'session-start', action: 'reject-autostart-skill', reason: 'not-user-authorized:' + v });
+    logHookEvent({ hook: 'session-start', action: 'reject-autostart-skill', reason: 'not-user-authorized:' + v, ...logContext });
     return '/core';                                               // shape ≠ authority
   }
   return v;
@@ -96,20 +97,22 @@ function main() {
   try { const raw = readFileSync(0, 'utf8'); if (raw.trim()) payload = JSON.parse(raw); } catch { payload = {}; }
   // A project-only folder gets the notice and nothing else: no settings read, no log write.
   if (projectOnlyHint(payload.cwd || process.cwd())) { process.stdout.write(PROJECT_ONLY_NOTICE + '\n'); return 0; }
+  const cwd = payload.cwd || process.cwd();
+  const logContext = { cwd, projectRoot: resolveRegisteredRoot(cwd) };
   // A session running under CORE_CLOSE_PASS_ACTIVE=1 is discharging a close and must NOT be
   // told to run /core first — it has one job. Without this, such a session takes the /core
   // directive and never cleanly closes.
   if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
-    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'close-pass-child' });
+    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'close-pass-child', ...logContext });
     return 0;
   }
   if (process.env.CORE_AUTOSTART === '0') {
-    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out' });
+    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out', ...logContext });
     return 0;
   }
-  const skill = autostartSkill();
+  const skill = autostartSkill(process.env, null, logContext);
   process.stdout.write(buildDirective(skill) + '\n');
-  logHookEvent({ hook: 'session-start', action: 'inject', reason: skill === '/core' ? undefined : 'skill=' + skill });
+  logHookEvent({ hook: 'session-start', action: 'inject', reason: skill === '/core' ? undefined : 'skill=' + skill, ...logContext });
   return 0;
 }
 

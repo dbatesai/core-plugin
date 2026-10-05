@@ -57,21 +57,23 @@ function main() {
   // A project-only folder has no automatic close (its next startup says so): exit before the
   // registry gate and the logger.
   if (projectOnlyHint(payload.cwd || process.cwd())) return 0;
+  const receiptCwd = resolve(payload.cwd || process.cwd());
+  const logContext = { cwd: receiptCwd, projectRoot: resolveRegisteredRoot(receiptCwd) };
 
   // Guard 1 — environment suppression: a close already owns this environment. No-op.
   if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
+    logHookEvent({ ...logContext, hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
     return 0;
   }
   // Guard 2 — kill switch: auto-close disabled.
   if (process.env.CORE_AUTO_CLOSE === '0') {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'kill-switch' });
+    logHookEvent({ ...logContext, hook: 'session-end', action: 'skip', reason: 'kill-switch' });
     return 0;
   }
 
   const reason = String(payload.reason || '');
   if (SKIP_REASONS.has(reason)) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'session-reason=' + reason });
+    logHookEvent({ ...logContext, hook: 'session-end', action: 'skip', reason: 'session-reason=' + reason });
     return 0;
   }
 
@@ -84,14 +86,14 @@ function main() {
   try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
   const store = resolveRegisteredRoot(cwd);
   if (!store) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd });
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd, projectRoot: null });
     return 0;
   }
 
   // Guard 4 — the exact-session decision (pure; see decideCloseAction below).
   const decision = decideCloseAction(payload, { store });
   if (decision.action === 'skip') {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: decision.reason, cwd: store });
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: decision.reason, cwd: store, projectRoot: store });
     return 0;
   }
 
@@ -107,7 +109,7 @@ function main() {
     // keeps that true if this is ever called without exiting.
     let settled = false; let timer = null;
     const settle = (row) => { if (settled) return; settled = true; clearTimeout(timer); logHookEvent(row); done(0); };
-    const failed = (why) => settle({ hook: 'session-end', action: 'spawn-failed', reason: String(why || 'error'), cwd: store, session: decision.sessionId });
+    const failed = (why) => settle({ hook: 'session-end', action: 'spawn-failed', reason: String(why || 'error'), cwd: store, projectRoot: store, session: decision.sessionId });
     let child;
     try { child = spawn(process.execPath, decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' }); }
     catch (e) { return failed(e?.code || e?.message); }
@@ -115,7 +117,7 @@ function main() {
     child.once('error', (e) => failed(e?.code || e?.message));
     child.once('spawn', () => {
       try { child.unref(); } catch { /* already gone */ }
-      settle({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store, session: decision.sessionId });
+      settle({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store, projectRoot: store, session: decision.sessionId });
     });
   });
 }
