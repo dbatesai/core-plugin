@@ -26,7 +26,7 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
 
 /**
@@ -276,19 +276,14 @@ function metricsEnabledFromState({ project, env, home, flag }) {
   if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
-    let m = null;
-    try {
-      const coreDir = join(home, '.core');
-      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
-    } catch { m = null; }
+    const coreDir = join(home, '.core');
+    const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
+      harness: detectStateHarness(env), coreDir, throwReadErrors: true });
     if (m && m.metrics_enabled === false) return false; // per-project opt-out
     if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
     const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
     if (!m && manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
-    try {
-      const rootManifest = JSON.parse(readFileSync(join(root, 'workspace.json'), 'utf8'));
-      if (rootManifest && rootManifest.metrics_enabled === false) return false;
-    } catch { /* absent or unreadable: no opt-out */ }
+    if (readCaptureOptOuts(join(root, 'workspace.json')).metrics_enabled === false) return false;
   }
   return true; // default-ON: instrument by default; opt out via env or workspace flag
 }

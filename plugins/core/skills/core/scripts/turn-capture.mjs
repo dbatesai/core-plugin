@@ -48,7 +48,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -103,29 +103,34 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  *      `workspace.json`, says `"turn_capture": false` → OFF.
  *   4. default → ON.
  */
+export let turnCaptureGateFailure = null;
+let gateFailureSaid = false;
+
 export function turnCaptureEnabled({ project, env = process.env, home = homedir() } = {}) {
+  turnCaptureGateFailure = null;
   if (!metricsEnabled({ project, env, home })) return false;
   const flag = (env.CORE_TURN_CAPTURE || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false;
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
-    let m = null;
     try {
       const coreDir = join(home, '.core');
-      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
-    } catch { m = null; }
-    if (m && m.turn_capture === false) return false;
-    try {
+      const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
+        harness: detectStateHarness(env), coreDir, throwReadErrors: true });
+      if (m && m.turn_capture === false) return false;
       const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
       if (!m && manifestTurnCaptureOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
-    } catch { /* unresolvable project: no unverified opt-out to honor */ }
-    // A project-root workspace.json can still say "off" (an older or copied project). Like
-    // metrics_enabled, it only ever switches capture off, and it keeps doing so until the
-    // signed manifest carries the value.
-    try {
-      const rootManifest = JSON.parse(readFileSync(join(projectRootFor(project, { home, coreDir: join(home, '.core') }), 'workspace.json'), 'utf8'));
-      if (rootManifest && rootManifest.turn_capture === false) return false;
-    } catch { /* absent or unreadable: no opt-out */ }
+      // An older or copied project's root manifest may only switch capture off,
+      // and has the same read-failure rule until the signed manifest carries it.
+      if (readCaptureOptOuts(join(root, 'workspace.json')).turn_capture === false) return false;
+    } catch (e) {
+      turnCaptureGateFailure = String(e?.code || e?.name || 'error');
+      if (!gateFailureSaid) {
+        gateFailureSaid = true;
+        try { process.stderr.write(`CORE turn-capture gate: could not read project state (${turnCaptureGateFailure}); capture is off for this run\n`); } catch { /* stderr closed */ }
+      }
+      return false;
+    }
   }
   return true;
 }

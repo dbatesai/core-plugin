@@ -606,7 +606,7 @@ export function writeSignedFile({ dir, name, body, coreDir = defaultCoreDir(), m
  * A writer sits between the file and its sidecar for a moment, so one re-read is taken
  * before calling a mismatch.
  */
-export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir() }) {
+export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir(), throwReadErrors = false }) {
   const s = stateDir({ root, harness, kind: 'durable', coreDir });
   if (!s) return null;
   if (s.location === 'project' && trackedStateFiles(canonical(root), harness).has(name)) return null;
@@ -619,7 +619,10 @@ export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir()
     try {
       bytes = readFileSync(file);
       mac = readFileSync(`${file}${MAC_SUFFIX}`, 'utf8').trim();
-    } catch { return null; }
+    } catch (e) {
+      if (throwReadErrors && e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e;
+      return null;
+    }
     const want = Buffer.from(contentMac(secret, name, bytes), 'hex');
     const got = /^[0-9a-f]{64}$/.test(mac) ? Buffer.from(mac, 'hex') : null;
     if (got && timingSafeEqual(want, got)) return bytes.toString('utf8');
@@ -875,8 +878,8 @@ function sleepMs(ms) {
 const MANIFEST = 'workspace.json';
 
 /** The manifest for (root, harness), or null when absent, untrusted, tracked, or its MAC fails. */
-export function readManifest({ root, harness, coreDir = defaultCoreDir() }) {
-  const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
+export function readManifest({ root, harness, coreDir = defaultCoreDir(), throwReadErrors = false }) {
+  const text = readSignedFile({ root, harness, name: MANIFEST, coreDir, throwReadErrors });
   if (text === null) return null;
   try { return JSON.parse(text); } catch { return null; }
 }
@@ -897,7 +900,7 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
       const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
       if (text === null) {
         // An untrusted manifest can only make capture safer: its opt-out survives the set-aside.
-        current = untrustedOptOuts(file);
+        current = readCaptureOptOuts(file);
         renameSync(file, `${file}.unverified-${isoStamp()}`);
       } else {
         // An unparseable manifest is surfaced, never silently replaced.
@@ -916,16 +919,24 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
 
 // Which capture switches an unverified manifest turns off. Untrusted content may only ever
 // make capture safer, so each opt-out it carries survives the set-aside.
-function untrustedOptOuts(file) {
+export function readCaptureOptOuts(file) {
   const out = {};
+  let text;
+  try { text = readFileSync(file, 'utf8'); }
+  catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return out;
+    // Unable to read is unknown, not an absent opt-out. Privacy consumers fail OFF;
+    // updateManifest must also preserve the unreadable file rather than replace it.
+    throw e;
+  }
   try {
-    const m = JSON.parse(readFileSync(file, 'utf8'));
-    if (m.metrics_enabled === false) out.metrics_enabled = false;
-    if (m.turn_capture === false) out.turn_capture = false;
-  } catch { /* unreadable: no opt-out to carry */ }
+    const m = JSON.parse(text);
+    if (m?.metrics_enabled === false) out.metrics_enabled = false;
+    if (m?.turn_capture === false) out.turn_capture = false;
+  } catch { /* readable malformed untrusted data carries no valid switch */ }
   return out;
 }
-function untrustedOptOut(file) { return untrustedOptOuts(file).metrics_enabled === false; }
+function untrustedOptOut(file) { return readCaptureOptOuts(file).metrics_enabled === false; }
 
 /**
  * True when this harness's manifest says metrics_enabled:false but doesn't verify.
@@ -937,7 +948,7 @@ export function manifestOptsOutUnverified({ root, harness }) {
 
 /** Same rule for the turn-capture switch: an unverified manifest may switch it off, never on. */
 export function manifestTurnCaptureOptsOutUnverified({ root, harness }) {
-  return untrustedOptOuts(join(canonical(root), STATE_DIRNAME, harness, MANIFEST)).turn_capture === false;
+  return readCaptureOptOuts(join(canonical(root), STATE_DIRNAME, harness, MANIFEST)).turn_capture === false;
 }
 
 // ---------- the bootstrap record (last-bootstrap.json) ----------

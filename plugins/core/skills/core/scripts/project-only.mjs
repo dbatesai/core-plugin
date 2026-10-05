@@ -280,7 +280,14 @@ export async function retention(ctx, { apply = false } = {}) {
   const { runTurnCaptureRetention } = await import('./turn-capture.mjs');
   const r = runTurnCaptureRetention(ctx.root, { apply });
   const rel = (f) => `_metrics/turn-capture/${String(f).split(/[\\/]/).pop()}`;
-  if (apply && !r.verified) return { status: 'refused', state: 'retention-incomplete', removed: r.deleted.map(rel), reason: 'some files could not be removed' };
+  if (apply && !r.verified) {
+    // Say which thing failed: the files, or only the lock after the files were removed.
+    const lockNote = r.kept.find((k) => String(k).startsWith('(retention-lock-unavailable'));
+    const removed = r.deleted.map(rel);
+    if (lockNote && /LOCK_RELEASE_FAILED/.test(lockNote)) return { status: 'refused', state: 'lock-release-failed', applied: true, removed, lock: '_metrics/.turn-capture.lock', reason: lockNote, recovery: 'the files listed were removed; the capture lock is still held and clears when it ages past the stale window, or a normal session can release it' };
+    if (lockNote) return { status: 'refused', state: 'lock-held', removed, reason: lockNote };
+    return { status: 'refused', state: 'retention-incomplete', removed, reason: 'some files could not be removed' };
+  }
   return { ...base, applied: apply, outcome: apply ? (r.deleted.length ? 'removed-in-project' : 'nothing-past-window') : 'dry-run', window_days: r.windowDays, cutoff: r.cutoff, candidates: r.candidates.map(rel), removed: r.deleted.map(rel) };
 }
 

@@ -903,3 +903,18 @@ test('the /process-memory skill sends a project-only session to the confined com
   assert.match(text, /don't run the script commands in the steps below/);
   for (const step of ['0.5', '6.5b', '6.5c', '6.6', '6.7']) assert.ok(text.includes(step), `names step ${step} as skipped`);
 });
+
+test('retention names a lock that would not release as that, not as files left behind, and still lists what it removed', () => {
+  const p = project();
+  try {
+    const dir = join(p.root, '_metrics', 'turn-capture'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2020-01-01.jsonl'), 'old\n');
+    const inject = 'data:text/javascript,' + encodeURIComponent(`import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module'; const o = fs.renameSync; fs.renameSync = function (a, b) { if (String(b).endsWith('.done')) throw Object.assign(new Error('injected'), { code: 'EPERM' }); return o.apply(this, arguments); }; syncBuiltinESMExports();`);
+    const r = spawnSync(process.execPath, ['--import', GATE, '--import', inject, join(CORE, 'scripts/project-only.mjs'), 'retention', '--apply', '--root', p.root], { encoding: 'utf8', cwd: p.root, env: { ...process.env, FS_CONFINE_ROOTS: [p.root, REPO].join(delimiter) } });
+    const out = JSON.parse(r.stdout);
+    assert.equal(r.status, 2);
+    assert.deepEqual([out.state, out.removed], ['lock-release-failed', ['_metrics/turn-capture/2020-01-01.jsonl']]);
+    assert.doesNotMatch(out.reason, /could not be removed/);
+    assert.equal(existsSync(join(dir, '2020-01-01.jsonl')), false);
+  } finally { p.cleanup(); }
+});
