@@ -298,7 +298,11 @@ export function captureCustodyProblem(projectDir, { rowFile = null, healthOnly =
     if (!healthOnly && kind(base)) {
       const lockName = basename(turnCaptureLockPath(projectDir));
       for (const e of readdirSync(base, { withFileTypes: true })) {
-        if (e.name.startsWith(lockName) && (e.isSymbolicLink() || !e.isFile())) return `${rel(join(base, e.name))} is a link or not a regular file`;
+        if (!e.name.startsWith(lockName)) continue;
+        // Every generation and tombstone of the lock is read during acquisition, so each must be the
+        // project's own single-named regular file, the same as the row and the health file.
+        const st = kind(join(base, e.name));
+        if (st && (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1)) return `${rel(join(base, e.name))} is a link, has a second name, or is not a regular file`;
       }
     }
   } catch (e) { return `capture location could not be checked (${e.code || e.message})`; }
@@ -347,6 +351,11 @@ export function readCaptureHealth(projectDir) {
 export function captureTurnEvidence(projectDir, input, { now, env = process.env } = {}) {
   try {
     if (!existsSync(projectDir)) return { written: false, reason: 'project-dir-missing' };
+    // The enabled check itself looks inside the metrics folder (the capture-disabled marker), so the
+    // folder's custody comes first. Not counted in health: health lives in that same folder, and
+    // whether this project opted out is not yet known.
+    const early = captureCustodyProblem(projectDir, { healthOnly: true });
+    if (early) return { written: false, reason: `capture-refused: ${early}`, refused: true };
     if (!turnCaptureEnabled({ project: projectDir, env })) {
       return { written: false, reason: 'disabled' };
     }
