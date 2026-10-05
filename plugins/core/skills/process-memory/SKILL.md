@@ -23,6 +23,20 @@ Runs synchronously in the current session.
 
 ---
 
+## Project-only mode
+
+If this session started with `/core project-only`, or the task says **project-only**, don't run the script commands in the steps below: several of them read session transcripts, the harness's own memory or state outside the folder. Use this instead, with the harness you are running in:
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" process-memory --root <project> --apply \
+  || echo "CORE-PROJECT-ONLY-FAILED: CORE_ROOT is unresolved or the command refused (see its JSON)"
+```
+
+It checks the units, refreshes the link blocks, regenerates the indexes and checks the `PROJECT.md` cap, from the folder alone. Then do the reasoning half yourself, writing only inside `_memories/`: Step 0 (look back over this conversation), Step 1 (the inbox) and Step 2 (graduating observations). Skip Steps 0.5, 6.5b, 6.5c, 6.6 and 6.7 and the direct script calls in Steps 3 to 5.5; the command's `not_run` list names what is waiting for a normal session. Tell the user which parts ran and which are waiting. A `refused` answer means a link or an unreadable folder was found: say which path, and stop.
+
+---
+
 ## Step 0 — Look back, capture missed observations from this session
 
 Before any other hygiene work, scan the current session for moments that should have become observations and weren't. The in-flow "answer the user" tradeoff regularly suppresses observation writes — this step exists because that failure mode is consistent and named in PROJECT.md §Moves (memory-capture robustness).

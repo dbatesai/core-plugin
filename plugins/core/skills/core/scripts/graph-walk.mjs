@@ -23,7 +23,7 @@
  *                       [--format json|text]
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, lstatSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import {
   loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
@@ -252,9 +252,17 @@ export function main(argv) {
   if (!seedArg) { process.stderr.write('usage: node graph-walk.mjs <seed-unit-path> [options]\n'); return 2; }
 
   const seedPath = resolve(seedArg);
+  const memoriesDir = memoriesArg ? resolve(memoriesArg) : dirname(seedPath);
+  // A store, or a seed, that is a link leads somewhere other than the folder the caller named. It is
+  // refused here, with lstat, before the seed is probed or read: containing the hops under wherever
+  // the link points would not keep the walk inside the invoked project.
+  for (const p of [memoriesDir, seedPath]) {
+    let st = null;
+    try { st = lstatSync(p); } catch { /* absent: reported below */ }
+    if (st?.isSymbolicLink()) { process.stderr.write(`refused: ${p} is a link; the walk stays in the folder it was given\n`); return 3; }
+  }
   if (!existsSync(seedPath)) { process.stderr.write(`error: seed unit not found: ${seedPath}\n`); return 2; }
 
-  const memoriesDir = memoriesArg ? resolve(memoriesArg) : dirname(seedPath);
   const today = todayArg ? (parseIsoDate(todayArg) || new Date()) : null;
 
   const stats = {};

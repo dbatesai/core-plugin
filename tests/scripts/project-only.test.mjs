@@ -854,3 +854,52 @@ test('purge reports a lock that would not release as a failure, keeps the honest
     assert.equal(inspectFileLock(join(m, '.turn-capture.lock'), { machine: null }).held, true, 'the lock really is still held');
   } finally { p.cleanup(); }
 });
+
+// ---------- the typed-edge walk stays in the folder it was given ----------
+
+test('graph-walk: a regular store walks to its neighbour; a store or seed that is a link is refused before the seed is probed, and no outside unit is returned', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const GW = join(CORE, 'scripts/graph-walk.mjs');
+  const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
+  const fill = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'dc-1-seed.md'), u('dc-1-seed', 'dc-2-neighbour')); writeFileSync(join(dir, 'dc-2-neighbour.md'), u('dc-2-neighbour')); };
+  const ok = project({ withUnits: false });
+  try {
+    fill(join(ok.root, '_memories'));
+    const r = confined(ok.root, [GW, join(ok.root, '_memories', 'dc-1-seed.md'), '--memories', join(ok.root, '_memories')]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /dc-2-neighbour/, 'control: the regular store returns the neighbour');
+    assert.deepEqual(r.violations, []);
+  } finally { ok.cleanup(); }
+  const a = project({ withUnits: false });
+  try {
+    const out = join(a.base, 'outside-store'); fill(out);
+    symlinkSync(out, join(a.root, '_memories'));
+    const r = confined(a.root, [GW, join(a.root, '_memories', 'dc-1-seed.md'), '--memories', join(a.root, '_memories')]);
+    assert.equal(r.status, 3);
+    assert.match(r.stderr, /refused: .*is a link/);
+    assert.doesNotMatch(r.stdout, /dc-2-neighbour/);
+    assert.deepEqual(r.violations, [], 'refused before the seed was probed');
+    const d = confined(a.root, [GW, join(a.root, '_memories', 'dc-1-seed.md')]);
+    assert.equal(d.status, 3, 'the same when the store is taken from the seed path');
+    assert.deepEqual(d.violations, []);
+  } finally { a.cleanup(); }
+  const b = project({ withUnits: false });
+  try {
+    const out = join(b.base, 'outside-store'); fill(out);
+    mkdirSync(join(b.root, '_memories')); writeFileSync(join(b.root, '_memories', 'dc-2-neighbour.md'), u('dc-2-neighbour'));
+    symlinkSync(join(out, 'dc-1-seed.md'), join(b.root, '_memories', 'dc-1-seed.md'));
+    const r = confined(b.root, [GW, join(b.root, '_memories', 'dc-1-seed.md'), '--memories', join(b.root, '_memories')]);
+    assert.equal(r.status, 3, 'a linked seed is refused too');
+    assert.deepEqual(r.violations, []);
+  } finally { b.cleanup(); }
+});
+
+test('the /process-memory skill sends a project-only session to the confined command at its own door', () => {
+  const skill = readFileSync(join(REPO, 'plugins/core/skills/process-memory/SKILL.md'), 'utf8');
+  const branch = skill.indexOf('## Project-only mode');
+  assert.ok(branch > 0 && branch < skill.indexOf('## Step 0 '), 'the branch comes before the first step');
+  const text = skill.slice(branch, skill.indexOf('## Step 0 '));
+  assert.match(text, /project-only\.mjs" process-memory --root <project> --apply/);
+  assert.match(text, /don't run the script commands in the steps below/);
+  for (const step of ['0.5', '6.5b', '6.5c', '6.6', '6.7']) assert.ok(text.includes(step), `names step ${step} as skipped`);
+});
