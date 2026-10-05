@@ -245,6 +245,11 @@ export function loadOrCreateSalt(stateDir) {
   return { salt, created: true };
 }
 
+/** A short, non-secret id for a key, so history rows say which key's pseudonyms they belong to. */
+export function keyIdOf(salt) {
+  return createHash('sha256').update(`key-id:${salt}`).digest('hex').slice(0, 16);
+}
+
 export function makeSeal(salt) {
   return (kind, id) => `${kind}-${createHmac('sha256', salt).update(String(id)).digest('hex').slice(0, 12)}`;
 }
@@ -798,7 +803,7 @@ export function headline(blocks) {
 
 /** Read-only: creates nothing. An absent history is a first package; an unreadable or damaged one is
  *  unavailable, never treated as a first package or a zero baseline. */
-export function computeDeltas(stateDir, current) {
+export function computeDeltas(stateDir, current, keyId = null) {
   const file = join(stateDir, HISTORY_FILE);
   try { assertArtifactFile(stateDir, file); } catch { return { available: false, reason: 'history unsafe' }; }
   let previous = null;
@@ -806,12 +811,20 @@ export function computeDeltas(stateDir, current) {
   try { text = readFileSync(file, 'utf8'); } catch (e) {
     if (e.code !== 'ENOENT') return { available: false, reason: 'history unreadable' };
   }
+  let earlier = false;
   if (text !== null) {
-    const { rows, bad } = readJsonlSafe(file);
-    if (bad) return { available: false, reason: 'history damaged' };
-    if (rows.length) previous = rows[rows.length - 1];
+    // Parsed from the one read above: a second read could fail and look like an empty history.
+    const rows = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { rows.push(JSON.parse(line)); } catch { return { available: false, reason: 'history damaged' }; }
+    }
+    earlier = rows.length > 0;
+    // Only rows made under the current key: after a rotation the old baseline belongs to old pseudonyms.
+    const mine = rows.filter((r) => r && r.key === keyId);
+    if (mine.length) previous = mine[mine.length - 1];
   }
-  const deltas = { available: !!previous, reason: previous ? undefined : 'first package for this project' };
+  const deltas = { available: !!previous, reason: previous ? undefined : earlier ? 'first package since the key changed' : 'first package for this project' };
   if (previous) {
     deltas.since = previous.generated_at || null;
     deltas.changes = {};
@@ -825,12 +838,19 @@ export function computeDeltas(stateDir, current) {
 
 // Called ONLY after the leak scan passed and the artifact shipped — an aborted
 // package never advances the delta baseline.
-export function appendHistory(stateDir, current) {
+export function appendHistory(stateDir, current, keyId = null) {
   const file = join(stateDir, HISTORY_FILE);
   assertArtifactFile(stateDir, file);
   // No-follow where the platform has it, so a link swapped in after the check is not written through.
   const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), 0o600);
-  try { writeSync(fd, JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n'); } finally { closeSync(fd); }
+  try {
+    const bytes = Buffer.from(JSON.stringify({ generated_at: new Date().toISOString(), key: keyId, ...current }) + '\n');
+    for (let off = 0; off < bytes.length;) {
+      const n = writeSync(fd, bytes, off, bytes.length - off);
+      if (n <= 0) throw Object.assign(new Error('history write made no progress'), { code: 'short-write' });
+      off += n;
+    }
+  } finally { closeSync(fd); }
 }
 
 export function computeFlags(blocks, hl) {
@@ -934,7 +954,7 @@ const RE_INT_KEY = /^-?\d+$/;
 // Emitted by metrics-dedupe's cohort gate; every component is already folded there.
 const RE_COHORT_LABEL = /^schema=\S+ classifier=\S+ proxy=\S+$/;
 // Node error codes plus this module's own fallback — never a raw message.
-const RE_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$|^collection-error$/;
+const RE_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$|^collection-error$|^package-key-(unsafe|unreadable|malformed)$|^project-artifact-unsafe-target$/;
 
 const NUM = { leaf: isNum };
 const BOOL = { leaf: (v) => typeof v === 'boolean' };
@@ -1438,13 +1458,15 @@ export function runPackage(argv, { homeOverride } = {}) {
       saltCreated ||= created;
       const collected = collectProject(dir, { home, seal: makeSeal(salt) });
       collected.stateDir = stateDir;
+      collected.keyId = keyIdOf(salt);
       projects.push(collected);
       coverage.push({ project: collected.pseudonym, available: true });
     } catch (err) {
       // The reason is an error CODE, never err.message — raw messages embed real
       // filesystem paths, which the leak scan rejects.
       const code = (err && typeof err.code === 'string') ? err.code : 'collection-error';
-      coverage.push({ project: runSeal('project', basename(dir)), available: false, reason: code });
+      // The full path, under a key that exists only for this run: distinct per project, linkable to nothing.
+      coverage.push({ project: runSeal('project', resolve(dir)), available: false, reason: code });
     }
   }
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
@@ -1452,7 +1474,7 @@ export function runPackage(argv, { homeOverride } = {}) {
   // Deltas are computed READ-ONLY here; the history append happens only after
   // the package actually ships — an aborted run must not consume a history slot.
   for (const proj of projects) {
-    proj.deltas = computeDeltas(proj.stateDir, proj.headline);
+    proj.deltas = computeDeltas(proj.stateDir, proj.headline, proj.keyId);
   }
 
   // Generator identity — honest provenance: a source-tree run must not
@@ -1598,7 +1620,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     // A failed save keeps the delivered package and says the next comparison has no baseline.
     const notSaved = [];
     for (const proj of projects) {
-      try { appendHistory(proj.stateDir, proj.headline); } catch (e) { notSaved.push({ project: proj.pseudonym, reason: e.code || 'write-failed' }); }
+      try { appendHistory(proj.stateDir, proj.headline, proj.keyId); } catch (e) { notSaved.push({ project: proj.pseudonym, reason: e.code || 'write-failed' }); }
     }
     if (notSaved.length) result.history_not_saved = notSaved;
 
@@ -1610,7 +1632,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     const partial = coverage.some(c => !c.available)
       || projects.some(p => Object.values(p.blocks).some(blockPartial));
     return Object.assign(result, {
-      exit: result.scratch_cleanup ? 2 : partial ? 1 : 0,
+      exit: result.scratch_cleanup ? 2 : (partial || result.history_not_saved) ? 1 : 0,
       ...(result.scratch_cleanup ? { error: 'metrics package scratch cleanup failed' } : {}),
       desktop_fallback: !flagsIn.out && !existsSync(join(home, 'Desktop')),
     });
@@ -1646,6 +1668,7 @@ if (isCliEntry(import.meta.url)) {
     process.stdout.write(`package: ${result.shipped.path}\n`);
     if (result.shipped.kind === 'folder') process.stdout.write(`note: zip unavailable (${result.shipped.reason}) — staged folder shipped instead\n`);
   }
+  for (const h of result.history_not_saved || []) process.stderr.write(`warning: the package was delivered, but its baseline was not saved for ${h.project} (${h.reason}); the next package for it has no comparison\n`);
   if (result.coverage) {
     const covered = result.coverage.filter(c => c.available).length;
     process.stdout.write(`coverage: ${covered}/${result.coverage.length} project(s)\n`);

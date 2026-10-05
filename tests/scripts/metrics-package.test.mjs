@@ -237,8 +237,8 @@ test('deltas read only the project history: absent is a first package, damaged o
       assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history unreadable' });
       chmodSync(join(dir, 'history.jsonl'), 0o600); rmSync(join(dir, 'history.jsonl'));
     }
-    writeFileSync(join(dir, 'history.jsonl'), '{"a":1,"generated_at":"t0"}\n');
-    const d = computeDeltas(dir, { a: 3 });
+    writeFileSync(join(dir, 'history.jsonl'), '{"a":1,"generated_at":"t0","key":"k1"}\n');
+    const d = computeDeltas(dir, { a: 3 }, 'k1');
     assert.equal(d.available, true); assert.equal(d.changes.a, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -285,7 +285,59 @@ test('a package key or history that is a link or has a second name is never read
   }
 });
 
-test('a history that cannot be saved keeps the delivered package and says the next comparison has no baseline', () => {
+test('a rotated key starts a new baseline, even when the first run after rotation never ships', async () => {
+  const { appendHistory } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'mp-rotate-'));
+  try {
+    const dir = join(root, 'state'); mkdirSync(dir);
+    writeFileSync(join(dir, 'history.jsonl'), '{"a":10,"generated_at":"2026-01-01T00:00:00Z","key":"old"}\n');
+    assert.deepEqual(computeDeltas(dir, { a: 11 }, 'new'), { available: false, reason: 'first package since the key changed' });
+    // an aborted run appends nothing, so the next run is still a first package under the new key
+    assert.equal(computeDeltas(dir, { a: 11 }, 'new').available, false);
+    appendHistory(dir, { a: 11 }, 'new');
+    const d = computeDeltas(dir, { a: 15 }, 'new');
+    assert.equal(d.available, true); assert.equal(d.changes.a, 4, 'compared with the new key\'s baseline, not the old one');
+    assert.match(readFileSync(join(dir, 'history.jsonl'), 'utf8'), /"key":"old"/, 'the old history is kept');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a history append that makes no progress is a failure, not a silent short row', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { appendHistory } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'mp-short-'));
+  const orig = fs.writeSync;
+  try {
+    const dir = join(root, 'state'); mkdirSync(dir);
+    fs.writeSync = () => 0; syncBuiltinESMExports();
+    assert.throws(() => appendHistory(dir, { a: 1 }, 'k'), (e) => e.code === 'short-write');
+  } finally { fs.writeSync = orig; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the shipped report names why deltas are unavailable, and refused projects keep their exact reason and distinct ids', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-reasons-'));
+  try {
+    const home = makeFixtureHome(root);
+    const good = makeFixtureProject(root);
+    mkdirSync(join(good, '.core', '_package'), { recursive: true });
+    writeFileSync(join(good, '.core', '_package', 'history.jsonl'), 'not json\n');
+    const bad = [join(root, 'a', 'repo'), join(root, 'b', 'repo')];
+    for (const p of bad) { mkdirSync(join(p, '_memories'), { recursive: true }); mkdirSync(join(p, '.core', '_package'), { recursive: true }); writeFileSync(join(p, '.core', '_package', 'salt'), 'bad\n'); }
+    writeFileSync(join(home, '.core', 'index.json'), JSON.stringify([{ id: 'fixture-ws-alpha', path: good }, { id: 'r1', path: bad[0] }, { id: 'r2', path: bad[1] }]));
+    const r = runPackage(['--all', '--scratch-project', good, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(r.shipped, JSON.stringify(r).slice(0, 300));
+    const refused = r.coverage.filter((c) => !c.available);
+    assert.deepEqual(refused.map((c) => c.reason), ['package-key-malformed', 'package-key-malformed']);
+    assert.notEqual(refused[0].project, refused[1].project, 'two refused projects named repo keep distinct ids');
+    const dir = readShippedPackage(r.shipped, join(root, 'unpacked'));
+    assert.match(readFileSync(join(dir, 'manifest.json'), 'utf8'), /package-key-malformed/, 'the exact reason ships');
+    const report = readFileSync(join(dir, 'report.md'), 'utf8');
+    assert.match(report, /unavailable — history damaged/);
+    assert.doesNotMatch(report, /first package/, 'a damaged history is never called a first package');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a history that cannot be saved keeps the delivered package and says the next comparison has no baseline', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-histfail-'));
   try {
     const home = makeFixtureHome(root);
@@ -295,6 +347,10 @@ test('a history that cannot be saved keeps the delivered package and says the ne
     const r = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     assert.ok(r.shipped, 'the package is still delivered');
     assert.equal(r.history_not_saved?.length, 1);
+    assert.equal(r.exit, 1, 'a lost baseline is not a clean run');
+    const { spawnSync } = await import('node:child_process');
+    const cli = spawnSync(process.execPath, [(await import('node:url')).fileURLToPath(new URL('../../plugins/core/skills/core/scripts/metrics-package.mjs', import.meta.url)), project, '--home', home, '--out', join(root, 'out-cli')], { encoding: 'utf8', timeout: 60000 });
+    assert.match(cli.stderr, /baseline was not saved/, 'the command line says so');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

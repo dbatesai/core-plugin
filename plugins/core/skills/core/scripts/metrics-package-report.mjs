@@ -47,7 +47,7 @@ export function buildReportMd({ manifest, projects }) {
       const changes = Object.entries(proj.deltas.changes || {}).filter(([, v]) => v !== 0);
       lines.push(`**Since ${proj.deltas.since}:** ${changes.length ? changes.map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(' · ') : 'no headline movement'}`);
     } else {
-      lines.push('**Deltas:** first package from this install for this project — trend lines start here.');
+      lines.push(/^first package/.test(proj.deltas?.reason || 'first package') ? `**Deltas:** ${proj.deltas?.reason || 'first package for this project'} — trend lines start here.` : `**Deltas:** unavailable — ${proj.deltas.reason}.`);
     }
     lines.push('');
     if (proj.flags.length) {
@@ -226,7 +226,7 @@ export function buildReportHtml({ manifest, projects }) {
 
     const deltas = proj.deltas?.available
       ? `<div class="note">Since ${esc(proj.deltas.since)}: ${Object.entries(proj.deltas.changes || {}).filter(([, x]) => x !== 0).map(([k, x]) => `${esc(k)} ${x > 0 ? '+' : ''}${esc(x)}`).join(' · ') || 'no headline movement'}</div>`
-      : '<div class="note">First package from this install for this project — trend lines start here.</div>';
+      : /^first package/.test(proj.deltas?.reason || 'first package') ? `<div class="note">${esc(proj.deltas?.reason || 'first package for this project')} — trend lines start here.</div>` : `<div class="note">Deltas unavailable — ${esc(proj.deltas.reason)}.</div>`;
 
     return `<h2>${esc(proj.pseudonym)}</h2><div class="tiles">${tiles}</div>${flags}${deltas}${tierChart}${eventsLine}${warnChart}${recLine}${selfTestChart}`;
   }).join('');
