@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * lifecycle-detect.mjs — the lifecycle REPORTING preflight and the CORE
- * creation-baseline seam.
+ * creation-baseline seam, plus an explicit old-evidence importer.
  *
- * TWO honest jobs, and no more:
+ * THREE explicit jobs:
  *
  *   1. REPORTING preflight (`detectStore`/`classifyFileLifecycle`). Runs at
  *      startup / `/process-memory` / `/finalize` / close catch-up and returns a
@@ -46,6 +46,15 @@
  *      is deliberately not automatic and not silent: run it once, on purpose,
  *      when adopting a pre-existing store into this stamping regime.
  *
+ *   3. LEGACY EVIDENCE TRANSFER (`--import-legacy-cache`). Dry-run by default;
+ *      explicit --apply copies accepted OLD stamps, preserving local own keys
+ *      and the source. It never stamps current content. Receipts cover the
+ *      declared lexical keys only; cross-spelling consumption remains open.
+ *      Transfer verification and selected-key coverage are independent. A
+ *      verified transfer with held coverage is still held/exit3 on local-only
+ *      rerun. Interrupted transfer uses explicit --recover [--apply], per-key
+ *      checks and source snapshot verification, preserving newer local stamps.
+ *
  * Per-file classification (the point-1 enum):
  *   clean          — matches the last CORE baseline byte-for-byte.
  *   generated-only — only the marker-delimited generated region changed
@@ -74,6 +83,7 @@
  *   node lifecycle-detect.mjs <project> [--record-session-start <id>] [--json]
  *   node lifecycle-detect.mjs <project> --stamp-created <path> [--kind unit|project] [--by <label>]
  *   node lifecycle-detect.mjs <project> --adopt-existing-store [--apply] [--json]
+ *   node lifecycle-detect.mjs <project> --import-legacy-cache [--apply] [--recover] [--json]
  *     --record-session-start <id>  Snapshot which user-sensitive files exist NOW
  *                                  (diagnostic hint only — see above).
  *     --stamp-created <path>       Establish the first CORE-authored baseline for
@@ -87,7 +97,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
+import { readProjectCache, hashText, stampFile, importLegacyProjectCache, CACHE_CORRUPT, CACHE_UNREADABLE, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -368,6 +378,20 @@ function main(argv) {
     else positionals.push(a);
   }
   const projectDir = resolve(positionals[0] || process.cwd());
+
+  if (flags.has('import-legacy-cache')) {
+    const conflicts = opts.record !== undefined || opts.stampCreated !== undefined || flags.has('adopt-existing-store');
+    const report = conflicts ? { status: 'held', reason: 'conflicting-lifecycle-actions', imported_count: 0 }
+      : importLegacyProjectCache(projectDir, { apply: flags.has('apply'), recover: flags.has('recover') });
+    if (flags.has('json')) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    else {
+      process.stdout.write(`lifecycle-detect: legacy baseline import ${report.status}${report.noop ? ' (local-only no-op)' : ''}; ${report.imported_count ?? 'unknown'} stamps transferred.\n`);
+      if (report.eligible_count !== undefined) process.stdout.write(`  dry-run: ${report.eligible_count} eligible old stamps; no cache writes.\n`);
+      process.stdout.write(`  key scope: ${report.coverage_scope || 'exact-lexical-keys'} at ${report.key_root || projectDir}; physical-project/cross-spelling coverage not evaluated.\n`);
+      if (report.status === 'held') process.stderr.write(`  import held: ${report.reason || report.coverage || 'selected evidence unavailable'}; ${(report.held || []).length} held entries. Preserve local/source evidence.\n`);
+    }
+    return report.status === 'held' || report.recovery ? 3 : 0;
+  }
 
   // Creation-baseline stamp: establish the first CORE-authored baseline for a
   // file the agent just wrote (graduation / PROJECT.md render). Preserve the

@@ -178,12 +178,11 @@ function assertReconciled(projectDir, path, currentText) {
 // and keeps `last_written_by` honest about who actually touched PROJECT.md.)
 //
 // Shared-write concurrency: the stamp lands in the PER-PROJECT cache
-// at <project>/_memories/_lib/state-cache.json — a single-owner file, so two
-// projects closing at once can't clobber each other's hashes (a shared global
-// cache write would be an unlocked read-modify-write). Readers take the
-// per-project entry whenever one exists and fall back to the global
-// ~/.core/state-cache.json only for a file with none, so the stamp never
-// touches the global cache or its lock.
+// at <project>/_memories/_lib/state-cache.json. Different projects use separate
+// files; writers within one project share the cache mutex. Ordinary readers
+// and stamps use only the project cache, with no global fallback. Explicit
+// legacy import is a separate old-evidence transfer, not current-byte adoption.
+// This stamp never touches the global cache or its lock.
 // Content outside the marker-delimited hot block is hashed on its own. `last_written_by:
 // hot-section` alone is NOT trustworthy evidence for a later hash mismatch —
 // it only says who wrote the PREVIOUS cached bytes, not the current ones. A

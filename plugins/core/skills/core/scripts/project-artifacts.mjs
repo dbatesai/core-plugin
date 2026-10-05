@@ -1,7 +1,7 @@
-/** Reserved local hook/scratch artifacts. This creates no enrollment or identity state. */
+/** Reserved local hook/scratch/cache artifacts. This creates no enrollment or identity state. */
 import { lstatSync, realpathSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve, join, dirname } from 'node:path';
-import { trackedStateFiles } from './project-state.mjs';
+import { trackedProjectFiles, trackedStateFiles } from './project-state.mjs';
 
 function refuse() { throw Object.assign(new Error('Project artifact target is not safe'), { code: 'project-artifact-unsafe-target' }); }
 function statOrMissing(path) {
@@ -27,19 +27,31 @@ export function projectArtifactRoot(projectRoot) {
 }
 export function ensureProjectArtifactDir(projectRoot, kind) {
   if (!['_hooks', '_scratch'].includes(kind)) refuse();
+  return ensureGeneratedDir(projectRoot, ['.core', kind]);
+}
+
+/** Generated attribution cache uses the same policy-before-writer guard as hook/scratch files. */
+export function ensureProjectCacheDir(projectRoot) {
+  return ensureGeneratedDir(projectRoot, ['_memories', '_lib']);
+}
+
+/** Local-only receipt checks must validate policy without creating or rewriting any artifact. */
+export function assertProjectCacheDir(projectRoot) {
+  return ensureGeneratedDir(projectRoot, ['_memories', '_lib'], false);
+}
+
+function ensureGeneratedDir(projectRoot, segments, create = true) {
   const root = projectArtifactRoot(projectRoot);
-  const core = join(root, '.core'), dir = join(core, kind);
-  physicalDirectory(core);
-  // Check each component before descending, including an already present .core link.
-  const coreStat = statOrMissing(core);
-  if (coreStat) physicalDirectory(dir);
-  const tracked = trackedStateFiles(root, kind);
+  const parent = join(root, segments[0]), dir = join(parent, segments[1]);
+  const parentStat = physicalDirectory(parent);
+  if (parentStat) physicalDirectory(dir);
+  const tracked = segments[0] === '.core' ? trackedStateFiles(root, segments[1]) : trackedProjectFiles(root, segments.join('/') + '/');
   if (tracked.size || tracked.has('.gitignore')) refuse();
-  if (!coreStat) mkdirSync(core, { mode: 0o700 });
-  if (!physicalDirectory(dir)) mkdirSync(dir, { mode: 0o700 });
+  if (!parentStat) { if (!create) refuse(); mkdirSync(parent, { mode: 0o700 }); }
+  if (!physicalDirectory(dir)) { if (!create) refuse(); mkdirSync(dir, { mode: 0o700 }); }
   const ignore = join(dir, '.gitignore');
   assertArtifactFile(dir, ignore);
-  if (!statOrMissing(ignore)) writeFileSync(ignore, '*\n', { flag: 'wx', mode: 0o600 });
+  if (!statOrMissing(ignore)) { if (!create) refuse(); writeFileSync(ignore, '*\n', { flag: 'wx', mode: 0o600 }); }
   // Preserve custom files. Only an existing policy excluding every artifact is accepted.
   const rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#'));
   if (rules.at(-1) !== '*') refuse();

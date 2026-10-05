@@ -551,12 +551,16 @@ export function contentMac(secret, rel, bytes) {
 function gitIndexFile(root) {
   for (let dir = root; ; dir = dirname(dir)) {
     const dotGit = join(dir, '.git');
-    try {
-      const st = lstatSync(dotGit);
+    let st;
+    try { st = lstatSync(dotGit); }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (st) {
       if (st.isDirectory()) return join(dotGit, 'index');
+      if (!st.isFile() || st.isSymbolicLink()) throw new Error('Unknown Git metadata type');
       const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
-      return m ? join(resolve(dir, m[1]), 'index') : null;
-    } catch { /* no .git here; keep walking */ }
+      if (!m) throw new Error('Unreadable Git metadata pointer');
+      return join(resolve(dir, m[1]), 'index');
+    }
     if (dirname(dir) === dir) return null;
   }
 }
@@ -568,10 +572,12 @@ function indexMightTrack(root, prefix) {
   const idx = gitIndexFile(root);
   if (!idx) return false;
   let buf;
-  try { buf = readFileSync(idx); } catch { return true; }
+  // An unborn repository can lack an index, as can broken metadata. Let Git distinguish them.
+  try { buf = readFileSync(idx); } catch (e) { if (e.code === 'ENOENT') return true; throw e; }
+  if (buf.length < 12 || buf.subarray(0, 4).toString() !== 'DIRC') return true;
   const version = buf.length >= 8 ? buf.readUInt32BE(4) : 0;
   if (version >= 4) return true;
-  try { if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true; } catch { return true; }
+  if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true;
   return buf.includes(prefix);
 }
 
@@ -583,12 +589,22 @@ const UNKNOWN_TRACKED = { has: () => true };
 
 export function trackedStateFiles(root, harness) {
   const prefix = `${STATE_DIRNAME}/${harness}/`;
-  if (!indexMightTrack(root, prefix)) return new Set();
+  try { return indexMightTrack(root, prefix) ? trackedProjectFiles(root, prefix) : new Set(); }
+  catch { return UNKNOWN_TRACKED; }
+}
+
+/** Generated-family tracking guard. Metadata errors remain unknown, never an empty set. */
+export function trackedProjectFiles(root, prefix) {
+  if (typeof prefix !== 'string' || !prefix.endsWith('/') || prefix.startsWith('/') || prefix.split('/').some(p => p === '..' || p === '.')) return UNKNOWN_TRACKED;
   try {
+    if (!gitIndexFile(root)) return new Set();
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+    env.GIT_CONFIG_NOSYSTEM = '1';
+    env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
     // Without --full-name, ls-files prints paths relative to -C, so a project nested
     // inside a larger repo still lists as `.core/<harness>/<name>`.
     const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', prefix], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000, env,
     });
     return new Set(out.split('\0').filter(Boolean).filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length)));
   } catch {
