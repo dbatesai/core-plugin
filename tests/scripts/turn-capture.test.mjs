@@ -256,7 +256,8 @@ test('write failure is fail-open and lands in the health counter', () => {
     writeFileSync(turnCaptureDir(project), 'squatter');
     const res = captureTurnEvidence(project, goodRow({ retrieval_id: 'rid-fail' }), { env, now: '2026-07-24T21:00:01Z' });
     assert.equal(res.written, false);
-    assert.match(res.reason, /capture-failed/);
+    // A path capture can't use as its own folder is refused before any write, and still counted.
+    assert.match(res.reason, /^capture-refused: _metrics\/turn-capture is a link or not a folder$/);
     const health = readCaptureHealth(project);
     assert.equal(health.attempts, 2);
     assert.equal(health.failures, 1);

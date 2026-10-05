@@ -44,7 +44,7 @@
  */
 
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
@@ -265,8 +265,50 @@ export function computeStoreSignature(storeDir) {
 // read-modify-write: two simultaneous processes can lose one increment.
 // ponytail: benign race on a health counter; move under its own lock if
 // tripwire precision ever needs exact counts.
+/**
+ * Why capture must not write here, or null. Everything capture writes is CORE's own and belongs
+ * physically in the project: the metrics folder and the stream folder must be real directories under
+ * the project root, and the dated row, the stream's ignore file, the health file and the lock's files
+ * must be regular files with a single name (a link, or a second hard link, is the same bytes living
+ * somewhere else). Checked with lstat, before anything is created, read or appended. A path inside the
+ * project is not proof of this; that is what the check is for.
+ */
+export function captureCustodyProblem(projectDir, { rowFile = null, healthOnly = false } = {}) {
+  let root;
+  // The project may itself be reached through a link; custody is judged against where it really is.
+  try { root = realpathSync(resolve(projectDir)); if (!statSync(root).isDirectory()) throw new Error('not a directory'); } catch { return 'project root is not a real directory'; }
+  const base = resolveStoragePath(projectDir);
+  const dir = turnCaptureDir(projectDir);
+  const rel = (p) => relative(resolve(projectDir), p) || '.';   // named as the caller sees it
+  const kind = (p) => { try { return lstatSync(p); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  try {
+    for (const d of healthOnly ? [base] : [base, dir]) {
+      const st = kind(d);
+      if (!st) continue;
+      if (st.isSymbolicLink() || !st.isDirectory()) return `${rel(d)} is a link or not a folder`;
+      const real = realpathSync(d);
+      if (real !== root && !real.startsWith(root + sep)) return `${rel(d)} is outside the project`;
+    }
+    if (!kind(base)) { let parent; try { parent = realpathSync(dirname(resolve(base))); } catch { parent = null; } if (parent !== root && !(parent || '').startsWith(root + sep)) return 'the metrics folder would be created outside the project'; }
+    const leaves = healthOnly ? [join(base, HEALTH_FILENAME)] : [join(base, HEALTH_FILENAME), join(dir, '.gitignore'), ...(rowFile ? [rowFile] : [])];
+    for (const f of leaves) {
+      const st = kind(f);
+      if (st && (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1)) return `${rel(f)} is a link, has a second name, or is not a regular file`;
+    }
+    if (!healthOnly && kind(base)) {
+      const lockName = basename(turnCaptureLockPath(projectDir));
+      for (const e of readdirSync(base, { withFileTypes: true })) {
+        if (e.name.startsWith(lockName) && (e.isSymbolicLink() || !e.isFile())) return `${rel(join(base, e.name))} is a link or not a regular file`;
+      }
+    }
+  } catch (e) { return `capture location could not be checked (${e.code || e.message})`; }
+  return null;
+}
+
 function bumpHealth(projectDir, { failed, reason, ts }) {
   try {
+    // Health is best-effort, but never somewhere else: an unsafe location means no health write.
+    if (captureCustodyProblem(projectDir, { healthOnly: true })) return;
     const base = resolveStoragePath(projectDir);
     mkdirSync(base, { recursive: true });
     const file = join(base, HEALTH_FILENAME);
@@ -321,6 +363,12 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
     const record = { ts: now || new Date().toISOString(), ...row };
     const dir = turnCaptureDir(projectDir);
     const file = join(dir, `${todayUTC(now)}.jsonl`);
+    // Refused before the lock is taken or anything is created: nothing is read or written elsewhere.
+    const unsafe = captureCustodyProblem(projectDir, { rowFile: file });
+    if (unsafe) {
+      bumpHealth(projectDir, { failed: true, reason: `capture-refused: ${unsafe}`, ts: record.ts });
+      return { written: false, reason: `capture-refused: ${unsafe}`, refused: true };
+    }
     let appendError = null;
     try {
       withFileLock(turnCaptureLockPath(projectDir), () => {
@@ -339,6 +387,9 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
             writeFileSync(gitignore, '*\n');
             hardenPath(gitignore, TURN_CAPTURE_FILE_MODE);
           }
+          // Checked again under the lock, immediately before the append.
+          const late = captureCustodyProblem(projectDir, { rowFile: file });
+          if (late) throw Object.assign(new Error(`capture-refused: ${late}`), { code: 'CAPTURE_REFUSED' });
           appendFileSync(file, JSON.stringify(record) + '\n');
           hardenPath(file, TURN_CAPTURE_FILE_MODE);
         } catch (e) {
