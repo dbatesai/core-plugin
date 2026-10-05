@@ -1307,3 +1307,41 @@ test('a legacy workspaces folder that is itself a link is held before it is list
     assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false);
   } finally { s.cleanup(); }
 });
+
+test('a late-registered workspace that is a link is held: the earlier receipt is unchanged, nothing is copied, and nothing is written where the link leads', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  const foreign = join(s.coreDir, '..', 'foreign-late');
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    mkdirSync(foreign); writeFileSync(join(foreign, 'workspace.json'), JSON.stringify({ workspace_id: 'legacy-late' })); writeFileSync(join(foreign, 'notes-late.md'), 'FOREIGN\n'); writeFileSync(join(foreign, 'last-active'), '2026-10-01T00:00:00Z\n');
+    symlinkSync(foreign, join(s.coreDir, 'workspaces', 'legacy-late'));
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([...index, { workspace_id: 'legacy-late', name: 'legacy-late', path: p }]));
+    const table2 = { ...table, entries: { ...table.entries, 'legacy-late': { harness: H, evidence: 'fixture' } } };
+    const receiptBefore = readFileSync(stateFile(p, RECEIPT_NAME), 'utf8');
+    const before = treeOf(foreign);
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'LEGACY_SYMLINK');
+    assert.deepEqual(treeOf(foreign), before, 'no MOVED note, nothing else');
+    assert.equal(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'), receiptBefore, 'the earlier receipt is byte-identical');
+    assert.equal(existsSync(join(p, '.core', H, 'superseded', 'legacy-late')), false, 'nothing foreign was copied in');
+    assert.equal(existsSync(join(p, '.core', H, '.migrating')), false, 'refused before the marker');
+  } finally { s.cleanup(); }
+});
+
+test('a registered workspace name that is a link is never read through while the migration plan is built', { skip: isWin }, async () => {
+  const { buildManifest } = await import('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs');
+  const { s, p, table } = migrationFixture();
+  const foreign = join(s.coreDir, '..', 'foreign-plan');
+  try {
+    mkdirSync(foreign); writeFileSync(join(foreign, 'last-active'), '2031-01-01T00:00:00Z\n'); writeFileSync(join(foreign, 'workspace.json'), JSON.stringify({ workspace_id: 'linked', agent_name: 'Foreign' }));
+    symlinkSync(foreign, join(s.coreDir, 'workspaces', 'linked'));
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([...index, { workspace_id: 'linked', name: 'linked', path: p, last_active: '2026-02-02T00:00:00Z' }]));
+    const m = buildManifest({ coreDir: s.coreDir, table });
+    const text = JSON.stringify(m);
+    assert.doesNotMatch(text, /Foreign/, "the linked workspace's manifest was not read");
+    assert.doesNotMatch(text, /2031-01-01/, 'nor its last-active stamp');
+  } finally { s.cleanup(); }
+});

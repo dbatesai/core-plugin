@@ -90,6 +90,8 @@ class LegacyStateError extends Error {
   }
 }
 
+function isRealFolder(path) { try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink(); } catch { return false; } }
+
 /** A legacy folder that is absent is fine; one that is a link, not a folder, or can't be examined is held. */
 function assertLegacyFolder(path) {
   let st;
@@ -157,7 +159,8 @@ function expandHome(p, home) {
 
 function lastActive(coreDir, id, indexEntry) {
   const file = join(coreDir, 'workspaces', id, 'last-active');
-  try {
+  // Read only from a real legacy folder: a workspace name that is a link is never read through.
+  if (isRealFolder(join(coreDir, 'workspaces', id))) try {
     const t = Date.parse(readFileSync(file, 'utf8').trim());
     if (!Number.isNaN(t)) return t;
   } catch { /* fall back to the registry field */ }
@@ -513,6 +516,9 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
       const covered = new Set([checked.receipt.live, ...(checked.receipt.superseded || [])].filter(Boolean));
       const late = [...(live ? [live] : []), ...dups].filter((e) => !covered.has(e.workspace_id));
       if (late.length) {
+        // The same rule as a first migration: each late source is a real folder, checked before the
+        // marker, the copy and the receipt change, so a refusal leaves the earlier receipt as it was.
+        for (const e of late) { assertSafeWorkspaceId(e.workspace_id); assertLegacyFolder(join(coreDir, 'workspaces', e.workspace_id)); }
         atomicWriteFileSync(markerFile, `${iso}\n`);
         const lateCopies = [];
         for (const e of late) {
@@ -641,7 +647,8 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     if (release.allDone) {
       for (const e of release.onPath) {
         const dir = join(coreDir, 'workspaces', e.workspace_id);
-        if (existsSync(dir) && !existsSync(join(dir, 'MOVED.md'))) {
+        // The note is written only into a real legacy folder; a link (or anything else) there is left alone.
+        if (isRealFolder(dir) && !existsSync(join(dir, 'MOVED.md'))) {
           atomicWriteFileSync(join(dir, 'MOVED.md'), `This workspace's CORE state now lives in ${e.migrated_to} (migrated ${e.migrated_at}). Nothing here was deleted.\n`);
         }
       }
