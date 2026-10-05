@@ -213,7 +213,7 @@ test('a project-only process takes locks with no identity at all, explicit ones 
     const code = (declare) => `const m = await import(${JSON.stringify(fl)});
       ${declare ? 'm.useNoMachineIdentity();' : ''}
       const { mkdirSync } = await import('node:fs'); mkdirSync(${JSON.stringify(join(p.root, '_memories', '_lib'))}, { recursive: true });
-      m.withFileLock(${JSON.stringify(lock)}, () => {});
+      m.withFileLock(${JSON.stringify(lock)}, () => { m.inspectFileLock(${JSON.stringify(lock)}); });   // no machine argument on either call
       let seen; m.withFileLock(${JSON.stringify(lock)}, () => { seen = m.inspectFileLock(${JSON.stringify(lock)}, { machine: null }).lock.machine ?? 'none'; }, { machine: 'probe-id' });
       process.stdout.write(String(seen));`;
     const none = confined(p.root, ['--input-type=module', '-e', code(true)]);
