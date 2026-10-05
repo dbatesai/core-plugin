@@ -91,7 +91,7 @@ test('--all requires an explicit scratch project before any salt or artifact wri
 });
 test('--all uses the explicitly selected registered project, irrespective of registry order',()=>{
   const f=fixture();try{
-    const r=run(f,packageCode(f,['--all','--scratch-project',f.other,'--home',f.home,'--out',f.out]));assert.equal(r.thrown,undefined);assert.ok(r.result.shipped);assert.deepEqual(r.violations,[]);localAllocations(r,f.other);cleanScratch(f.other);assert.equal(fs.existsSync(join(f.root,'.core')),false);
+    const r=run(f,packageCode(f,['--all','--scratch-project',f.other,'--home',f.home,'--out',f.out]));assert.equal(r.thrown,undefined);assert.ok(r.result.shipped);assert.deepEqual(r.violations,[]);localAllocations(r,f.other);cleanScratch(f.other);assert.deepEqual(fs.readdirSync(join(f.root,'.core')),['_package'],'the other project keeps only its own package key and history, no scratch');
   }finally{f.cleanup();}
 });
 test('a scratch override outside the exported project set is refused before salt creation',()=>{
