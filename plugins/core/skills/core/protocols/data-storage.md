@@ -765,8 +765,10 @@ Three rings, one read at runtime.
 ├── local/<key>/                   ← adoption-consent records only; older project state here is read-only history
 ├── migration-manifest.json        ← the migration's record of the legacy workspaces/ folders
 ├── index.json, workspaces/<id>/   ← legacy layout; read by the migration, never written for new projects
-└── agent-profile.md, topics.md, agents/, task-configs/, research/, state-cache.json
-                                   ← older shared copies; read-only history, copied into a project once
+├── agent-profile.md, dm-profile.md, topics.md, agents/, task-configs/
+│                                  ← older shared copies; read-only history, copied into a project once by import-agent-notes.mjs
+└── research/, state-cache.json    ← read-only history, copied only on an explicit ask: --research, or the
+                                     legacy-cache importer (§Edit detection)
 ```
 
 **Skill ring** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace) or `~/.claude/skills/core/` (legacy direct install)

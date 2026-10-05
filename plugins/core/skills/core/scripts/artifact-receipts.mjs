@@ -9,8 +9,8 @@
  *   - The GENERATION receipt (the preflight manifest, written by the
  *     generator before consent) records what was generated and offered —
  *     never what went up. This module owns where it lands
- *     (`<project>/_core/<harness>/artifact-receipts/`, or the flagged
- *     `~/.core/artifact-receipts/` fallback when no workspace.json exists).
+ *     (`<project>/_core/<harness>/artifact-receipts/`; with no writable project state, nothing is
+ *     generated).
  *   - The PUBLISH receipt (`--record-publish`) is written after the consent/
  *     publish step resolves and records the actual outcome — declined,
  *     failed, or published-private with privacy-verification evidence — as

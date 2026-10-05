@@ -30,11 +30,14 @@ test('copies each family once, records source digests, and leaves the old folder
     const before = snapshot(join(home, '.core'));
     const r = importAgentNotes({ root, home });
     assert.equal(r.status, 'ok');
-    assert.equal(readFileSync(join(agent, 'agent-profile.md'), 'utf8'), '# legacy profile\n');
+    assert.equal(readFileSync(join(agent, 'dm-profile.md'), 'utf8'), '# legacy profile\n');
+    assert.equal(existsSync(join(agent, 'agent-profile.md')), false);
     assert.equal(readFileSync(join(agent, 'agents', 'retired', 'old.md'), 'utf8'), 'old\n');
     assert.equal(readFileSync(join(agent, '.gitignore'), 'utf8'), '*\n');
     const receipt = JSON.parse(readFileSync(join(agent, 'import-receipt.json'), 'utf8'));
-    assert.equal(receipt.families.profile.source, join(home, '.core', 'dm-profile.md'));
+    assert.equal(receipt.families['dm-profile'].source, join(home, '.core', 'dm-profile.md'));
+    assert.equal(receipt.families.profile.result, 'absent');
+    assert.ok(!readdirSync(agent).some((n) => n.startsWith('.importing-')), 'no staging left behind');
     assert.equal(receipt.families.topics.files['.'], sha('topics v1\n'));
     assert.equal(receipt.families.agents.files['retired/old.md'], sha('old\n'));
     assert.equal(receipt.families['task-configs'].result, 'absent');
@@ -55,11 +58,11 @@ test('a deleted local copy never falls back to the old folder, and a local copy 
     assert.equal(first.results.find(x => x.family === 'agents').result, 'local-present');
     assert.deepEqual(readdirSync(join(agent, 'agents')), ['mine.md']);
     assert.equal(readFileSync(join(agent, 'topics.md'), 'utf8'), 'mine\n');
-    rmSync(join(agent, 'agent-profile.md'));
+    rmSync(join(agent, 'dm-profile.md'));
     writeFileSync(join(home, '.core', 'agent-profile.md'), 'newer global\n');
     const r = importAgentNotes({ root, home });
     assert.ok(r.results.every(x => x.result === 'already-decided'));
-    assert.ok(!existsSync(join(agent, 'agent-profile.md')));
+    assert.ok(!existsSync(join(agent, 'agent-profile.md')) && !existsSync(join(agent, 'dm-profile.md')));
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
@@ -72,5 +75,95 @@ test('links are listed, not followed; research copies only when asked', { skip: 
     assert.deepEqual(r.results.find(x => x.family === 'agents').omitted, ['link.md']);
     assert.ok(!existsSync(join(agent, 'agents', 'link.md')));
     assert.equal(readFileSync(join(root, '_outputs', 'research', 'index.json'), 'utf8'), '{"documents":[]}\n');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('both profile files are kept under their own names', () => {
+  const { base, home, root, agent } = setup();
+  try {
+    writeFileSync(join(home, '.core', 'agent-profile.md'), 'current\n');
+    importAgentNotes({ root, home });
+    assert.equal(readFileSync(join(agent, 'agent-profile.md'), 'utf8'), 'current\n');
+    assert.equal(readFileSync(join(agent, 'dm-profile.md'), 'utf8'), '# legacy profile\n');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('an unfinished family is staged, recorded as pending, finished when its copy is intact, and held when something else is there', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { base, home, root, agent } = setup();
+  try {
+    const real = fs.linkSync;
+    fs.linkSync = () => { throw Object.assign(new Error('interrupted'), { code: 'EIO' }); };
+    syncBuiltinESMExports();
+    let r;
+    try { r = importAgentNotes({ root, home }); } finally { fs.linkSync = real; syncBuiltinESMExports(); }
+    assert.equal(r.status, 'partial');
+    assert.deepEqual(['held', 'publish', 'EIO'], ['result', 'stage', 'code'].map((k) => r.results.find((x) => x.family === 'topics')[k]));
+    let receipt = JSON.parse(readFileSync(join(agent, 'import-receipt.json'), 'utf8'));
+    assert.equal(receipt.families.topics.result, 'pending');
+    assert.equal(receipt.families.topics.files['.'], sha('topics v1\n'));
+    assert.equal(existsSync(join(agent, 'topics.md')), false);
+    assert.equal(importAgentNotes({ root, home }).status, 'ok', 'the next run copies it');
+    assert.equal(readFileSync(join(agent, 'topics.md'), 'utf8'), 'topics v1\n');
+    assert.ok(!readdirSync(agent).some((n) => n.startsWith('.importing-')));
+
+    // published but not yet recorded as done: finished when the copy is intact
+    receipt = JSON.parse(readFileSync(join(agent, 'import-receipt.json'), 'utf8'));
+    receipt.families.topics = { ...receipt.families.topics, result: 'pending', staging: '.importing-topics-dead' };
+    mkdirSync(join(agent, '.importing-topics-dead'));
+    writeFileSync(join(agent, 'import-receipt.json'), JSON.stringify(receipt));
+    assert.equal(importAgentNotes({ root, home }).results.find((x) => x.family === 'topics').result, 'copied');
+    assert.equal(existsSync(join(agent, '.importing-topics-dead')), false);
+
+    // something else at the destination: held, the local bytes kept
+    receipt.families.topics.result = 'pending';
+    writeFileSync(join(agent, 'import-receipt.json'), JSON.stringify(receipt));
+    writeFileSync(join(agent, 'topics.md'), 'user edit\n');
+    const held = importAgentNotes({ root, home });
+    assert.equal(held.status, 'partial');
+    assert.equal(held.results.find((x) => x.family === 'topics').result, 'held');
+    assert.equal(readFileSync(join(agent, 'topics.md'), 'utf8'), 'user edit\n');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('an unreadable source is not recorded and leaves nothing half-copied; a receipt of the wrong shape copies nothing', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const { chmodSync } = await import('node:fs');
+  const { base, home, root, agent } = setup();
+  try {
+    chmodSync(join(home, '.core', 'agents', 'retired', 'old.md'), 0o000);
+    const r = importAgentNotes({ root, home });
+    chmodSync(join(home, '.core', 'agents', 'retired', 'old.md'), 0o644);
+    assert.equal(r.status, 'partial');
+    assert.deepEqual(['not-copied', 'read', 'EACCES'], ['result', 'stage', 'code'].map((k) => r.results.find((x) => x.family === 'agents')[k]));
+    assert.equal(existsSync(join(agent, 'agents')), false);
+    assert.ok(!readdirSync(agent).some((n) => n.startsWith('.importing-')));
+    assert.equal(JSON.parse(readFileSync(join(agent, 'import-receipt.json'), 'utf8')).families.agents, undefined);
+    assert.equal(importAgentNotes({ root, home }).status, 'ok', 'tried again once readable');
+    assert.equal(readFileSync(join(agent, 'agents', 'retired', 'old.md'), 'utf8'), 'old\n');
+
+    const { root: root2, agent: agent2, base: base2 } = setup();
+    try {
+      mkdirSync(agent2, { recursive: true });
+      writeFileSync(join(agent2, '.gitignore'), '*\n');
+      writeFileSync(join(agent2, 'import-receipt.json'), '{"families":[]}');
+      const bad = importAgentNotes({ root: root2, home });
+      assert.equal(bad.status, 'receipt-invalid');
+      assert.equal(existsSync(join(agent2, 'topics.md')), false);
+    } finally { rmSync(base2, { recursive: true, force: true }); }
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('a linked local note is held and reported as not readable', { skip: process.platform === 'win32' }, () => {
+  const { base, home, root, agent } = setup();
+  try {
+    mkdirSync(agent, { recursive: true });
+    writeFileSync(join(base, 'elsewhere.md'), 'outside\n');
+    symlinkSync(join(base, 'elsewhere.md'), join(agent, 'topics.md'));
+    const r = importAgentNotes({ root, home });
+    assert.equal(r.status, 'partial');
+    assert.equal(r.results.find((x) => x.family === 'topics').result, 'held');
+    assert.equal(r.notes['topics.md'], 'link');
+    assert.equal(r.notes['dm-profile.md'], 'ok');
   } finally { rmSync(base, { recursive: true, force: true }); }
 });

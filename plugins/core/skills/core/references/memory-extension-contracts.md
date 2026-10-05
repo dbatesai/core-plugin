@@ -147,8 +147,10 @@ blast-radius policy (MAJOR/MINOR on the plugin version) and called out in `CHANG
 What is internal and may change without notice: script internals and exports not named above,
 analyzer output formats, `state-cache.json` shape.
 
-Co-installation rule: a wrapper writes only under its own `<project>/_core/<wrapper>/` sub-namespace
-and never the shared registry files — see `protocols/data-storage.md §Single-writer assumption`.
+Co-installation rule: a wrapper writes only under its own `<project>/_core/<wrapper>/` sub-namespace,
+named for the wrapper and never one of CORE's own names there (a harness name, `_agent`, `_hooks`,
+`_scratch`, `_package`, `_project-only`), and never writes `~/.core` — see `protocols/data-storage.md
+§Shared-write concurrency`.
 
 ---
 

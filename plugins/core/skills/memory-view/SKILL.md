@@ -131,6 +131,6 @@ On each wake:
 ## Self-healing rails
 
 - **No `_memories/` store here:** say so; offer `/core` to start one. Nothing to publish.
-- **No `workspace.json`:** the receipt falls back to `~/.core/artifact-receipts/` and the manifest flags it (`receipt_fallback: true`) — mention it, don't hide it.
+- **No project state to write to:** generation stops before anything is published and nothing is written outside the project; say why. Older receipts under `~/.core/artifact-receipts/` stay readable history.
 - **Store feels too big to publish whole:** that's what scope selection is for — suggest `--exclude-topic` or staying with the active-only default rather than skipping the preflight.
 - **Metrics gathering failed during generation:** the page carries an honest "metrics not gathered" line instead of the health section; the snapshot is still valid to publish.

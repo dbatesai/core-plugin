@@ -6,7 +6,7 @@
  * sessions (analyze-capability-drift.mjs is the consumer).
  *
  * Storage: the project's per-harness state, `<project>/_core/<harness>/capability-history.jsonl`
- *   (or ~/.core/local/<slug>/<harness>/ for a synced, read-only or another install's project),
+ *   (older rows under ~/.core/local/<slug>/<harness>/ are read-only history),
  *   with a project fallback at `<project>/_metrics/capability-history/<harness>.jsonl`.
  *   One JSON object per line:
  *   { observed_at, runner_version, schema_version, harness,
