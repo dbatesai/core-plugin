@@ -506,6 +506,13 @@
       "surface": "shipped"
     },
     {
+      "name": "project-artifacts",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/project-artifacts.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "project-only",
       "kind": "script",
       "harness": "shared",
