@@ -89,8 +89,18 @@ export function storeBoundaryProblem(storePath) {
   if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
   let entries;
   try { entries = readdirSync(lib, { withFileTypes: true }); } catch (e) { return unproven(lib, e); }
-  const link = entries.find((e) => e.isSymbolicLink());
-  return link ? bad(join(lib, link.name)) : null;
+  // Every cache file is CORE's own: an ordinary file with one name, or a folder. A link, a second
+  // name elsewhere, or a pipe/device is refused before any reader opens it. Lock files are checked
+  // by the lock itself, whose acquisition briefly gives a lock file a second name in this folder.
+  for (const e of entries) {
+    const path = join(lib, e.name);
+    if (e.isSymbolicLink()) return bad(path);
+    if (e.isDirectory() || e.name.includes('.lock')) continue;
+    let leaf;
+    try { leaf = lstatSync(path); } catch (err) { if (err?.code === 'ENOENT') continue; return unproven(path, err); }
+    if (!leaf.isFile() || leaf.nlink !== 1) return bad(path);
+  }
+  return null;
 }
 
 /** The first link found anywhere under `dir` (never followed), or null. An unlistable folder throws. */

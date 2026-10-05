@@ -101,6 +101,7 @@ import { readProjectCache, hashText, stampFile, importLegacyProjectCache, CACHE_
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, storeBoundaryProblem } from './generate-summary-index.mjs';
 
 // ---------- session-start inventory (diagnostic only, non-authoritative) ----------
 
@@ -114,6 +115,7 @@ export function sessionInventoryPath(projectDir) {
  * annotation on a no-baseline file). No safety decision depends on it.
  */
 export function readSessionInventory(projectDir) {
+  if (storeBoundaryProblem(projectDir)) return null;
   try {
     const inv = JSON.parse(readFileSync(sessionInventoryPath(projectDir), 'utf8'));
     if (inv && typeof inv === 'object' && Array.isArray(inv.paths)) return inv;
@@ -162,6 +164,7 @@ export function inventoryPaths(projectDir) {
 export function recordSessionStart(projectDir, { sessionId = null, now = new Date().toISOString() } = {}) {
   const inv = { session: sessionId, started_at: now, paths: inventoryPaths(projectDir) };
   const path = sessionInventoryPath(projectDir);
+  assertStoreBoundary(projectDir);
   mkdirSync(dirname(path), { recursive: true });
   atomicWriteFileSync(path, JSON.stringify(inv, null, 2) + '\n');
   return inv;
