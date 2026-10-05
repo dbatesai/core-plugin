@@ -198,7 +198,7 @@ test('a current capture-health file that cannot be trusted is reported UNREADABL
   const { resolveStoragePath } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { chmodSync, linkSync } = await import('node:fs');
   const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
-  const shapes = ['valid', 'malformed', 'a JSON array', 'a second hard link'];
+  const shapes = ['valid', 'valid older file without consecutive_failures', 'malformed', 'a JSON array', 'a second hard link', 'a text counter', 'a negative counter', 'a fractional counter', 'no counters'];
   if (process.platform !== 'win32' && !isRoot) shapes.push('unreadable');
   for (const shape of shapes) {
     const root = mkdtempSync(join(tmpdir(), 'ans-health-'));
@@ -208,12 +208,20 @@ test('a current capture-health file that cannot be trusted is reported UNREADABL
       appendScorecard(project, card(new Date(Date.now() - day).toISOString()));
       const dir = resolveStoragePath(project); mkdirSync(dir, { recursive: true });
       const file = join(dir, HEALTH_FILENAME);
-      writeFileSync(file, shape === 'malformed' ? '{"attempts": 3,' : shape === 'a JSON array' ? '[]' : '{"attempts":3,"failures":0,"consecutive_failures":0}');
+      const bodies = {
+        malformed: '{"attempts": 3,', 'a JSON array': '[]',
+        'a text counter': '{"attempts":100,"failures":"unknown","consecutive_failures":0}',
+        'a negative counter': '{"attempts":100,"failures":-1,"consecutive_failures":0}',
+        'a fractional counter': '{"attempts":100,"failures":0.5,"consecutive_failures":0}',
+        'no counters': '{"note":"x"}',
+        'valid older file without consecutive_failures': '{"attempts":3,"failures":0}',
+      };
+      writeFileSync(file, bodies[shape] ?? '{"attempts":3,"failures":0,"consecutive_failures":0}');
       if (shape === 'a second hard link') linkSync(file, join(root, 'elsewhere.json'));
       if (shape === 'unreadable') chmodSync(file, 0o000);
       const view = renderAnswerView(gatherAnswers(project));
       assert.match(view, /82%/, `${shape}: the pinned self-test answer still renders`);
-      if (shape === 'valid') {
+      if (shape.startsWith('valid')) {
         assert.match(view, /Nothing needs your attention right now\./, 'control: a readable file is quiet');
       } else {
         assert.match(view, /Needs your attention: health evidence is UNREADABLE — current capture health is unreadable/, shape);

@@ -346,6 +346,12 @@ export function readCaptureHealth(projectDir) {
   try { parsed = JSON.parse(readFileSync(file, 'utf8')); }
   catch (e) { return e.code === 'ENOENT' ? zero : { ...zero, unreadable: e.code || 'not valid JSON' }; }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ...zero, unreadable: 'not a JSON object' };
+  // Counters earn numeric credit only as whole numbers from zero up. One a file predates is zero;
+  // a file with none of them is not a health record.
+  const counters = ['attempts', 'failures', 'consecutive_failures'];
+  if (!counters.some((k) => k in parsed)) return { ...zero, unreadable: 'no counters' };
+  const bad = counters.find((k) => k in parsed && !(Number.isSafeInteger(parsed[k]) && parsed[k] >= 0));
+  if (bad) return { ...zero, unreadable: `${bad} is not a whole number from zero up` };
   return { ...zero, ...parsed };
 }
 
