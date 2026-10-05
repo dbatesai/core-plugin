@@ -463,11 +463,16 @@ function setAside(harnessDir, label) {
  * a moved project is re-stamped at its new path.
  *
  * Refused containment (a symlinked or escaping .core) throws on write and reads as null.
+ * Optional readDirectoryGuard checks a selected state directory before child probes;
+ * false means genuinely absent, and throws distinguish unsafe/unreadable parents.
  */
-export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent } = {}) {
+export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent, readDirectoryGuard } = {}) {
   assertHarnessName(harness);
   const real = canonical(root);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
+  // Strict consumers inspect the selected parent chain before any child probe.
+  // Ordinary readers and explicit writers retain their existing behavior.
+  if (!forWrite && readDirectoryGuard && !readDirectoryGuard(target.dir)) return null;
   if (target.location === 'local') {
     if (forWrite) mkdirSync(target.dir, { recursive: true });
     else if (!existsSync(target.dir)) return null;
@@ -478,6 +483,7 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
   const harnessDir = join(real, STATE_DIRNAME, harness);
   const local = () => {
     const dir = localStateDir({ root: real, harness, coreDir });
+    if (!forWrite && readDirectoryGuard && !readDirectoryGuard(dir)) return null;
     if (forWrite) mkdirSync(dir, { recursive: true });
     else if (!existsSync(dir)) return null;
     return { dir, location: 'local', status: verdict.status, trusted: true };

@@ -21,8 +21,8 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
@@ -213,14 +213,42 @@ export function operationalMetricsDir(projectDir, { home = homedir(), env = proc
   return dir;
 }
 
-/** The metrics dir when trustworthy state already exists for this project; null otherwise. Never writes. */
-export function trustedMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+/** The metrics dir when trustworthy state already exists; null otherwise. Never writes.
+ * guardReadParents opts strict consumers into selected-parent checks and visible IO errors. */
+export function trustedMetricsDir(projectDir, { home = homedir(), env = process.env, harness, guardReadParents = false } = {}) {
   try {
+    if (guardReadParents) home = realpathSync(home); // Account-root aliases are allowed.
     const coreDir = join(home, '.core');
+    if (guardReadParents) checkMetricsParentChain(home, coreDir);
     const root = projectRootFor(projectDir, { home, coreDir });
-    const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir });
-    return s ? join(s.dir, 'metrics') : null;
-  } catch { return null; }
+    const readDirectoryGuard = guardReadParents ? dir => {
+      const fromProject = relative(root, dir);
+      const anchor = fromProject !== '..' && !fromProject.startsWith('..' + sep) && !isAbsolute(fromProject) ? root : home;
+      return checkMetricsParentChain(anchor, dir);
+    } : undefined;
+    const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, readDirectoryGuard });
+    if (!s) return null;
+    const dir = join(s.dir, 'metrics');
+    if (readDirectoryGuard) readDirectoryGuard(dir);
+    return dir;
+  } catch (e) { if (guardReadParents) throw e; return null; }
+}
+
+// Walk from a canonical, caller-owned root without following a linked parent.
+// Genuine absence is empty evidence; all other IO errors stay distinguishable.
+function checkMetricsParentChain(anchor, dir) {
+  const rel = relative(anchor, dir);
+  if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel))
+    throw Object.assign(new Error('metrics directory escapes its selected root'), { code: 'METRICS_DIRECTORY_CUSTODY' });
+  let current = anchor;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    current = join(current, part);
+    let st;
+    try { st = lstatSync(current); } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
+    if (st.isSymbolicLink() || !st.isDirectory())
+      throw Object.assign(new Error('metrics parent is not a real directory'), { code: 'METRICS_DIRECTORY_CUSTODY' });
+  }
+  return true;
 }
 
 /**

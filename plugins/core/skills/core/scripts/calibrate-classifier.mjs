@@ -30,7 +30,7 @@
 
 import {
   existsSync, readFileSync, writeFileSync, mkdirSync,
-  readdirSync, chmodSync,
+  readdirSync, chmodSync, lstatSync,
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
@@ -96,9 +96,13 @@ export function emptyCalibrationState() {
   };
 }
 
-export function readCalibrationState(metaDir) {
+export function readCalibrationState(metaDir, { strict = false } = {}) {
   const f = join(metaDir, 'calibration-state.json');
-  if (!existsSync(f)) return emptyCalibrationState();
+  if (strict) {
+    const st = calibrationReadKind(f);
+    if (!st) return emptyCalibrationState();
+    requireCalibrationReadFile(st);
+  } else if (!existsSync(f)) return emptyCalibrationState();
   try {
     const state = JSON.parse(readFileSync(f, 'utf8'));
     if (state.classifier_version !== CLASSIFIER_VERSION
@@ -106,8 +110,15 @@ export function readCalibrationState(metaDir) {
       || state.classified_schema_version !== CLASSIFIED_SCHEMA_VERSION) {
       return { ...emptyCalibrationState(), invalidated_stale_state: true };
     }
+    if (strict && (state.schema_version !== CALIBRATION_VERSION
+      || typeof state.is_calibrated !== 'boolean' || typeof state.provisional !== 'boolean'
+      || !Number.isSafeInteger(state.labeled_count) || state.labeled_count < 0
+      || (state.overall_precision !== null && (!Number.isFinite(state.overall_precision)
+        || state.overall_precision < 0 || state.overall_precision > 1)))) {
+      throw Object.assign(new Error('calibration conclusion fields are invalid'), { code: 'CALIBRATION_STATE_INVALID' });
+    }
     return state;
-  } catch { return emptyCalibrationState(); }
+  } catch (e) { if (strict) throw e; return emptyCalibrationState(); }
 }
 
 export function writeCalibrationState(metaDir, state) {
@@ -201,8 +212,22 @@ export function computePrecision(labeledTurns) {
  * Collect classified turn records from all daily files under classifiedDir.
  * Returns an array of records, newest-first up to maxCount.
  */
-export function collectClassifiedTurns(classifiedDir, maxCount = 500) {
-  if (!existsSync(classifiedDir)) return [];
+// Strict readiness reads distinguish genuine absence from unknown evidence and
+// refuse links before traversing them. Explicit worksheet writers keep their existing policy.
+function calibrationReadKind(path) {
+  try { return lstatSync(path); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+}
+function requireCalibrationReadFile(st) {
+  if (!st || !st.isFile() || st.isSymbolicLink() || st.nlink !== 1) {
+    throw Object.assign(new Error('calibration file is not physically owned'), { code: 'CALIBRATION_CUSTODY' });
+  }
+}
+export function collectClassifiedTurns(classifiedDir, maxCount = 500, { strict = false } = {}) {
+  if (strict) {
+    const st = calibrationReadKind(classifiedDir);
+    if (!st) return [];
+    if (!st.isDirectory() || st.isSymbolicLink()) throw Object.assign(new Error('classified directory is not physically owned'), { code: 'CALIBRATION_CUSTODY' });
+  } else if (!existsSync(classifiedDir)) return [];
   const files = readdirSync(classifiedDir)
     .filter((f) => f.endsWith('.jsonl'))
     .sort()
@@ -210,10 +235,12 @@ export function collectClassifiedTurns(classifiedDir, maxCount = 500) {
   const out = [];
   for (const f of files) {
     if (out.length >= maxCount) break;
-    const lines = safeRead(join(classifiedDir, f)).split('\n').filter(Boolean);
+    const path = join(classifiedDir, f);
+    if (strict) requireCalibrationReadFile(calibrationReadKind(path));
+    const lines = (strict ? readFileSync(path, 'utf8') : safeRead(path)).split('\n').filter(Boolean);
     for (const l of lines) {
       if (out.length >= maxCount) break;
-      try { out.push(JSON.parse(l)); } catch { /* skip malformed */ }
+      try { out.push(JSON.parse(l)); } catch (e) { if (strict) throw e; /* explicit worksheet policy: skip malformed */ }
     }
   }
   return out;
@@ -563,21 +590,31 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
  */
 export function readinessReport({ project, home = homedir(), env = process.env }) {
   const minLabeled = resolveMinLabeled(project);
-  const metaDir = trustedMetricsDir(project, { home, env });
-  const classifiedDir = metaDir ? join(metaDir, 'classified') : null;
-  const state = metaDir ? readCalibrationState(metaDir) : emptyCalibrationState();
-  const turns = classifiedDir ? collectClassifiedTurns(classifiedDir, minLabeled + 50) : [];
+  let metaDir = null, classifiedDir = null;
+  let state = emptyCalibrationState(), turns = [], failure = null;
+  try {
+    metaDir = trustedMetricsDir(project, { home, env, guardReadParents: true });
+    classifiedDir = metaDir ? join(metaDir, 'classified') : null;
+    if (metaDir) {
+      state = readCalibrationState(metaDir, { strict: true });
+      if (state.invalidated_stale_state) throw Object.assign(new Error('calibration instrument is stale'), { code: 'CALIBRATION_STALE' });
+      turns = collectClassifiedTurns(classifiedDir, minLabeled + 50, { strict: true });
+    }
+  } catch (e) { failure = e.code || e.name || 'calibration-read-failed'; }
+  const available = Boolean(metaDir) && !failure;
+  const reason = failure ? `Calibration evidence is unavailable (${failure}).`
+    : !metaDir ? 'No trusted calibration data is available.' : null;
   return {
-    available: Boolean(metaDir),
-    ...(metaDir ? {} : { reason: 'No trusted calibration data is available.' }),
-    is_calibrated: state.is_calibrated,
-    provisional: state.provisional,
-    pool_size: turns.length,
+    available,
+    ...(reason ? { reason } : {}),
+    is_calibrated: available && state.is_calibrated,
+    provisional: available ? state.provisional : true,
+    pool_size: failure ? null : turns.length,
     min_needed: minLabeled,
-    ready_to_label: turns.length >= minLabeled,
+    ready_to_label: available && turns.length >= minLabeled,
     overall_precision: state.overall_precision,
     labeled_count: state.labeled_count,
-    notes: metaDir ? state.notes : 'No trusted calibration data is available.',
+    notes: reason || state.notes,
     metaDir,
     classifiedDir,
   };
