@@ -519,3 +519,21 @@ test('a registered project is injected, and so is a session started in one of it
     assert.match(runHook('widget decision', { ...registryEnvFor(root) }, sub), /dc-1-widget/, 'a subfolder retrieves from the project root');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a migration fence stops retrieval and its receipt names the real reason, not pipeline-error', { skip: process.platform === 'win32' }, async () => {
+  const { symlinkSync, existsSync: ex2, readFileSync: rf } = await import('node:fs');
+  for (const [shape, expected] of [['marker', 'migration-in-progress'], ['linked state', 'state-untrusted']]) {
+    const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-fence-')));
+    try {
+      if (shape === 'marker') { mkd(join(root, '.core', 'claude-code'), { recursive: true }); wf(join(root, '.core', 'claude-code', '.migrating'), ''); }
+      else { const other = mkdtempSync(join(tmpdir(), 'rh-fence-other-')); symlinkSync(other, join(root, '.core')); }
+      const r = runHookProcess('widget decision', {}, root);
+      assert.equal(r.status, 0);
+      assert.doesNotMatch(r.stdout, /dc-1-widget/, `${shape}: nothing retrieved`);
+      const log = isolatedHooksLog(root);
+      const lines = (ex2(log) ? rf(log, 'utf8') : r.stderr).trim().split('\n').filter((l) => l.startsWith('{'));
+      const row = JSON.parse(lines.pop());
+      assert.ok(row.reason === expected || row.intended_reason === expected, `${shape}: ${JSON.stringify(row)}`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
