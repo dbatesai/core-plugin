@@ -282,7 +282,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
 // ---------- apply ----------
 
 // Statuses that mean the project's state is not migrated and needs attention or a retry.
-const BLOCKED_STATUSES = new Set(['legacy-held', 'migration-incomplete', 'receipt-unverified', 'lock-held']);
+const BLOCKED_STATUSES = new Set(['held', 'legacy-held', 'migration-incomplete', 'receipt-unverified', 'lock-held']);
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const RECEIPT = 'migrated-from.json';
 const LEGACY_MANIFEST = 'legacy-workspace.json';

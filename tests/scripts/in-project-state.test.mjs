@@ -247,6 +247,34 @@ test('without a table, the running harness claims a sole unlabeled registration;
   } finally { s.cleanup(); }
 });
 
+test('migration CLI exits 3 for ambiguous legacy registrations and 0 for genuine absence', () => {
+  const s = sandbox();
+  try {
+    const heldRoot = s.mk('Projects', 'Held');
+    const absentRoot = s.mk('Projects', 'Absent');
+    const index = ['held-a', 'held-b'].map(id => legacyWorkspace(s, id, {
+      path: heldRoot, files: { 'workspace.json': JSON.stringify({ workspace_id: id }) },
+    }));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index));
+    const before = index.map(e => readFileSync(join(s.coreDir, 'workspaces', e.workspace_id, 'workspace.json'), 'utf8'));
+    const run = root => spawnSync(process.execPath, [join(SCRIPTS, 'migrate-workspace-state.mjs'),
+      '--apply', '--root', root, '--harness', 'codex', '--core-dir', s.coreDir], { encoding: 'utf8' });
+    const held = run(heldRoot);
+    assert.equal(held.status, 3, `held migration must not return success: ${held.stdout} ${held.stderr}`);
+    const report = JSON.parse(held.stdout);
+    assert.equal(report.status, 'held');
+    assert.equal(report.held.length, 2);
+    assert.equal(existsSync(join(heldRoot, '.core', 'codex', 'migrated-from.json')), false);
+    for (let i = 0; i < index.length; i++) {
+      assert.equal(readFileSync(join(s.coreDir, 'workspaces', index[i].workspace_id, 'workspace.json'), 'utf8'), before[i]);
+      assert.equal(existsSync(join(s.coreDir, 'workspaces', index[i].workspace_id, 'MOVED.md')), false);
+    }
+    const absent = run(absentRoot);
+    assert.equal(absent.status, 0, absent.stderr);
+    assert.equal(JSON.parse(absent.stdout).status, 'nothing-to-migrate');
+  } finally { s.cleanup(); }
+});
+
 // ---------- spec test 7: .core stays out of git ----------
 
 function exerciseState(s, root) {
