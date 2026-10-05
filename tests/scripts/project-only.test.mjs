@@ -205,7 +205,7 @@ test('a link to another place inside the folder is refused too, so pending write
   } finally { p.cleanup(); }
 });
 
-test('a project-only process takes locks without reading the install id; withFileLock passes a given identity through', () => {
+test('a project-only process takes locks with no identity at all, explicit ones included; otherwise withFileLock passes a given identity through', () => {
   const p = project();
   try {
     const fl = pathToFileURL(join(CORE, 'scripts/file-lock.mjs')).href;
@@ -219,9 +219,10 @@ test('a project-only process takes locks without reading the install id; withFil
     const none = confined(p.root, ['--input-type=module', '-e', code(true)]);
     assert.equal(none.status, 0, none.stderr);
     assert.deepEqual(none.violations, [], 'no install-id read once the process has declared no identity');
-    assert.equal(none.stdout, 'probe-id', 'an explicit identity reaches the lock');
+    assert.equal(none.stdout, 'none', 'after the declaration even an explicit identity is dropped');
     const control = confined(p.root, ['--input-type=module', '-e', code(false)]);
     assert.ok(control.violations.some((v) => v.path.endsWith('install-id')), 'without the declaration the default reads the install id');
+    assert.equal(control.stdout, 'probe-id', 'and without it an explicit identity reaches the lock (withFileLock passes it through)');
   } finally { p.cleanup(); }
 });
 

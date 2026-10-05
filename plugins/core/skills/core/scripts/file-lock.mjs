@@ -69,10 +69,13 @@ let cachedMachineId;
 /**
  * A process that must not read anything outside its project (project-only mode) declares it has
  * no install identity before taking any lock, so every lock it takes, directly or through a
- * shared helper, records `machine: null` and never reads ~/.core/install-id. It can only remove
- * an identity, never supply one.
+ * shared helper, records `machine: null` and never reads ~/.core/install-id, including a lock
+ * whose caller passes an identity explicitly. It can only remove an identity, never supply one.
  */
-export function useNoMachineIdentity() { cachedMachineId = null; }
+let noIdentity = false;
+export function useNoMachineIdentity() { cachedMachineId = null; noIdentity = true; }
+// After the declaration an identity passed explicitly is dropped too: it can only be removed.
+const lockMachine = (machine) => (noIdentity ? null : machine);
 
 /** This install's id (~/.core/install-id under the trusted home), or null when absent. Never creates it. */
 export function localMachineId() {
@@ -177,7 +180,7 @@ export function inspectFileLock(lockPath, {
   hardStaleMs = DEFAULT_HARD_STALE_MS,
   machine = localMachineId(),
 } = {}) {
-  return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs, machine });
+  return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs, machine: lockMachine(machine) });
 }
 
 /**
@@ -218,6 +221,7 @@ export function acquireFileLock(lockPath, {
   hardStaleMs = DEFAULT_HARD_STALE_MS,
   machine = localMachineId(),
 } = {}) {
+  machine = lockMachine(machine);
   mkdirSync(dirname(lockPath), { recursive: true });
   const nonce = newNonce();
 
