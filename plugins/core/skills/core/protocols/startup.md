@@ -43,7 +43,7 @@ It prints one JSON line:
 - `status: refused` (an unresolvable path, the home folder, a filesystem root): say so in one plain line and stop.
 - `status: ok`: it has written `.core/_project-only/<harness>/bootstrap.json` and returned the unverified agent name (`agent_name`) and the capture state (`capture`: `disabled`, `held` or `default`).
 
-Then load project context from the folder by reading it: `PROJECT.md`, the unit store under `_memories/` (Tier 1 Grep and the typed-edge walk work as usual), and `inbox.md`. Explicit retrieval works unchanged: `retrieve-context.mjs <root> "<query>"`. Capture status is `project-only.mjs capture-status --root <root>`; outside history shows as unknown.
+Then load project context from the folder by reading it: `PROJECT.md`, the unit store under `_memories/` (Tier 1 Grep and the typed-edge walk work as usual), and `inbox.md`. Explicit retrieval works unchanged: `retrieve-context.mjs <root> "<query>"`. So does the typed-edge walk, `graph-walk.mjs <seed> --memories <root>/_memories`. Those two and the `project-only.mjs` commands are the script routes this mode supports; each refuses a link out of the folder. Don't run `priority.mjs`, `check-units.mjs`, `generate-unit-index.mjs` or the other maintenance scripts directly here: they aren't checked for links, and `project-only.mjs process-memory` is the confined way to get what they do. Capture status is `project-only.mjs capture-status --root <root>`; outside history shows as unknown.
 
 **Off in this mode, and said in the readiness summary:**
 - automatic per-turn retrieval and the capture inside it;

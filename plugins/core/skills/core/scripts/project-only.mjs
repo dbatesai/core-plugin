@@ -206,6 +206,10 @@ const UNAVAILABLE = {
   'metrics-export': `the metrics export ${NORMAL}`,
 };
 
+// What to do about a lock that would not release. Age alone does not clear a lock whose owner is a
+// live process on this machine, so the wording promises nothing automatic.
+const LOCK_RECOVERY = 'inspect the named lock and this result; the lock belongs to the process that took it and is not cleared by age while that process is alive. Recover only that generation after confirming its owner, and do not repeat the operation';
+
 // ---------- purge ----------
 //
 // The explicit captured-turn purge, from the folder alone. It removes what this project holds:
@@ -254,7 +258,7 @@ export function purge(ctx, { apply = false } = {}) {
   } finally { release = releaseFileLock(lockPath, lock.nonce); }
   // The removal report stands either way. A lock that would not release is a failure of its own: it
   // blocks later capture work, so it is never folded into a clean result.
-  if (!release.released) return { status: 'refused', state: 'lock-release-failed', applied: true, removed, refused, outside_history: 'unknown', lock: '_metrics/.turn-capture.lock', reason: `${release.reason}${release.error ? `: ${release.error}` : ''}`, recovery: 'the capture lock is still held; it clears when it ages past the stale window, or a normal session can release it' };
+  if (!release.released) return { status: 'refused', state: 'lock-release-failed', applied: true, removed, refused, outside_history: 'unknown', lock: '_metrics/.turn-capture.lock', reason: `${release.reason}${release.error ? `: ${release.error}` : ''}`, recovery: LOCK_RECOVERY };
   return { ...base, applied: true, outcome: refused.length ? 'partly-purged-in-project' : removed.length ? 'purged-in-project' : 'nothing-in-project', removed, would_remove: [], refused };
 }
 
@@ -284,7 +288,7 @@ export async function retention(ctx, { apply = false } = {}) {
     // Say which thing failed: the files, or only the lock after the files were removed.
     const lockNote = r.kept.find((k) => String(k).startsWith('(retention-lock-unavailable'));
     const removed = r.deleted.map(rel);
-    if (lockNote && /LOCK_RELEASE_FAILED/.test(lockNote)) return { status: 'refused', state: 'lock-release-failed', applied: true, removed, lock: '_metrics/.turn-capture.lock', reason: lockNote, recovery: 'the files listed were removed; the capture lock is still held and clears when it ages past the stale window, or a normal session can release it' };
+    if (lockNote && /LOCK_RELEASE_FAILED/.test(lockNote)) return { status: 'refused', state: 'lock-release-failed', applied: true, removed, lock: '_metrics/.turn-capture.lock', reason: lockNote, recovery: LOCK_RECOVERY };
     if (lockNote) return { status: 'refused', state: 'lock-held', removed, reason: lockNote };
     return { status: 'refused', state: 'retention-incomplete', removed, reason: 'some files could not be removed' };
   }
@@ -305,18 +309,8 @@ const PM_NOT_RUN = [
   'graduation and look-back (agent reasoning under the protocol, not a script)',
 ];
 
-/** The first link found anywhere under `dir` (never followed), or null. An unlistable folder throws. */
-function firstLinkUnder(dir) {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isSymbolicLink()) return p;
-    if (e.isDirectory()) { const inner = firstLinkUnder(p); if (inner) return inner; }
-  }
-  return null;
-}
-
 export async function processMemory(ctx, { apply = false } = {}) {
-  const { storeBoundaryProblem } = await import('./generate-summary-index.mjs');
+  const { storeBoundaryProblem, firstLinkUnder } = await import('./generate-summary-index.mjs');
   const problem = storeBoundaryProblem(ctx.root);
   if (problem) return { status: 'refused', state: problem.code === 'STORE_OUTSIDE_ROOT' ? 'refused-link' : 'boundary-unverified', reason: problem.path };
   const mem = join(ctx.root, '_memories');

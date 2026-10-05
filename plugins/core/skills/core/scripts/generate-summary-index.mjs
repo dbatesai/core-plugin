@@ -93,6 +93,16 @@ export function storeBoundaryProblem(storePath) {
   return link ? bad(join(lib, link.name)) : null;
 }
 
+/** The first link found anywhere under `dir` (never followed), or null. An unlistable folder throws. */
+export function firstLinkUnder(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isSymbolicLink()) return p;
+    if (e.isDirectory()) { const inner = firstLinkUnder(p); if (inner) return inner; }
+  }
+  return null;
+}
+
 /** Throws when the store or its cache folder leaves the project, or when that can't be established. */
 export function assertStoreBoundary(storePath) {
   const problem = storeBoundaryProblem(storePath);

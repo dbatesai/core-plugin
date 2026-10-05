@@ -918,3 +918,36 @@ test('retention names a lock that would not release as that, not as files left b
     assert.equal(existsSync(join(dir, '2020-01-01.jsonl')), false);
   } finally { p.cleanup(); }
 });
+
+test('graph-walk: a seed under a linked dated folder is refused; in a project-only folder a link anywhere under the store is refused before any hop', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const GW = join(CORE, 'scripts/graph-walk.mjs');
+  const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
+  // a regular seed file whose parent folder is a link out
+  const a = project({ withUnits: false });
+  try {
+    const mem = join(a.root, '_memories'); mkdirSync(join(mem, 'observations'), { recursive: true });
+    writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
+    const out = join(a.base, 'outside-month'); mkdirSync(out); writeFileSync(join(out, 'dc-3-seed.md'), u('dc-3-seed', 'dc-2-neighbour'));
+    symlinkSync(out, join(mem, 'observations', '2026-10'));
+    const r = confined(a.root, [GW, join(mem, 'observations', '2026-10', 'dc-3-seed.md'), '--memories', mem]);
+    assert.equal(r.status, 3);
+    assert.match(r.stderr, /2026-10 is a link/);
+    assert.doesNotMatch(r.stdout, /dc-2-neighbour/, 'the outside seed did not drive the walk');
+    assert.deepEqual(r.violations, []);
+  } finally { a.cleanup(); }
+  // project-only folder: a linked observations folder elsewhere in the store
+  const b = project({ withUnits: false });
+  try {
+    const mem = join(b.root, '_memories'); mkdirSync(mem);
+    writeFileSync(join(mem, 'dc-1-seed.md'), u('dc-1-seed', 'dc-2-neighbour')); writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
+    const out = join(b.base, 'outside-obs'); mkdirSync(out); writeFileSync(join(out, 'obs-x.md'), u('obs-x'));
+    symlinkSync(out, join(mem, 'observations'));
+    const args = [GW, join(mem, 'dc-1-seed.md'), '--memories', mem];
+    confined(b.root, [join(CORE, 'scripts/project-only.mjs'), 'startup', '--root', b.root, '--session', 's']);
+    const r = confined(b.root, args);
+    assert.equal(r.status, 3);
+    assert.match(r.stderr, /in project-only mode nothing under the store may be one/);
+    assert.deepEqual(r.violations, [], 'no outside folder was scanned');
+  } finally { b.cleanup(); }
+});

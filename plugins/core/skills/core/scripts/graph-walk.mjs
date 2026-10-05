@@ -24,7 +24,9 @@
  */
 
 import { existsSync, readdirSync, lstatSync } from 'node:fs';
-import { resolve, join, dirname, basename } from 'node:path';
+import { resolve, join, dirname, basename, relative, isAbsolute, sep } from 'node:path';
+import { firstLinkUnder } from './generate-summary-index.mjs';
+import { projectOnlyHint } from './project-only.mjs';
 import {
   loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
   SCORE_PRUNE_THRESHOLD,
@@ -256,10 +258,22 @@ export function main(argv) {
   // A store, or a seed, that is a link leads somewhere other than the folder the caller named. It is
   // refused here, with lstat, before the seed is probed or read: containing the hops under wherever
   // the link points would not keep the walk inside the invoked project.
-  for (const p of [memoriesDir, seedPath]) {
+  // Every folder between the store and the seed is checked too: a regular seed file under a linked
+  // dated folder is still somebody else's unit.
+  const chain = [memoriesDir];
+  const below = relative(memoriesDir, seedPath);
+  if (below && !below.startsWith('..') && !isAbsolute(below)) { let at = memoriesDir; for (const part of below.split(sep)) { at = join(at, part); chain.push(at); } }
+  else chain.push(seedPath);
+  for (const p of chain) {
     let st = null;
-    try { st = lstatSync(p); } catch { /* absent: reported below */ }
+    try { st = lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') { process.stderr.write(`refused: ${p} could not be checked (${e.code}); the walk stays in the folder it was given\n`); return 3; } }
     if (st?.isSymbolicLink()) { process.stderr.write(`refused: ${p} is a link; the walk stays in the folder it was given\n`); return 3; }
+  }
+  // In a folder working project-only, hops must not meet a link either: nothing under the store may be one.
+  if (projectOnlyHint(dirname(memoriesDir))) {
+    let link = null;
+    try { link = firstLinkUnder(memoriesDir); } catch (e) { process.stderr.write(`refused: part of ${memoriesDir} could not be listed (${e.code}); the walk stays in the folder it was given\n`); return 3; }
+    if (link) { process.stderr.write(`refused: ${link} is a link; in project-only mode nothing under the store may be one\n`); return 3; }
   }
   if (!existsSync(seedPath)) { process.stderr.write(`error: seed unit not found: ${seedPath}\n`); return 2; }
 
