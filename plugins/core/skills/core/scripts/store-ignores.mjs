@@ -104,30 +104,35 @@ function visibleToGit(root, rel, dir, rules) {
   const repo = ownRepository(root);
   if (repo === 'no' || repo === 'elsewhere') return [];
   if (repo === 'unknown') return ['(could not check: the project\'s .git could not be examined)'];
+  let text;
   try {
     const st = lstatSync(join(dir, '.gitignore'));
     if (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1) return ['(its .gitignore is a link, a second name or not a file, so git does not use it as written)'];
-    // Exactly the file CORE writes: a folder's own rules decide for its files, so nothing above can undo them.
-    if (readFileSync(join(dir, '.gitignore'), 'utf8') === HEADER + rules.join('\n') + '\n') return [];
+    text = readFileSync(join(dir, '.gitignore'), 'utf8');   // the one read; everything below uses it
   } catch (e) { return [`(could not check: ${e.code})`]; }
+  // Exactly the file CORE writes: a folder's own rules decide for its files, so nothing above can undo them.
+  if (text === HEADER + rules.join('\n') + '\n') return [];
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
   const samples = rules.flatMap((rule) => (SAMPLES[rule] || [rule]).map((n) => [rule, `${rel}/${n}`]));
   // The CORE files already here, whatever their generation or round number.
+  const notes = [];
   let present = [];
-  try { present = readdirSync(dir); } catch { /* the samples still run */ }
+  try { present = readdirSync(dir); } catch (e) { notes.push(`(could not list the folder (${e.code}), so the CORE files in it were not all checked)`); }
   for (const name of present) for (const rule of rules) if (ruleRe(rule).test(name)) samples.push([rule, `${rel}/${name}${rule.endsWith('/') ? '/x' : ''}`]);
-  // An exception in the user's file can name a later generation or round than any here; that can't be
-  // checked ahead of time, so it is said rather than counted as covered.
-  let reincludes = false;
-  try { reincludes = readFileSync(join(dir, '.gitignore'), 'utf8').split(/\r?\n/).some((l) => l.trim().startsWith('!')); } catch { /* reported above */ }
+  // Future names in a numbered family (lock generations, rounds) count as covered only when this file
+  // has CORE's own wildcard rule and re-includes nothing; anything else is said, not assumed.
+  const reincludes = lines.some((l) => l.startsWith('!'));
+  const unproven = rules.filter((rule) => rule.includes('*') && (reincludes || !lines.includes(rule)));
   const r = spawnSync('git', ['-C', root, 'check-ignore', '--no-index', '-z', '--stdin'], {
     input: samples.map(([, p]) => p).join('\0') + '\0', encoding: 'utf8', timeout: 3000,
     env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: dirname(root) },
   });
-  if (r.status !== 0 && r.status !== 1) return [`(could not check: git ${r.status ?? r.error?.code ?? 'failed'})`];
+  if (r.status !== 0 && r.status !== 1) return [...notes, `(could not check: git ${r.status ?? r.error?.code ?? 'failed'})`];
   const ignored = new Set(r.stdout.split('\0').filter(Boolean));
   const visible = [...new Set(samples.filter(([, p]) => !ignored.has(p)).map(([rule]) => rule))];
-  if (reincludes && rules.some((rule) => rule.includes('*'))) visible.push('(it re-includes names, so later lock generations or rounds may be visible too)');
-  return visible;
+  const future = unproven.filter((rule) => !visible.includes(rule));
+  if (future.length) notes.push(`(does not prove later names are covered for ${future.join(', ')}: it lacks CORE's rule or re-includes names)`);
+  return [...visible, ...notes];
 }
 
 /** Problems found, as short strings; empty when every rule file is in place. Never throws. */

@@ -145,7 +145,9 @@ test("an existing ignore file that leaves CORE's working files visible is report
     assert.ok(notes.some((n) => /^git ignore: _memories\/\.gitignore is not CORE's/.test(n)), notes.join(' | '));
     // the repository's own rules cover them: nothing to report
     writeFileSync(join(root, '.gitignore'), '_memories/_close*\n_memories/.*.lock*\n_memories/.*.tmp-*\n_memories/_*.json\n_memories/_capability-drift-log.md\n');
-    assert.deepEqual(ensureStoreIgnores(root), []);
+    const covered = ensureStoreIgnores(root);
+    assert.equal(covered.some((p) => /visible to git/.test(p)), false, 'nothing present or sampled is visible');
+    assert.ok(covered.some((p) => /does not prove later names/.test(p)), 'but the folder\'s own file does not prove later names are covered');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -322,7 +324,7 @@ test('a later lock generation or round re-included by the user is seen: present 
     const all = '_close.lock*\n._close.lock*\n.*.lock*\n.*.tmp-*\n_close-marker.json\n_maintenance-state.json\n_pm-state.json\n_capability-drift-log.md\n';
     writeFileSync(join(root, '_memories', '.gitignore'), all + '!_close.lock.g2.done\n');
     let problems = ensureStoreIgnores(root).join();
-    assert.match(problems, /re-includes names, so later lock generations/, 'an exception is named as something that cannot be fully checked');
+    assert.match(problems, /does not prove later names are covered for .*_close\.lock\*/, 'an exception is named as something that cannot be fully checked');
     writeFileSync(join(root, '_memories', '_close.lock.g2.done'), '{}');
     assert.match(ensureStoreIgnores(root).join(), /leaves _close\.lock\* visible/, 'the generation actually present is checked');
     // rounds
@@ -354,4 +356,22 @@ test('a .git that is a link or a pointer file keeps its repository outside: git 
       assert.equal(existsSync(marker), false, `${shape}: git was never run against the outside repository`);
     } finally { process.env.PATH = path; rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
   }
+});
+
+test('a positive-only custom policy that covers the samples but not the family is reported as unproven; a listing failure is reported', { skip: isWin }, async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const root = project();
+  try {
+    mkdirSync(join(root, '_tests', 'self-test'), { recursive: true });
+    writeFileSync(join(root, '_tests', 'self-test', '.gitignore'), 'round-1/\nauto-author-state.json\n');
+    assert.match(ensureStoreIgnores(root).join(), /self-test\/\.gitignore does not prove later names are covered for round-\*\//);
+    writeFileSync(join(root, '_tests', 'self-test', '.gitignore'), 'round-*/\nauto-author-state.json\n# mine\n');
+    assert.equal(ensureStoreIgnores(root).some((p) => p.includes('self-test')), false, "CORE's own rule, no re-include: proven");
+    const orig = fs.readdirSync;
+    fs.readdirSync = (p, ...a) => { if (String(p) === join(root, '_tests', 'self-test')) throw Object.assign(new Error('x'), { code: 'EIO' }); return orig(p, ...a); };
+    syncBuiltinESMExports();
+    try { assert.match(ensureStoreIgnores(root).join(), /could not list the folder \(EIO\)/); }
+    finally { fs.readdirSync = orig; syncBuiltinESMExports(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
