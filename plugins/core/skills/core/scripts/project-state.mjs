@@ -576,7 +576,7 @@ function indexMightTrack(root, prefix) {
   try { buf = readFileSync(idx); } catch (e) { if (e.code === 'ENOENT') return true; throw e; }
   if (buf.length < 12 || buf.subarray(0, 4).toString() !== 'DIRC') return true;
   const version = buf.length >= 8 ? buf.readUInt32BE(4) : 0;
-  if (version >= 4) return true;
+  if (version !== 2 && version !== 3) return true;
   if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true;
   // The bytes only answer for an index git itself would accept: one that ends in the checksum of
   // everything before it. A truncated or damaged file is git's to judge, not this scan's.
