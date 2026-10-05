@@ -150,6 +150,13 @@ const controls = [];
     const c3 = await runConfined(root, 'EACCES', [PO, 'finalize-begin', '--session', 'n3b', '--root', root]);
     const j = JSON.parse(c3.stdout);
     controls.push({ id: 'N3-same-project-lock-separation', what: 'a second close on the same project is refused while the first holds the lock', expected: 'lock-held', observed: j.state, result: j.state === 'lock-held' ? 'pass (separation is real: the same project contends)' : 'FAIL' });
+    // The hook rows above pass because the project-only folder makes the hooks exit first. Without that
+    // folder the same hook, same payload, reaches the registry in the account home: the rows are not vacuous.
+    const plain = fixture('nohint');
+    try {
+      const c4 = await runConfined(plain.root, 'EACCES', [join(CORE, 'hooks/retrieve-context-hook.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: plain.root, prompt: 'what color are the widgets', session_id: 'n4' }) });
+      controls.push({ id: 'N4-hook-without-project-only-folder', what: 'the automatic retrieval hook, run in a folder without the project-only marker, reaches outside the folder', expected: 'outside attempt recorded', outside_attempts: c4.ops.filter((o) => o.verdict !== 'allowed').length, violations: c4.violations, result: c4.violations?.length ? 'pass (the hook rows are not vacuous)' : 'FAIL (control did not trigger)' });
+    } finally { rmSync(plain.base, { recursive: true, force: true }); }
   } finally { rmSync(base, { recursive: true, force: true }); }
 }
 

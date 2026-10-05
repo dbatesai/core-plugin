@@ -32,8 +32,11 @@ const roots = (process.env.FS_CONFINE_ROOTS || '').split(delimiter).filter(Boole
 const violations = [];
 const ERRNO = process.env.FS_CONFINE_ERRNO === 'ENOENT' ? 'ENOENT' : 'EACCES';
 const LOG = process.env.FS_CONFINE_LOG || '';
-const rawAppend = fs.appendFileSync.bind(fs);
-const record = (call, path, verdict) => { if (LOG) { try { rawAppend(LOG, JSON.stringify({ call, path: String(path), verdict }) + '\n'); } catch { /* the log is evidence, never a dependency */ } } };
+// The log's descriptor is opened before any wrapping, and written by descriptor: path-taking calls (which
+// appendFileSync reaches internally) would be judged by the gate itself.
+const logFd = LOG ? fs.openSync(LOG, 'a') : -1;
+const rawWrite = fs.writeSync.bind(fs);
+const record = (call, path, verdict) => { if (logFd >= 0) { try { rawWrite(logFd, JSON.stringify({ call, path: String(path), verdict }) + '\n'); } catch { /* the log is evidence, never a dependency */ } } };
 // Calls that act on a link itself (lstat, readlink, unlink, rm, rename) are judged by where the
 // link sits: its parent resolved physically, plus its own name.
 const ON_LINK = new Set(['lstat', 'readlink', 'unlink', 'rm', 'rmdir', 'rename']);
@@ -59,7 +62,7 @@ for (const name of NAMES) {
     if (typeof orig !== 'function') continue;
     const wrapped = function confined(...args) {
       const bad = paths(name, args).find(p => !inside(p, name));
-      if (bad === undefined) { if (LOG) record(key, paths(name, args)[0], 'allowed'); return orig.apply(this, args); }
+      if (bad === undefined) { record(key, paths(name, args)[0], 'allowed'); return orig.apply(this, args); }
       const err = refuse(key, bad);
       if (obj === fs.promises) return Promise.reject(err);
       if (key.endsWith('Sync')) throw err;
