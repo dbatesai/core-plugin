@@ -87,7 +87,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE } from './state-cache.mjs';
+import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -329,9 +329,11 @@ export function adoptExistingStore(projectDir, { apply = false, now, home } = {}
 
   const stamped = [];
   const failed = [];
+  const stampOutcomes = [];
   for (const f of candidates) {
     const kind = resolve(f.path) === pmPath ? 'project' : 'unit';
     const outcome = stampCreatedBaseline(root, f.path, { kind, lastWrittenBy: 'adopt-existing-store', now, home });
+    stampOutcomes.push({ ...outcome, path: f.path });
     if (outcome && outcome.stamped === false) {
       failed.push({ path: f.path, outcome: outcome.outcome, reason: outcome.reason });
     } else {
@@ -346,6 +348,7 @@ export function adoptExistingStore(projectDir, { apply = false, now, home } = {}
     stamped_count: stamped.length,
     stamped,
     failed,
+    stamp_outcomes: stampOutcomes,
   };
 }
 
@@ -367,29 +370,32 @@ function main(argv) {
   const projectDir = resolve(positionals[0] || process.cwd());
 
   // Creation-baseline stamp: establish the first CORE-authored baseline for a
-  // file the agent just wrote (graduation / PROJECT.md render). Exits nonzero if
-  // the stamp could not land, so a caller sees the attribution-unknown state.
+  // file the agent just wrote (graduation / PROJECT.md render). Preserve the
+  // material stamp and return nonzero when stamping or cleanup needs recovery.
   if (opts.stampCreated !== undefined) {
     const target = resolve(projectDir, opts.stampCreated);
     const kind = opts.kind === 'project' ? 'project' : 'unit';
     const outcome = stampCreatedBaseline(projectDir, target, { kind, lastWrittenBy: opts.by || undefined });
-    if (outcome && outcome.stamped === false) {
-      process.stderr.write(`lifecycle-detect: stamp-created FAILED for ${basename(target)} (${outcome.outcome}: ${outcome.reason}) — attribution unknown, recovery required.\n`);
-      return 1;
-    }
+    const needsRecovery = stampNeedsRecovery(outcome);
+    if (needsRecovery) process.stderr.write(`lifecycle-detect: ${basename(target)}: ${stampRecoveryMessage(outcome)}.\n`);
     if (!flags.has('json')) {
-      process.stdout.write(`lifecycle-detect: stamped creation baseline for ${basename(target)} (kind: ${kind}).\n`);
+      process.stdout.write(outcome.stamped
+        ? `lifecycle-detect: stamped creation baseline for ${basename(target)} (kind: ${kind}).\n`
+        : `lifecycle-detect: creation baseline did not land for ${basename(target)} (kind: ${kind}).\n`);
     } else {
-      process.stdout.write(JSON.stringify({ stamped: true, path: target, kind }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ stamped: outcome.stamped, path: target, kind, stampOutcome: outcome }, null, 2) + '\n');
     }
-    return 0;
+    return needsRecovery ? 1 : 0;
   }
 
   // One-time batch adoption: dry-run by default, stamps only with --apply.
   if (flags.has('adopt-existing-store')) {
     const report = adoptExistingStore(projectDir, { apply: flags.has('apply') });
+    const recoveryOutcomes = (report.stamp_outcomes || []).filter(stampNeedsRecovery);
     if (flags.has('json')) {
       process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    } else if (report.refused_reason) {
+      process.stdout.write(`lifecycle-detect: adoption refused (${report.refused_reason}; baseline ${report.baseline_status}).\n`);
     } else if (!report.applied) {
       process.stdout.write(report.candidate_count
         ? `lifecycle-detect: DRY RUN — ${report.candidate_count} file(s) would be adopted (re-run with --apply):\n${report.candidates.map(p => `  ${basename(p)}`).join('\n')}\n`
@@ -398,10 +404,11 @@ function main(argv) {
       process.stdout.write(`lifecycle-detect: adopted ${report.stamped_count}/${report.candidate_count} file(s) as of today's bytes.\n`);
       if (report.failed.length) {
         process.stdout.write(`  FAILED (attribution unknown, recovery required): ${report.failed.map(f => basename(f.path)).join(', ')}\n`);
-        return 1;
       }
     }
-    return 0;
+    if (report.refused_reason) process.stderr.write(`lifecycle-detect: adoption refused (${report.refused_reason}); preserve and inspect the existing baseline.\n`);
+    for (const o of recoveryOutcomes) process.stderr.write(`lifecycle-detect: ${basename(o.path)}: ${stampRecoveryMessage(o)}.\n`);
+    return report.refused_reason || (report.failed || []).length || recoveryOutcomes.length ? 1 : 0;
   }
 
   if (opts.record !== undefined) {

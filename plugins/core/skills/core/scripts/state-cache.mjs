@@ -137,7 +137,8 @@ export function quarantineCache(path, now = nowIso()) {
  *   `last_hash`; `extra` merges additional fields into the stamp (e.g.
  *   `outside_hash` for a marker-delimited-block classifier).
  * @param {{now?: string}} [opts]
- * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string}}
+ * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string,
+ *   primaryError?: object, lockReleaseFailures?: object[], lockRecovery?: object}}
  */
 export function stampFiles(projectDir, entries, { now } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return { stamped: true };
@@ -201,19 +202,52 @@ export function stampFiles(projectDir, entries, { now } = {}) {
         };
       }
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
+      // The checked-release helper must receive the actual stamp outcome so
+      // cleanup failure cannot turn a completed stamp into a failed stamp.
+      return stampOutcome;
     }, { retries: 20, retryDelayMs: 50 });
     // The callback's refusal is the stamp's outcome, not a success.
     if (lockResult && lockResult.stamped === false) stampOutcome = lockResult;
   } catch (e) {
-    stampOutcome = {
-      stamped: false,
-      outcome: 'attribution-unknown',
+    const releaseFailures = e?.lockReleaseFailures || (e?.releaseResult
+      ? [{ lockPath: e.lockPath, releaseResult: e.releaseResult }] : []);
+    // operationResult exists only when the callback returned. Never infer a
+    // successful stamp from the optimistic outer value after a thrown write.
+    stampOutcome = e?.code === 'LOCK_RELEASE_FAILED' && e.operationResult
+      ? e.operationResult : {
+        ...stampOutcome,
+        stamped: false,
+        outcome: 'attribution-unknown',
+        recovery: 'recovery-required',
+        reason: (e && (e.code || e.message)) ? String(e.code || e.message) : 'stamp-failed',
+        primaryError: { code: e?.code || null, message: String(e?.message || e) },
+      };
+    if (releaseFailures.length) stampOutcome = {
+      ...stampOutcome,
       recovery: 'recovery-required',
-      reason: (e && (e.code || e.message)) ? String(e.code || e.message) : 'stamp-failed',
+      lockReleaseFailures: releaseFailures,
+      lockRecovery: e.recovery,
     };
   }
 
   return stampOutcome;
+}
+
+/** A completed stamp can still require lock cleanup; callers must retain both. */
+export function stampNeedsRecovery(outcome) {
+  return outcome?.stamped === false || (outcome?.lockReleaseFailures?.length || 0) > 0;
+}
+
+/** Human diagnostic distinguishes missing attribution from completed stamping. */
+export function stampRecoveryMessage(outcome) {
+  const material = outcome?.stamped === true ? 'authorship stamp landed'
+    : `authorship stamp failed (${outcome?.outcome}: ${outcome?.reason}) — attribution unknown`;
+  const cleanup = outcome?.lockReleaseFailures?.length
+    ? '; lock cleanup failed: ' + outcome.lockReleaseFailures.map(f =>
+      `${f.lockPath} (${f.releaseResult?.reason}${f.releaseResult?.error ? ': ' + f.releaseResult.error : ''})`).join('; ') +
+      '; inspect the named lock and material outcome; do not repeat the operation'
+    : '; inspect the baseline before reconciling or re-stamping';
+  return material + cleanup + ' — recovery-required';
 }
 
 /** Convenience single-file wrapper around stampFiles. Returns the same

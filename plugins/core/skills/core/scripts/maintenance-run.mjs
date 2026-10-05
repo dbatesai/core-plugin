@@ -23,7 +23,7 @@ import { resolve, join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
-import { hashText, stampFiles } from './state-cache.mjs';
+import { hashText, stampFiles, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { purgeTurnCapture } from './turn-capture.mjs';
 import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
@@ -73,6 +73,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
 
   const ranOps = [];
   const notes = [];
+  let attribution = null;
 
   // 1. Ghost duplicates — always (cheap). Reported, never removed.
   const ghosts = findGhostDuplicates(mem);
@@ -112,12 +113,10 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       } catch { /* best-effort: a stamp we can't compute never blocks the regen itself */ }
 
       const stampOutcome = stampFiles(root, stampEntries, { now, home });
-      // Truthful stamp-failure surfacing: the indexes wrote
-      // but their attribution stamp didn't. These are machine-generated files
-      // with no human region, so it's lower-stakes than a mixed-ownership
-      // write — but still report it rather than claim a clean maintenance run.
-      if (stampOutcome && stampOutcome.stamped === false) {
-        notes.push(`index attribution stamp failed (${stampOutcome.outcome}: ${stampOutcome.reason}) — recovery-required`);
+      attribution = stampOutcome;
+      // Keep the stamp receipt and cleanup failure visible after index writes.
+      if (stampNeedsRecovery(stampOutcome)) {
+        notes.push(`index ${stampRecoveryMessage(stampOutcome)}`);
       }
     }
     ranOps.push('decisions-index', 'risks-index', 'summary-index');
@@ -226,7 +225,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   if (apply) atomicWriteFileSync(ledgerPath, JSON.stringify(newLedger, null, 2) + '\n');
 
   const narration = composeNarration(ranOps, notes);
-  return { ranOps, notes, unitsChanged, narration };
+  return { ranOps, notes, unitsChanged, narration, attribution };
 }
 
 function composeNarration(ranOps, notes) {
@@ -294,7 +293,7 @@ async function main(argv) {
   const regrade = await autoRegradeSelfTest(projectPath, { dryRun });
   if (json) process.stdout.write(JSON.stringify({ ...res, self_test_regrade: regrade }) + '\n');
   else process.stdout.write(res.narration + (regrade ? ' ' + regrade.note + '.' : '') + '\n');
-  return 0;
+  return stampNeedsRecovery(res.attribution) ? 1 : 0;
 }
 
 if (isCliEntry(import.meta.url)) {

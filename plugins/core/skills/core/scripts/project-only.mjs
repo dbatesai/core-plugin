@@ -334,17 +334,21 @@ export async function processMemory(ctx, { apply = false } = {}) {
   const { iterActiveUnits, checkSchema, checkIntegrity } = await import('./check-units.mjs');
   const { decorateStoreLocked } = await import('./decorate-graph.mjs');
   const { runMaintenance } = await import('./maintenance-run.mjs');
+  const { stampNeedsRecovery } = await import('./state-cache.mjs');
   const report = [];
   const units = iterActiveUnits(mem, { includeObservations: false });
   if (units.length) { checkSchema(units, mem, report); checkIntegrity(units, mem, new Date(), report); }
   const count = (sev) => report.filter((r) => String(r.severity || r.level || '').toUpperCase() === sev).length;
   const decoration = decorateStoreLocked(ctx.root, { dryRun: !apply });
   const upkeep = runMaintenance(ctx.root, { apply, metrics: false });
+  const needsRecovery = stampNeedsRecovery(decoration.attribution) || stampNeedsRecovery(upkeep.attribution);
   return {
-    status: 'ok', mode: 'project-only', operation: 'process-memory', applied: apply,
+    status: needsRecovery ? 'refused' : 'ok',
+    ...(needsRecovery ? { state: 'recovery-required' } : {}),
+    mode: 'project-only', operation: 'process-memory', applied: apply,
     units_checked: units.length, unit_findings: { fail: count('FAIL'), warn: count('WARN') },
-    decoration: { changed: (decoration.changed || []).length, refused: decoration.refused || [], needs_reconciliation: decoration.needs_reconciliation || [] },
-    upkeep: { ran: upkeep.ranOps || [], notes: upkeep.notes || [] },
+    decoration: { changed: (decoration.changed || []).length, refused: decoration.refused || [], needs_reconciliation: decoration.needs_reconciliation || [], attribution: decoration.attribution },
+    upkeep: { ran: upkeep.ranOps || [], notes: upkeep.notes || [], attribution: upkeep.attribution },
     not_run: PM_NOT_RUN,
   };
 }

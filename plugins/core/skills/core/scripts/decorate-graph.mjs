@@ -32,7 +32,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
-import { hashText, stampFiles, readProjectCache } from './state-cache.mjs';
+import { hashText, stampFiles, readProjectCache, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { writeGuardDecision } from './lifecycle-core.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
@@ -284,9 +284,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     changed.push(u.path);
   }
 
-  // Truthful stamp-failure surfacing: the unit files landed
-  // on disk; if their authorship stamp didn't, report attribution-unknown so
-  // the caller surfaces it, rather than reporting a clean decoration.
+  // Preserve stamping and cleanup outcomes independently after unit writes.
   let stampOutcome = { stamped: true };
   if (!dryRun && stampEntries.length > 0) stampOutcome = stampFiles(projectDir, stampEntries, { now, home });
 
@@ -297,7 +295,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     unchanged_count: unchanged.length,
     refused,
     needs_reconciliation: needsReconciliation,
-    attribution: stampOutcome && stampOutcome.stamped === false ? stampOutcome : { stamped: true },
+    attribution: stampOutcome,
     dry_run: dryRun,
   };
 }
@@ -366,14 +364,11 @@ function main(argv) {
     for (const r of result.needs_reconciliation) process.stderr.write(`  ${r.path}: ${r.classification}\n`);
   }
 
-  // Attribution failure: files wrote but a baseline stamp
-  // didn't land. Never report clean success over an unknown-authorship state.
-  const attributionFailed = result.attribution && result.attribution.stamped === false;
+  // A failed stamp or failed cleanup needs recovery; a landed stamp stays landed.
+  const attributionFailed = stampNeedsRecovery(result.attribution);
   if (attributionFailed) {
     process.stderr.write(
-      `decorate-graph: WROTE unit files but the authorship stamp failed ` +
-      `(${result.attribution.outcome}: ${result.attribution.reason}) — attribution unknown, ` +
-      `recovery-required before the next lifecycle pass trusts these files.\n`
+      `decorate-graph: WROTE unit files; ${stampRecoveryMessage(result.attribution)}.\n`
     );
   }
 
