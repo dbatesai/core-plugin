@@ -44,7 +44,7 @@
  */
 
 import {
-  readFileSync, writeFileSync, statSync, readdirSync,
+  readFileSync, writeFileSync, statSync, lstatSync, readdirSync,
   openSync, writeSync, closeSync, linkSync,
   renameSync, rmSync, mkdirSync,
 } from 'node:fs';
@@ -303,6 +303,36 @@ export function acquireFileLock(lockPath, {
     if (g.n < target) { try { rmSync(g.path); } catch { /* gone */ } }
   }
   return { ok: true, nonce, gen: target, lock: readJson(targetPath), stolen: stale };
+}
+
+/**
+ * The name of a file in this lock's family that is not physically the lock's own, or null: a
+ * symbolic link, or a file with a hard link somewhere other than this folder. A generation is
+ * created by linking a temp file in the same folder, so for a moment it has two names, both here;
+ * that is the lock's own doing and passes. A name anywhere else is someone else's bytes.
+ */
+export function foreignLockArtifact(lockPath) {
+  const dir = dirname(lockPath), base = basename(lockPath);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let names;
+    try { names = readdirSync(dir); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+    const stats = new Map();
+    for (const n of names) { try { stats.set(n, lstatSync(join(dir, n))); } catch { /* gone mid-scan */ } }
+    let retry = false;
+    for (const [n, st] of stats) {
+      if (!n.startsWith(base)) continue;
+      if (st.isSymbolicLink()) return n;
+      if (!st.isFile() || st.nlink === 1) continue;
+      let here = 0;
+      for (const other of stats.values()) if (other.ino === st.ino && other.dev === st.dev) here++;
+      if (here === st.nlink) continue;                       // every name is in this folder
+      let again; try { again = lstatSync(join(dir, n)); } catch { continue; }   // released meanwhile
+      if (again.nlink !== st.nlink) { retry = true; break; }  // an acquisition was in flight: look again
+      return n;
+    }
+    if (!retry) return null;
+  }
+  return null;
 }
 
 /**

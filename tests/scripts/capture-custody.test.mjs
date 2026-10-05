@@ -101,8 +101,31 @@ test('nothing under a linked metrics folder is probed, and a hard-linked lock ge
     const lock = join(b.root, '_metrics', '.turn-capture.lock.g1'); linkSync(join(b.foreign, 'lockish'), lock);
     const x = run(b, lock);
     assert.equal(x.r.refused, true);
-    assert.match(x.r.reason, /turn-capture\.lock\.g1 is a link, has a second name/);
+    assert.match(x.r.reason, /turn-capture\.lock\.g1 is a link or has a name outside this folder/);
     assert.equal(x.reads, 0, 'the shared lock file was never read');
     assert.equal(readFileSync(join(b.foreign, 'lockish'), 'utf8'), '{}');
   } finally { b.cleanup(); }
+});
+
+// A lock generation is created by linking a temp file beside it, so it briefly has two names, both in
+// the folder. That is the lock's own doing and must never be read as a custody problem.
+test('many captures at once all land: the lock creating its own generations is not mistaken for a foreign link', { skip }, async () => {
+  const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const mod = pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts/turn-capture.mjs')).href;
+  const s = setup();
+  try {
+    const home = join(s.base, 'home'); mkdirSync(join(home, '.core'), { recursive: true }); writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: s.root }]));
+    const preload = 'data:text/javascript,' + encodeURIComponent(`import os from 'node:os'; import { syncBuiltinESMExports } from 'node:module'; os.userInfo = () => ({ homedir: ${JSON.stringify(home)} }); os.homedir = () => ${JSON.stringify(home)}; syncBuiltinESMExports();`);
+    const { spawn } = await import('node:child_process');
+    const N = 16;
+    const one = (i) => new Promise((done) => {
+      const script = `const { captureTurnEvidence } = await import(${JSON.stringify(mod)}); let out = []; for (let k = 0; k < 5; k++) out.push(captureTurnEvidence(${JSON.stringify(s.root)}, { prompt_text: 'c', retrieval_id: 'p${i}-' + k }, { env: ${JSON.stringify(ENV)} })); console.log(JSON.stringify(out));`;
+      const c = spawn(process.execPath, ['--import', preload, '--input-type=module', '-e', script], { cwd: s.root, env: { ...process.env, CORE_HOOKS_LOG_FILE: '/dev/null' } });
+      let o = ''; c.stdout.on('data', (d) => { o += d; }); c.on('close', () => done(JSON.parse(o || '[]')));
+    });
+    const results = (await Promise.all(Array.from({ length: N }, (_, i) => one(i)))).flat();
+    assert.equal(results.length, N * 5);
+    const refused = results.filter((r) => r.refused);
+    assert.deepEqual(refused, [], 'no capture was refused for custody');
+  } finally { s.cleanup(); }
 });

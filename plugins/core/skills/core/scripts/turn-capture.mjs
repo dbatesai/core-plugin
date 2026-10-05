@@ -46,7 +46,7 @@
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
-import { withFileLock } from './file-lock.mjs';
+import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -296,14 +296,11 @@ export function captureCustodyProblem(projectDir, { rowFile = null, healthOnly =
       if (st && (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1)) return `${rel(f)} is a link, has a second name, or is not a regular file`;
     }
     if (!healthOnly && kind(base)) {
-      const lockName = basename(turnCaptureLockPath(projectDir));
-      for (const e of readdirSync(base, { withFileTypes: true })) {
-        if (!e.name.startsWith(lockName)) continue;
-        // Every generation and tombstone of the lock is read during acquisition, so each must be the
-        // project's own single-named regular file, the same as the row and the health file.
-        const st = kind(join(base, e.name));
-        if (st && (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1)) return `${rel(join(base, e.name))} is a link, has a second name, or is not a regular file`;
-      }
+      // Every generation and tombstone of the lock is read during acquisition. A link, or a hard
+      // link from outside this folder, is refused; the lock's own momentary second name (it creates
+      // a generation by linking a temp file beside it) is not.
+      const lock = foreignLockArtifact(turnCaptureLockPath(projectDir));
+      if (lock) return `${rel(join(base, lock))} is a link or has a name outside this folder`;
     }
   } catch (e) { return `capture location could not be checked (${e.code || e.message})`; }
   return null;

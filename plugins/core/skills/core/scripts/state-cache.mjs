@@ -37,11 +37,11 @@
  * build on.
  */
 
-import { readFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, renameSync, existsSync, lstatSync, realpathSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative, sep } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { withFileLock } from './file-lock.mjs';
+import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
 
 export function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -65,6 +65,41 @@ export const CACHE_CORRUPT = 'corrupt';
 export const CACHE_UNREADABLE = 'unreadable';
 
 /**
+ * Why the cache can't be used here, or null. The cache is CORE's own generated file and must
+ * physically be this project's: `_memories` and `_memories/_lib` real directories under the real
+ * project root, and the cache file and its lock's files regular files with a single name. A link, or
+ * a second hard link, means the bytes are (also) somebody else's: reading them would inherit a
+ * foreign baseline and writing beside them would leave artifacts outside the project. Checked with
+ * lstat before anything is created, read or locked. The project itself may be reached by an alias.
+ */
+export function cacheCustodyProblem(projectDir) {
+  const lexical = resolve(projectDir);
+  const rel = (p) => relative(lexical, p) || '.';
+  const kind = (p) => { try { return lstatSync(p); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  try {
+    const root = realpathSync(lexical);
+    const lib = dirname(projectCachePath(projectDir));
+    for (const d of [dirname(lib), lib]) {
+      const st = kind(d);
+      if (!st) continue;
+      // Something else in the way (a file where the folder should be) is the ordinary unreadable
+      // case and is handled as that; custody is about links.
+      if (st.isSymbolicLink()) return `${rel(d)} is a link`;
+      if (!st.isDirectory()) return null;
+      const real = realpathSync(d);
+      if (real !== root && !real.startsWith(root + sep)) return `${rel(d)} is outside the project`;
+    }
+    if (kind(lib)) {
+      const st = kind(join(lib, 'state-cache.json'));
+      if (st && (st.isSymbolicLink() || (st.isFile() && st.nlink !== 1))) return `${rel(join(lib, 'state-cache.json'))} is a link or has a second name`;
+      const lock = foreignLockArtifact(join(lib, '.state-cache.lock'));
+      if (lock) return `${rel(join(lib, lock))} is a link or has a name outside this folder`;
+    }
+  } catch (e) { return `the cache location could not be checked (${e.code || e.message})`; }
+  return null;
+}
+
+/**
  * Read the project-local cache. The returned `status` separates a store that has
  * never been stamped (`absent`) from one whose baseline is unreadable
  * (`corrupt`) — both yield an empty `files` map, but only the first means "no
@@ -73,6 +108,9 @@ export const CACHE_UNREADABLE = 'unreadable';
  */
 export function readProjectCache(projectDir) {
   const path = projectCachePath(projectDir);
+  // Bytes that aren't physically this project's are not its baseline: unknown, evidence untouched.
+  const custody = cacheCustodyProblem(projectDir);
+  if (custody) return { files: {}, status: CACHE_UNREADABLE, error: `cache-custody: ${custody}`, baseline_trustworthy_hint: false };
   let raw;
   try { raw = readFileSync(path, 'utf8'); }
   catch (e) {
@@ -154,6 +192,9 @@ export function stampFiles(projectDir, entries, { now } = {}) {
   // caller (the underlying content write already happened), but it IS
   // reported truthfully instead of silently swallowed.
   let stampOutcome = { stamped: true };
+  // Refused before the folder is created or the lock is taken: nothing is made or read elsewhere.
+  const custody = cacheCustodyProblem(projectDir);
+  if (custody) return { stamped: false, outcome: 'refused', recovery: 'recovery-required', reason: `cache-custody: ${custody}` };
   try {
     mkdirSync(dirname(cachePath), { recursive: true });
     const lockResult = withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
