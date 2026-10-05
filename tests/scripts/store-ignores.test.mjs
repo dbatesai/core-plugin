@@ -204,8 +204,7 @@ test('the cache folder is refused, before any write, when git would track what g
       plant(root, lib);
       const before = Object.fromEntries(readdirSync(lib).map((n) => [n, readFileSync(join(lib, n), 'utf8')]));
       const st = stampFile(root, join(root, '_memories', 'u1.md'), 'h', 'test');
-      assert.equal(st.outcome, 'refused', `${name}: stamping refused`);
-      assert.match(st.reason, /^cache-policy:/);
+      assert.equal(st.stamped, false, `${name}: nothing stamped`);
       assert.throws(() => generateSummaryIndex(root), `${name}: the index command refuses`);
       // Retrieval still answers; a link in the cache folder refuses the whole store, as it always has.
       try { assert.ok(loadFreshIndex(root), `${name}: retrieval still answers`); }

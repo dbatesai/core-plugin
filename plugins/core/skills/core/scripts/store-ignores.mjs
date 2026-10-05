@@ -8,10 +8,9 @@
  * names are returned as a problem, so the gap is reported rather than hidden.
  * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md, curated gold sets) is never matched.
  */
-import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ensureProjectCacheDir } from './project-artifacts.mjs';
 
 const HEADER = '# Written by CORE: its own working files in this folder, never project content.\n';
 export const STORE_IGNORES = [
@@ -32,21 +31,50 @@ export function folderChain(root, rel) {
   return 'real';
 }
 
+const refuse = (code, why) => { throw Object.assign(new Error(`cache folder refused: ${why}`), { code }); };
+const gitEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith('GIT_'))), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null' });
+
 /**
- * The cache folder `_memories/_lib`, ready for a first write: a real folder whose own ignore file ends
- * in `*`, with nothing in it tracked by git. Anything else (tracked or unknown tracking, an ignore file
- * that is a link or re-includes a file, a linked parent) throws before any lock, temp or payload write.
+ * The cache folder `_memories/_lib`, ready for a first write, judged from inside the project folder only.
+ * It must be a real folder whose ignore file is a single-named regular file ending in `*` with nothing
+ * re-included (CORE writes one if absent). When the project's own `.git` sits at its root, git is asked
+ * (and told not to look above the project) whether anything in the folder is tracked. Anything else
+ * throws before any lock, temp or payload write. A repository above the project isn't consulted, since
+ * that would read outside the folder.
  */
 export function ensureLibDir(projectRoot) {
+  const store = folderChain(projectRoot, '_memories');
+  if (store === 'absent') mkdirSync(join(projectRoot, '_memories'));
+  else if (store !== 'real') refuse('cache-folder-unsafe', store);
   ensureStoreIgnores(projectRoot);
-  return ensureProjectCacheDir(projectRoot);
+  const lib = join(projectRoot, '_memories', '_lib');
+  const state = folderChain(projectRoot, '_memories/_lib');
+  if (state === 'absent') mkdirSync(lib, { mode: 0o700 });
+  else if (state !== 'real') refuse('cache-folder-unsafe', state);
+  const ignore = join(lib, '.gitignore');
+  let st = null;
+  try { st = lstatSync(ignore); } catch (e) { if (e.code !== 'ENOENT') refuse('cache-ignore-unsafe', `ignore file could not be examined (${e.code})`); }
+  if (!st) writeFileSync(ignore, HEADER + '*\n', { flag: 'wx', mode: 0o600 });
+  else {
+    if (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1) refuse('cache-ignore-unsafe', 'its ignore file is a link, a second name or not a file');
+    const rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    if (rules.at(-1) !== '*' || rules.some((r) => r.startsWith('!'))) refuse('cache-ignore-unsafe', 'its ignore file does not end in * or re-includes a file');
+  }
+  let dotGit = null;
+  try { dotGit = lstatSync(join(projectRoot, '.git')); } catch { /* no repository of its own at the root */ }
+  if (dotGit) {
+    const r = spawnSync('git', ['-C', projectRoot, 'ls-files', '-z', '--', '_memories/_lib/'], { encoding: 'utf8', timeout: 3000, env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: dirname(projectRoot) } });
+    if (r.status !== 0) refuse('cache-tracking-unknown', 'git could not say whether it is tracked');
+    if (r.stdout.split('\0').some((n) => n && n !== '_memories/_lib/.gitignore')) refuse('cache-tracked', 'git tracks files in it');
+  }
+  return lib;
 }
 
 /** The rules whose files git would still show, judged by git itself with every rule in the repository.
  *  Outside a repository, or when git can't answer, nothing is reported. */
 function visibleToGit(root, rel, dir, rules) {
   try { if (readFileSync(join(dir, '.gitignore'), 'utf8').startsWith(HEADER)) return []; } catch { return []; }
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith('GIT_')));
+  const env = gitEnv();
   const visible = [];
   for (const rule of rules) {
     const sample = `${rel}/${rule.replace(/\*/g, 'x').replace(/\/$/, '/x')}`;
