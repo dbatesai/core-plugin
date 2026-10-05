@@ -578,6 +578,10 @@ function indexMightTrack(root, prefix) {
   const version = buf.length >= 8 ? buf.readUInt32BE(4) : 0;
   if (version >= 4) return true;
   if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true;
+  // The bytes only answer for an index git itself would accept: one that ends in the checksum of
+  // everything before it. A truncated or damaged file is git's to judge, not this scan's.
+  const intact = (n, algo) => buf.length >= 12 + n && createHash(algo).update(buf.subarray(0, -n)).digest().equals(buf.subarray(-n));
+  if (!intact(20, 'sha1') && !intact(32, 'sha256')) return true;
   return buf.includes(prefix);
 }
 

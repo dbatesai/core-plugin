@@ -1537,3 +1537,32 @@ test('a tracked root pointer survives damaged git metadata and an inherited alte
     assert.equal(r.root_pointer, null);
   } finally { c.s.cleanup(); }
 });
+
+test('a git index that git itself rejects is never read as "nothing tracked": generated folders are refused, and healthy repositories still get theirs', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, realpathSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { trackedStateFiles } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { ensureProjectArtifactDir } = await import('../../plugins/core/skills/core/scripts/project-artifacts.mjs');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+  const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore', env });
+  const truncated = Buffer.alloc(12); truncated.write('DIRC'); truncated.writeUInt32BE(2, 4);
+  for (const shape of ['unborn', 'healthy index', 'truncated index']) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-index-unknown-')));
+    try {
+      git(root, 'init', '-q');
+      if (shape !== 'unborn' && shape !== 'truncated index') { writeFileSync(join(root, 'a.txt'), 'a\n'); git(root, 'add', 'a.txt'); }
+      const idx = join(root, '.git', 'index');
+      if (shape === 'truncated index') writeFileSync(idx, truncated);
+      const tracked = trackedStateFiles(root, '_hooks');
+      if (shape === 'unborn' || shape === 'healthy index') {
+        assert.equal(tracked.has('.gitignore'), false, `${shape}: nothing under the prefix is tracked`);
+        assert.ok(ensureProjectArtifactDir(root, '_hooks'), `${shape}: the generated folder is created`);
+      } else {
+        assert.equal(tracked.has('.gitignore'), true, `${shape}: tracking is unknown, so every name reads as tracked`);
+        assert.throws(() => ensureProjectArtifactDir(root, '_hooks'), `${shape}: no generated folder`);
+        assert.equal(existsSync(join(root, '.core', '_hooks')), false);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
