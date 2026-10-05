@@ -67,8 +67,9 @@ function isCandidateDir(name) {
  * arrive with `_memories` or `_memories/_lib` (or a file in `_lib`) as a link to somewhere else,
  * which would bring outside content into retrieval and send cache writes out of the project. Links
  * are judged with lstat, before anything follows them. Only a path that is plainly absent (ENOENT)
- * passes unchecked: when a check itself fails for any other reason the boundary is unproven, and
- * that is a refusal too, never a pass.
+ * passes unchecked. When a check fails while the content could still be reached (the path can't be
+ * resolved, or `_lib` can be entered but not listed) the boundary is unproven, and that is a refusal
+ * too, never a pass.
  * @returns {null | { code: 'STORE_OUTSIDE_ROOT' | 'STORE_BOUNDARY_UNVERIFIED', path: string, reason?: string }}
  */
 export function storeBoundaryProblem(storePath) {
@@ -82,7 +83,9 @@ export function storeBoundaryProblem(storePath) {
   if (!st.isDirectory()) return null;   // a plain file is no store; the capture reports it
   try { if (!realpathSync.native(mem).startsWith(realpathSync.native(root) + sep)) return bad(mem); } catch (e) { return unproven(mem, e); }
   const lib = join(mem, '_lib');
-  try { st = lstatSync(lib); } catch (e) { return e?.code === 'ENOENT' ? null : unproven(lib, e); }
+  // `_memories` is proven real and inside. If it can't be searched, nothing beneath it can be reached
+  // either, so nothing can cross the boundary: the capture reports that store as incomplete.
+  try { st = lstatSync(lib); } catch (e) { return e?.code === 'ENOENT' || e?.code === 'EACCES' ? null : unproven(lib, e); }
   if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
   let entries;
   try { entries = readdirSync(lib, { withFileTypes: true }); } catch (e) { return unproven(lib, e); }

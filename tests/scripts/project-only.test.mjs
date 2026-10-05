@@ -599,6 +599,34 @@ test('explicit retrieval: when the boundary check itself fails (not plain absenc
       assert.equal(r.stdout, '');
     } finally { chmodSync(b.root, 0o755); }
   } finally { b.cleanup(); }
+  // _lib can be entered but not listed (search-only), with a link out inside it: still reachable, so refused.
+  const d = project();
+  try {
+    const { symlinkSync } = await import('node:fs');
+    const target = join(d.base, 'outside-index.json'); writeFileSync(target, '{}');
+    const lib = join(d.root, '_memories', '_lib'); mkdirSync(lib);
+    symlinkSync(target, join(lib, 'unit-summaries.json'));
+    chmodSync(lib, 0o100);
+    try {
+      const r = confined(d.root, [RC, d.root, 'what colour are widgets']);
+      assert.equal(r.status, 3);
+      assert.deepEqual(r.violations, []);
+      assert.equal(readFileSync(target, 'utf8'), '{}');
+    } finally { chmodSync(lib, 0o755); }
+  } finally { d.cleanup(); }
+  // An unsearchable _memories can't leak anything: that stays an incomplete search, not a refusal.
+  const e = project();
+  try {
+    chmodSync(join(e.root, '_memories'), 0o000);
+    try {
+      assert.equal(storeBoundaryProblem(e.root), null);
+      const r = confined(e.root, [RC, e.root, 'what colour are widgets']);
+      assert.equal(r.status, 0);
+      assert.equal(r.stdout, '');
+      assert.match(r.stderr, /search incomplete/);
+      assert.deepEqual(r.violations, []);
+    } finally { chmodSync(join(e.root, '_memories'), 0o755); }
+  } finally { e.cleanup(); }
   // Plain absence is not a refusal.
   const c = project({ withUnits: false });
   try {
