@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 import {
-  runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
+  runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats, computeDeltas,
   buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics, selfTestStats,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
@@ -204,18 +204,71 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('pseudonyms are stable under one salt and rotate when the salt is deleted', () => {
+test('the package key is per project: stable, rotated by deleting it, and never replaced when malformed or unreadable', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-salt-'));
   try {
-    const home = makeFixtureHome(root);
-    const { salt: s1 } = loadOrCreateSalt(join(home, '.core'));
-    const { salt: s1again } = loadOrCreateSalt(join(home, '.core'));
-    assert.equal(s1, s1again, 'salt persists');
+    const dir = join(root, 'state'); mkdirSync(dir);
+    const { salt: s1, created } = loadOrCreateSalt(dir);
+    assert.equal(created, true);
+    assert.equal(loadOrCreateSalt(dir).salt, s1, 'the key persists');
     const label1 = makeSeal(s1)('project', 'fixture-ws-alpha');
     assert.match(label1, /^project-[0-9a-f]{12}$/);
-    rmSync(join(home, '.core', 'metrics-package-salt'));
-    const { salt: s2 } = loadOrCreateSalt(join(home, '.core'));
-    assert.notEqual(makeSeal(s2)('project', 'fixture-ws-alpha'), label1, 'deleting the salt rotates pseudonyms');
+    rmSync(join(dir, 'salt'));
+    assert.notEqual(makeSeal(loadOrCreateSalt(dir).salt)('project', 'fixture-ws-alpha'), label1, 'deleting the key rotates pseudonyms');
+    writeFileSync(join(dir, 'salt'), 'not-a-key\n');
+    assert.throws(() => loadOrCreateSalt(dir), (e) => e.code === 'package-key-malformed');
+    assert.equal(readFileSync(join(dir, 'salt'), 'utf8'), 'not-a-key\n', 'a malformed key is kept as it was');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('deltas read only the project history: absent is a first package, damaged or unreadable is unavailable, and nothing is created', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-delta-'));
+  try {
+    const dir = join(root, 'state'); mkdirSync(dir);
+    assert.deepEqual(computeDeltas(dir, { a: 1 }), { available: false, reason: 'first package for this project' });
+    assert.deepEqual(readdirSync(dir), [], 'a delta read creates nothing');
+    writeFileSync(join(dir, 'history.jsonl'), '{"a":1}\nnot json\n');
+    assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history damaged' });
+    rmSync(join(dir, 'history.jsonl')); mkdirSync(join(dir, 'history.jsonl'));
+    assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history unreadable' });
+    rmSync(join(dir, 'history.jsonl'), { recursive: true });
+    writeFileSync(join(dir, 'history.jsonl'), '{"a":1,"generated_at":"t0"}\n');
+    const d = computeDeltas(dir, { a: 3 });
+    assert.equal(d.available, true); assert.equal(d.changes.a, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a package run keeps its key and history in the project, leaves the old global key and history untouched, and a second run has deltas', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-local-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root);
+    const legacySalt = join(home, '.core', 'metrics-package-salt');
+    const legacyHistory = join(home, '.core', 'metrics-package-history');
+    writeFileSync(legacySalt, 'a'.repeat(64) + '\n'); mkdirSync(legacyHistory); writeFileSync(join(legacyHistory, 'x.jsonl'), '{"old":1}\n');
+    const r1 = runPackage([project, '--home', home, '--out', join(root, 'out1')]);
+    assert.ok(r1.shipped, JSON.stringify(r1).slice(0, 300));
+    const state = join(project, '.core', '_package');
+    assert.match(readFileSync(join(state, 'salt'), 'utf8'), /^[0-9a-f]{64}\n$/);
+    assert.equal(readFileSync(join(state, 'history.jsonl'), 'utf8').trim().split('\n').length, 1, 'one baseline after a shipped package');
+    assert.equal(readFileSync(legacySalt, 'utf8'), 'a'.repeat(64) + '\n', 'the old global key is untouched');
+    assert.deepEqual(readdirSync(legacyHistory), ['x.jsonl'], 'nothing is added to the old global history');
+    const r2 = runPackage([project, '--home', home, '--out', join(root, 'out2')]);
+    assert.ok(r2.shipped);
+    assert.equal(readFileSync(join(state, 'history.jsonl'), 'utf8').trim().split('\n').length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a history that cannot be saved keeps the delivered package and says the next comparison has no baseline', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-histfail-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root);
+    mkdirSync(join(project, '.core', '_package'), { recursive: true });
+    mkdirSync(join(project, '.core', '_package', 'history.jsonl'));   // a folder where the file goes
+    const r = runPackage([project, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(r.shipped, 'the package is still delivered');
+    assert.equal(r.history_not_saved?.length, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

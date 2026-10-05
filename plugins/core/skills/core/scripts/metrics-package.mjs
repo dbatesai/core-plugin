@@ -15,10 +15,10 @@
  * discloses how many fields were dropped. By design this boundary lives in
  * prescriptive code, not skill prose; and the script carries zero dependencies.
  *
- * Pseudonyms: HMAC-SHA256 over a per-install secret salt (~/.core/metrics-package-salt,
- * 0600, NEVER shipped). Stable across packages from the same install so trend
- * lines are comparable; meaningless elsewhere.
- * Deleting the salt rotates every pseudonym.
+ * Pseudonyms: HMAC-SHA256 over a per-project secret key (<project>/.core/_package/salt,
+ * 0600, NEVER shipped). Stable across packages of the same project so trend lines
+ * are comparable; meaningless elsewhere, and unrelated between projects.
+ * Deleting the key rotates that project's pseudonyms and restarts its deltas.
  *
  * Self-healing: every source is optional — absent/unparseable sources emit
  * `{available:false, reason}` blocks and land in manifest.coverage; one broken
@@ -58,8 +58,9 @@ import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
-const SALT_FILE = 'metrics-package-salt';
-const HISTORY_DIR = 'metrics-package-history';
+const SALT_FILE = 'salt';
+const HISTORY_FILE = 'history.jsonl';
+const SALT_RE = /^[0-9a-f]{64}$/;
 
 // Closed CORE vocabulary — the only strings (besides pseudonyms, dates, and
 // numbers) allowed into the package. Anything outside a whitelist folds to 'other'.
@@ -225,12 +226,18 @@ export function projectForShare(blocks) {
 
 // ---------- pseudonymization ----------
 
-export function loadOrCreateSalt(coreDir) {
-  const p = join(coreDir, SALT_FILE);
-  if (existsSync(p)) return { salt: readFileSync(p, 'utf8').trim(), created: false };
-  mkdirSync(coreDir, { recursive: true });
+/** The project's packaging key from its package state folder. A key that is there but unreadable or
+ *  malformed is refused, never replaced: replacing it would silently rotate every pseudonym. */
+export function loadOrCreateSalt(stateDir) {
+  const p = join(stateDir, SALT_FILE);
+  let text = null;
+  try { text = readFileSync(p, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw Object.assign(new Error('package key unreadable'), { code: 'package-key-unreadable' }); }
+  if (text !== null) {
+    if (!SALT_RE.test(text.trim())) throw Object.assign(new Error('package key malformed'), { code: 'package-key-malformed' });
+    return { salt: text.trim(), created: false };
+  }
   const salt = randomBytes(32).toString('hex');
-  writeFileSync(p, salt + '\n', { mode: 0o600 });
+  writeFileSync(p, salt + '\n', { mode: 0o600, flag: 'wx' });
   try { chmodSync(p, 0o600); } catch { /* windows: mode is advisory */ }
   return { salt, created: true };
 }
@@ -786,16 +793,21 @@ export function headline(blocks) {
   return h;
 }
 
-export function computeDeltas(home, projectPseudonym, current) {
-  const dir = join(home, '.core', HISTORY_DIR);
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${projectPseudonym}.jsonl`);
+/** Read-only: creates nothing. An absent history is a first package; an unreadable or damaged one is
+ *  unavailable, never treated as a first package or a zero baseline. */
+export function computeDeltas(stateDir, current) {
+  const file = join(stateDir, HISTORY_FILE);
   let previous = null;
-  if (existsSync(file)) {
-    const { rows } = readJsonlSafe(file);
+  let text = null;
+  try { text = readFileSync(file, 'utf8'); } catch (e) {
+    if (e.code !== 'ENOENT') return { available: false, reason: 'history unreadable' };
+  }
+  if (text !== null) {
+    const { rows, bad } = readJsonlSafe(file);
+    if (bad) return { available: false, reason: 'history damaged' };
     if (rows.length) previous = rows[rows.length - 1];
   }
-  const deltas = { available: !!previous, reason: previous ? undefined : 'first package from this install for this project' };
+  const deltas = { available: !!previous, reason: previous ? undefined : 'first package for this project' };
   if (previous) {
     deltas.since = previous.generated_at || null;
     deltas.changes = {};
@@ -809,10 +821,8 @@ export function computeDeltas(home, projectPseudonym, current) {
 
 // Called ONLY after the leak scan passed and the artifact shipped — an aborted
 // package never advances the delta baseline.
-export function appendHistory(home, projectPseudonym, current) {
-  const dir = join(home, '.core', HISTORY_DIR);
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(join(dir, `${projectPseudonym}.jsonl`), JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n');
+export function appendHistory(stateDir, current) {
+  appendFileSync(join(stateDir, HISTORY_FILE), JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n');
 }
 
 export function computeFlags(blocks, hl) {
@@ -1405,22 +1415,28 @@ export function runPackage(argv, { homeOverride } = {}) {
   } catch (e) {
     return { exit: 2, error: 'project scratch is unavailable', error_code: e.code || 'scratch-error' };
   }
-  const { salt, created: saltCreated } = loadOrCreateSalt(coreDir);
-  const seal = makeSeal(salt);
+  // Each project's key and delta history live in its own package state folder. A project whose key
+  // can't be used is reported under a pseudonym from a key that exists only for this run.
+  const runSeal = makeSeal(randomBytes(32).toString('hex'));
+  let saltCreated = false;
 
   // collect
   const coverage = [];
   const projects = [];
   for (const dir of projectDirs) {
     try {
-      const collected = collectProject(dir, { home, seal });
+      const stateDir = ensureProjectArtifactDir(projectArtifactRoot(dir), '_package');
+      const { salt, created } = loadOrCreateSalt(stateDir);
+      saltCreated ||= created;
+      const collected = collectProject(dir, { home, seal: makeSeal(salt) });
+      collected.stateDir = stateDir;
       projects.push(collected);
       coverage.push({ project: collected.pseudonym, available: true });
     } catch (err) {
       // The reason is an error CODE, never err.message — raw messages embed real
       // filesystem paths, which the leak scan rejects.
       const code = (err && typeof err.code === 'string') ? err.code : 'collection-error';
-      coverage.push({ project: seal('project', basename(dir)), available: false, reason: code });
+      coverage.push({ project: runSeal('project', basename(dir)), available: false, reason: code });
     }
   }
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
@@ -1428,7 +1444,7 @@ export function runPackage(argv, { homeOverride } = {}) {
   // Deltas are computed READ-ONLY here; the history append happens only after
   // the package actually ships — an aborted run must not consume a history slot.
   for (const proj of projects) {
-    proj.deltas = computeDeltas(home, proj.pseudonym, proj.headline);
+    proj.deltas = computeDeltas(proj.stateDir, proj.headline);
   }
 
   // Generator identity — honest provenance: a source-tree run must not
@@ -1491,8 +1507,8 @@ export function runPackage(argv, { homeOverride } = {}) {
       mode: flagsIn.all ? 'all-projects' : 'single-project',
       plugin,
       generator,
-      pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
-      residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
+      pseudonym_note: "Ids are HMAC pseudonyms from a per-project key that never ships; stable across one project's packages and unrelated between projects. Deleting the project's .core/_package/salt rotates them and restarts its deltas.",
+      residual_risk: "Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across that project's packages (delete its key to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.",
       salt_rotated_this_run: saltCreated,
       field_policy: {
         enforcement: 'allowlist',
@@ -1571,9 +1587,12 @@ export function runPackage(argv, { homeOverride } = {}) {
       hardenTree(folder);
     }
     // Ship succeeded — NOW the delta baseline may advance (never on abort).
+    // A failed save keeps the delivered package and says the next comparison has no baseline.
+    const notSaved = [];
     for (const proj of projects) {
-      try { appendHistory(home, proj.pseudonym, proj.headline); } catch { /* history is best-effort */ }
+      try { appendHistory(proj.stateDir, proj.headline); } catch (e) { notSaved.push({ project: proj.pseudonym, reason: e.code || 'write-failed' }); }
     }
+    if (notSaved.length) result.history_not_saved = notSaved;
 
     // Partial detection descends one level: a workspace-metrics block whose
     // recognition/calibration/capability sub-blocks are unavailable is partial
