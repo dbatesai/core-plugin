@@ -9,9 +9,7 @@ import { updateManifest } from '../../plugins/core/skills/core/scripts/project-s
 
 test('a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
   withClassified({}, ({ home, project }) => {
-    const metaDir = operationalMetricsDir(project, { home: home });
-    writeFileSync(join(metaDir, 'calibration-state.json'),
-      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION }));
+    writeCalState(home, project, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION });
     const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true, 'calibration state read as calibrated');
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'the no-turns signal must not claim provisional once calibrated');
@@ -96,10 +94,18 @@ test('readOrientSignal returns null when no signal has been written', () => {
 
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
+// Each harness keeps its own calibration state and is the authority only for its own entry; the gate
+// clears when both have. The fixture writes the same conclusion for both harnesses, in full state shape.
 function writeCalState(home, project, state) {
-  const dir = operationalMetricsDir(project, { home: home });
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'calibration-state.json'), JSON.stringify(state) + '\n');
+  for (const harness of ['claude-code', 'codex']) {
+    const dir = operationalMetricsDir(project, { home, harness });
+    mkdirSync(dir, { recursive: true });
+    const entry = { is_calibrated: state.is_calibrated === true, overall_precision: state.overall_precision ?? null, labeled_count: 100 };
+    writeFileSync(join(dir, 'calibration-state.json'), JSON.stringify({
+      schema_version: '1.0.0', provisional: state.is_calibrated !== true, labeled_count: 100, overall_precision: state.overall_precision ?? null,
+      ...state, by_harness: { [harness]: entry },
+    }) + '\n');
+  }
 }
 
 test('rollup drops PROVISIONAL when calibration is cleared at the current classifier version', () => {
@@ -386,4 +392,18 @@ test('ACCEPTANCE (rollup): a cross-date replay attributes to the EARLIEST observ
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
+});
+
+test('the rollup clears PROVISIONAL only when both harnesses have cleared, each from its own state', () => {
+  withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
+    writeCalState(home, project, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.9 });
+    // codex has not cleared
+    const codexDir = operationalMetricsDir(project, { home, harness: 'codex' });
+    const codex = JSON.parse(readFileSync(join(codexDir, 'calibration-state.json'), 'utf8'));
+    codex.by_harness.codex.is_calibrated = false; codex.is_calibrated = false; codex.provisional = true;
+    writeFileSync(join(codexDir, 'calibration-state.json'), JSON.stringify(codex));
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, false, 'one harness cleared is not the gate');
+    assert.match(r.signal, /PROVISIONAL/);
+  });
 });

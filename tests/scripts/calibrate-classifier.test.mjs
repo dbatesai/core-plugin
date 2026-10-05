@@ -478,3 +478,32 @@ test('worksheetDir keeps raw turn text in the project hot state, not the project
     assert.ok(dir.endsWith(join('metrics', 'calibration')), 'beside the classified rows');
   } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
+
+test('two harnesses each importing qualifying labels into their own state reach a calibrated readiness; one alone does not', async () => {
+  const { operationalMetricsDir } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { readinessReport, aggregateCalibration } = await import('../../plugins/core/skills/core/scripts/calibrate-classifier.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'cal-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'cal-proj-'));
+  try {
+    mkdirSync(join(home, '.core'));
+    writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
+    const env = { CORE_METRICS_ENABLED: '1' };
+    const importFor = (harness) => {
+      const metaDir = operationalMetricsDir(project, { home, harness });
+      const exported = writeBlindLabels(metaDir, { harness });
+      const r = importLabels({ worksheetFile: exported.jsonl_path, metaDir, expectedHarness: harness });
+      assert.equal(r.status, 'OK', harness); assert.equal(r.is_calibrated, true, `${harness} clears on its own evidence`);
+    };
+    importFor('claude-code');
+    assert.equal(aggregateCalibration(project, { home, env }).is_calibrated, false, 'one harness is not the gate');
+    assert.equal(readinessReport({ project, home, env, harness: 'claude-code' }).is_calibrated, false);
+    importFor('codex');
+    const gate = aggregateCalibration(project, { home, env });
+    assert.equal(gate.is_calibrated, true, gate.notes);
+    for (const harness of ['claude-code', 'codex']) {
+      const r = readinessReport({ project, home, env, harness });
+      assert.equal(r.is_calibrated, true, `${harness} readiness reaches the final state`);
+      assert.equal(r.provisional, false);
+    }
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
+});

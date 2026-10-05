@@ -581,6 +581,39 @@ export function importLabels({ worksheetFile, metaDir, expectedHarness, minLabel
   };
 }
 
+/**
+ * The calibration gate across harnesses. Each harness's state lives with that harness and is the
+ * authority only for its own entry; the gate clears when every harness's own entry has cleared. A state
+ * that can't be read, or belongs to an older instrument, counts as not cleared, and the unreadable ones
+ * are named.
+ */
+export function aggregateCalibration(project, { home = homedir(), env = process.env } = {}) {
+  const byHarness = {};
+  const unreadable = [];
+  for (const name of CALIBRATION_HARNESSES) {
+    let state;
+    try {
+      const dir = trustedMetricsDir(project, { home, env, harness: name, guardReadParents: true });
+      if (!dir) continue;
+      state = readCalibrationState(dir, { strict: true });
+    } catch { unreadable.push(name); continue; }
+    if (!state.invalidated_stale_state && state.by_harness?.[name]) byHarness[name] = state.by_harness[name];
+  }
+  const cleared = CALIBRATION_HARNESSES.filter((name) => byHarness[name]?.is_calibrated === true);
+  const all = cleared.length === CALIBRATION_HARNESSES.length;
+  const waiting = CALIBRATION_HARNESSES.filter((name) => !cleared.includes(name));
+  return {
+    is_calibrated: all,
+    provisional: !all,
+    by_harness: byHarness,
+    unreadable,
+    labeled_count: Object.values(byHarness).reduce((sum, item) => sum + (item.labeled_count || 0), 0),
+    overall_precision: all ? Math.min(...CALIBRATION_HARNESSES.map((name) => byHarness[name].overall_precision)) : null,
+    notes: all ? 'Claude Code and Codex calibration gates both cleared.'
+      : `Calibration remains provisional until ${waiting.join(' and ')} clear${waiting.length === 1 ? 's' : ''} independently${unreadable.length ? ` (state unreadable: ${unreadable.join(', ')})` : ''}.`,
+  };
+}
+
 // ============================================================
 // Readiness summary
 // ============================================================
@@ -605,6 +638,9 @@ export function readinessReport({ project, home = homedir(), env = process.env, 
   const available = Boolean(metaDir) && !failure;
   const reason = failure ? `Calibration evidence is unavailable (${failure}).`
     : !metaDir ? 'No trusted calibration data is available.' : null;
+  // The conclusion comes from every harness's own state, not from this harness's file alone.
+  const gate = available ? aggregateCalibration(project, { home, env }) : null;
+  if (gate) state = { ...state, ...gate };
   return {
     available,
     ...(reason ? { reason } : {}),
@@ -678,7 +714,9 @@ if (isCliEntry(import.meta.url)) {
     const r = importLabels({ worksheetFile, metaDir, expectedHarness:harness, minLabeled: resolveMinLabeled(project) });
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.status === 'OK' ? 0 : 1); }
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
-    process.stdout.write(`calibrate-classifier: ${r.is_calibrated ? '✔ CALIBRATED' : '○ still provisional'} — ${r.notes}\n`);
+    const gate = aggregateCalibration(project);
+    process.stdout.write(`calibrate-classifier: ${harness} ${r.is_calibrated ? 'cleared' : 'not cleared'} — ${r.notes}\n`);
+    process.stdout.write(`  overall: ${gate.is_calibrated ? '✔ CALIBRATED' : '○ PROVISIONAL'} — ${gate.notes}\n`);
     process.exit(0);
   }
 

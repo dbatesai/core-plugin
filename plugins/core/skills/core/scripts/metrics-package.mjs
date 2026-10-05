@@ -57,6 +57,7 @@ import { ensureProjectArtifactDir, projectArtifactRoot, assertArtifactFile } fro
 import { isCliEntry } from './cli-entry.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
+import { aggregateCalibration } from './calibrate-classifier.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'salt';
@@ -735,6 +736,16 @@ export function workspaceMetrics(home, projectDir) {
         })),
       };
     } catch { calibration = { available: false, reason: 'calibration-state.json unparseable' }; }
+  }
+  if (calibration.available) {
+    // Per-harness states are each the authority for their own harness; the conclusion spans them all.
+    const gate = aggregateCalibration(projectDir, { home });
+    calibration.is_calibrated = gate.is_calibrated;
+    calibration.provisional = gate.provisional;
+    for (const harness of ['claude-code', 'codex']) {
+      const row = gate.by_harness[harness];
+      if (row) calibration.by_harness[harness] = { ...calibration.by_harness[harness], is_calibrated: row.is_calibrated === true, labeled_count: num(row.labeled_count), overall_precision: num(row.overall_precision) };
+    }
   }
 
   let capability = { available: false, reason: 'no capability-history.jsonl' };

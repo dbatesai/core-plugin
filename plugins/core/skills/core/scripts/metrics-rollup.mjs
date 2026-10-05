@@ -25,6 +25,7 @@ import { todayUTC, operationalMetricsDir, trustedMetricsDir, metricsEnabled } fr
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { aggregateCalibration } from './calibrate-classifier.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
@@ -38,33 +39,6 @@ const HEADLINE = 'rec-fail-tier-0';
 const DAY_ATTRIBUTION = 'observation-day';
 const DAY_ATTRIBUTION_NOTE = 'replayed sessions keep their earliest/original observation day; "turns today" means user turns first observed that day, never re-processing activity';
 
-/**
- * Read calibration state and decide whether the rollup may drop the PROVISIONAL
- * tag. A calibration only counts if it was run against the CURRENT instrument
- * TRIPLE — classifier version, proxy version, AND the classified-row schema
- * version. Calibrate at one instrument, then change any leg of the triple, and
- * the old precision number no longer describes what's running. Any mismatch ⇒
- * treat as uncalibrated (the honesty spine: never launder stale confidence).
- *
- * The distinct `classified_schema_version` field is the schema of the CLASSIFIED
- * ROWS the calibration was measured against (written by calibrate-classifier.mjs).
- * The state's own `schema_version` is the calibration-FILE schema and is NOT a
- * substitute — binding to it would let a calibration taken against a different
- * row schema still claim exact-triple calibration.
- */
-function readCalibrationState(metaDir) {
-  const f = join(metaDir, 'calibration-state.json');
-  if (!existsSync(f)) return { is_calibrated: false, provisional: true };
-  let s;
-  try { s = JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
-  if (s.is_calibrated
-      && (s.classifier_version !== CLASSIFIER_VERSION
-        || s.proxy_version !== PROXY_VERSION
-        || s.classified_schema_version !== CLASSIFIED_SCHEMA_VERSION)) {
-    return { ...s, is_calibrated: false, provisional: true, version_mismatch: true };
-  }
-  return s;
-}
 
 function readClassified(dir, date) {
   const file = join(dir, `${date}.jsonl`);
@@ -153,7 +127,8 @@ export function buildRollup({ project, today, home = homedir(), env }) {
   const avg = trailingAvg(dedupedDays, date, HEADLINE);
 
   // Phase 3: read calibration state to determine whether to drop PROVISIONAL tag.
-  const calState = readCalibrationState(metaDir);
+  // The gate across harnesses, each from its own state; this harness's file alone can't clear it.
+  const calState = aggregateCalibration(project, { home, env });
   const provisional = !calState.is_calibrated;
   const provisionalTag = provisional ? ' [PROVISIONAL — classifier uncalibrated]' : '';
 
