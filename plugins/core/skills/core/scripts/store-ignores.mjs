@@ -17,6 +17,18 @@ export const STORE_IGNORES = [
   ['_tests/self-test', ['round-*/', 'auto-author-state.json']],
 ];
 
+/** 'real' when every folder on the path is a real folder, 'absent' when one doesn't exist, otherwise why not. */
+function folderChain(root, rel) {
+  let path = root;
+  for (const part of rel.split('/')) {
+    path = join(path, part);
+    let st;
+    try { st = lstatSync(path); } catch (e) { return e.code === 'ENOENT' ? 'absent' : `${part} could not be examined (${e.code})`; }
+    if (st.isSymbolicLink() || !st.isDirectory()) return `${part} is not a real folder`;
+  }
+  return 'real';
+}
+
 /** Problems found, as short strings; empty when every rule file is in place. Never throws. */
 export function ensureStoreIgnores(projectRoot) {
   // ponytail: best effort so a lock or cache write never fails over an ignore file; the problems
@@ -25,10 +37,11 @@ export function ensureStoreIgnores(projectRoot) {
   for (const [rel, rules] of STORE_IGNORES) {
     const dir = join(projectRoot, ...rel.split('/'));
     try {
-      let st;
-      // A folder that doesn't exist yet gets its rules when its own writer creates it.
-      try { st = lstatSync(dir); } catch (e) { if (e.code !== 'ENOENT') problems.push(`${rel}: ${e.code}`); continue; }
-      if (st.isSymbolicLink() || !st.isDirectory()) { problems.push(`${rel} is not a real folder`); continue; }
+      // Every folder from the project root down is checked, so a linked parent never leads the write
+      // elsewhere. A folder that doesn't exist yet gets its rules when its own writer creates it.
+      const state = folderChain(projectRoot, rel);
+      if (state === 'absent') continue;
+      if (state !== 'real') { problems.push(`${rel}: ${state}`); continue; }
       writeFileSync(join(dir, '.gitignore'), HEADER + rules.join('\n') + '\n', { flag: 'wx' });
     } catch (e) {
       if (e.code !== 'EEXIST') problems.push(`${rel}/.gitignore: ${e.code || e.message}`);

@@ -114,3 +114,19 @@ test('the trigger-state writer alone adds the rules before its first write', { s
     assert.equal(ignored(root, '_tests/self-test/auto-author-state.json'), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a linked parent never leads the rules outside the project: _memories or _tests as a link to a folder with the child inside', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  for (const [parent, child] of [['_memories', '_lib'], ['_tests', 'self-test']]) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-outside-')));
+    try {
+      mkdirSync(join(outside, child));
+      symlinkSync(outside, join(root, parent));
+      const problems = ensureStoreIgnores(root);
+      assert.match(problems.join(), new RegExp(`${parent} is not a real folder`), parent);
+      assert.deepEqual(readdirSync(outside), [child], `${parent}: nothing written where the link leads`);
+      assert.deepEqual(readdirSync(join(outside, child)), [], `${parent}/${child}: nothing written there either`);
+    } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+  }
+});
