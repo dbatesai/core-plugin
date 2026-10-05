@@ -1,7 +1,7 @@
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -230,8 +230,13 @@ test('deltas read only the project history: absent is a first package, damaged o
     writeFileSync(join(dir, 'history.jsonl'), '{"a":1}\nnot json\n');
     assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history damaged' });
     rmSync(join(dir, 'history.jsonl')); mkdirSync(join(dir, 'history.jsonl'));
-    assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history unreadable' });
+    assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history unsafe' }, 'a folder in its place is not a history file');
     rmSync(join(dir, 'history.jsonl'), { recursive: true });
+    if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+      writeFileSync(join(dir, 'history.jsonl'), '{"a":1}\n'); chmodSync(join(dir, 'history.jsonl'), 0o000);
+      assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history unreadable' });
+      chmodSync(join(dir, 'history.jsonl'), 0o600); rmSync(join(dir, 'history.jsonl'));
+    }
     writeFileSync(join(dir, 'history.jsonl'), '{"a":1,"generated_at":"t0"}\n');
     const d = computeDeltas(dir, { a: 3 });
     assert.equal(d.available, true); assert.equal(d.changes.a, 2);
@@ -257,6 +262,27 @@ test('a package run keeps its key and history in the project, leaves the old glo
     assert.ok(r2.shipped);
     assert.equal(readFileSync(join(state, 'history.jsonl'), 'utf8').trim().split('\n').length, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a package key or history that is a link or has a second name is never read or written through', { skip: process.platform === 'win32' }, async () => {
+  const { symlinkSync, linkSync } = await import('node:fs');
+  const { appendHistory } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
+  for (const shape of ['link', 'second name']) {
+    const root = mkdtempSync(join(tmpdir(), 'mp-unsafe-'));
+    try {
+      const dir = join(root, 'state'); mkdirSync(dir);
+      const foreignKey = join(root, 'foreign-key'), foreignHist = join(root, 'foreign-history');
+      writeFileSync(foreignKey, 'b'.repeat(64) + '\n'); writeFileSync(foreignHist, '{"a":1}\n');
+      const plant = (target, at) => shape === 'link' ? symlinkSync(target, at) : linkSync(target, at);
+      plant(foreignKey, join(dir, 'salt'));
+      assert.throws(() => loadOrCreateSalt(dir), (e) => e.code === 'package-key-unsafe', shape);
+      plant(foreignHist, join(dir, 'history.jsonl'));
+      assert.deepEqual(computeDeltas(dir, { a: 2 }), { available: false, reason: 'history unsafe' }, shape);
+      assert.throws(() => appendHistory(dir, { a: 2 }), shape);
+      assert.equal(readFileSync(foreignKey, 'utf8'), 'b'.repeat(64) + '\n');
+      assert.equal(readFileSync(foreignHist, 'utf8'), '{"a":1}\n', `${shape}: nothing appended to the other file`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });
 
 test('a history that cannot be saved keeps the delivered package and says the next comparison has no baseline', () => {

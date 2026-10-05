@@ -37,7 +37,8 @@
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
-  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync,
+  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync, openSync, writeSync, closeSync,
+  constants as fsConstants,
 } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { homedir } from 'node:os';
@@ -52,7 +53,7 @@ import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './outcome-vocab.mj
 import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
-import { ensureProjectArtifactDir, projectArtifactRoot } from './project-artifacts.mjs';
+import { ensureProjectArtifactDir, projectArtifactRoot, assertArtifactFile } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
@@ -230,6 +231,8 @@ export function projectForShare(blocks) {
  *  malformed is refused, never replaced: replacing it would silently rotate every pseudonym. */
 export function loadOrCreateSalt(stateDir) {
   const p = join(stateDir, SALT_FILE);
+  // A link, a second name or a non-file is never read or written through.
+  try { assertArtifactFile(stateDir, p); } catch { throw Object.assign(new Error('package key is not an ordinary file'), { code: 'package-key-unsafe' }); }
   let text = null;
   try { text = readFileSync(p, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw Object.assign(new Error('package key unreadable'), { code: 'package-key-unreadable' }); }
   if (text !== null) {
@@ -797,6 +800,7 @@ export function headline(blocks) {
  *  unavailable, never treated as a first package or a zero baseline. */
 export function computeDeltas(stateDir, current) {
   const file = join(stateDir, HISTORY_FILE);
+  try { assertArtifactFile(stateDir, file); } catch { return { available: false, reason: 'history unsafe' }; }
   let previous = null;
   let text = null;
   try { text = readFileSync(file, 'utf8'); } catch (e) {
@@ -822,7 +826,11 @@ export function computeDeltas(stateDir, current) {
 // Called ONLY after the leak scan passed and the artifact shipped — an aborted
 // package never advances the delta baseline.
 export function appendHistory(stateDir, current) {
-  appendFileSync(join(stateDir, HISTORY_FILE), JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n');
+  const file = join(stateDir, HISTORY_FILE);
+  assertArtifactFile(stateDir, file);
+  // No-follow where the platform has it, so a link swapped in after the check is not written through.
+  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), 0o600);
+  try { writeSync(fd, JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n'); } finally { closeSync(fd); }
 }
 
 export function computeFlags(blocks, hl) {
