@@ -61,7 +61,7 @@ function findGhostDuplicates(memoriesDir) {
  * @param {{ apply?: boolean, now?: string, home?: string, env?: object }} opts
  * @returns {{ ranOps: string[], notes: string[], unitsChanged: boolean, narration: string }}
  */
-export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home, env = process.env } = {}) {
+export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home, env = process.env, metrics = true } = {}) {
   const root = resolve(projectPath);
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
@@ -140,7 +140,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // (turn-capture is the live capture layer) is reported, never removed: CORE does not delete
   // data unattended. Remove this block, and the folder, in a release that adds the explicit
   // bounded removal command.
-  if (apply) {
+  if (apply && metrics) {
     try {
       const legacyDir = join(resolveStoragePath(root), 'rich-context');
       if (existsSync(legacyDir)) {
@@ -156,7 +156,9 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // idempotent. Runs BEFORE the scorecard op so fresh verdicts pin same-pass.
   // The global metrics opt-out covers derived metrics and automatic self-tests
   // too. Keep ordinary memory indexes and their cadence ledger independent.
-  const maintainMetrics = apply && metricsEnabled({ project: root, home, env });
+  // `metrics: false` is the folder-only caller: the metrics gate reads the registry and the signed
+  // manifest, so that caller keeps the memory indexes current and leaves derived metrics alone.
+  const maintainMetrics = apply && metrics && metricsEnabled({ project: root, home, env });
   if (maintainMetrics) {
     try {
       const jr = judgeUnjudgedTurns(root, { limit: 50, now, env });

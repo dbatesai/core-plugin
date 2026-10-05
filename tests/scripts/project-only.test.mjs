@@ -126,7 +126,7 @@ test('capture status reads only the folder and calls outside history unknown; de
     assert.deepEqual(s.violations, []);
     const out = JSON.parse(s.stdout);
     assert.deepEqual([out.in_project.rows, out.outside_history], [2, 'unknown']);
-    for (const [cmd, want] of [['retention', 'unavailable'], ['process-memory', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
+    for (const [cmd, want] of [['retention', 'unavailable'], ['metrics', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
       const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), cmd, '--root', p.root]);
       assert.equal(JSON.parse(r.stdout).status, want, cmd);
       assert.deepEqual(r.violations, [], cmd);
@@ -705,4 +705,58 @@ test('purge in project-only mode never follows a link: a linked _metrics is refu
     assert.deepEqual(r.violations, []);
     assert.equal(readFileSync(target, 'utf8'), 'keep\n', 'the file the link pointed at is untouched');
   } finally { c.cleanup(); }
+});
+
+// ---------- memory processing, the script half ----------
+
+const unit = (id, extra = '') => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [widgets]\n${extra}---\n${id} body.\n`;
+
+test('process-memory in project-only mode: a dry run writes no index; --apply checks units and regenerates the indexes from the folder alone, runs no derived metrics, and names what it did not run', () => {
+  const p = project();
+  try {
+    writeFileSync(join(p.root, '_memories', 'dc-1-widgets.md'), unit('dc-1-widgets', 'edges:\n  - type: depends-on\n    target: dc-2-gadgets\n'));
+    writeFileSync(join(p.root, '_memories', 'dc-2-gadgets.md'), unit('dc-2-gadgets'));
+    mkdirSync(join(p.root, '_metrics', 'turn-capture'), { recursive: true });
+    writeFileSync(join(p.root, '_metrics', 'turn-capture', '2026-10-01.jsonl'), '{"turn":1}\n');
+    const po = (...a) => { const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]); assert.deepEqual(r.violations, [], a.join(' ')); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout); };
+    const dry = po('process-memory');
+    assert.deepEqual([dry.status, dry.applied, dry.units_checked], ['ok', false, 2]);
+    assert.equal(existsSync(join(p.root, '_memories', 'INDEX-decisions.md')), false, 'a dry run writes no index');
+    const done = po('process-memory', '--apply');
+    assert.equal(done.applied, true);
+    assert.deepEqual(done.upkeep.ran, ['decisions-index', 'risks-index', 'summary-index']);
+    assert.match(readFileSync(join(p.root, '_memories', 'INDEX-decisions.md'), 'utf8'), /dc-2-gadgets/);
+    assert.ok(existsSync(join(p.root, '_memories', '_lib', 'unit-summaries.json')));
+    assert.equal(existsSync(join(p.root, '_metrics', 'judgment-log.jsonl')), false, 'no hindsight judge ran');
+    assert.equal(existsSync(join(p.root, '_metrics', 'scorecard-log.jsonl')), false, 'no scorecard ran');
+    assert.equal(existsSync(join(p.root, '.core', 'claude-code')), false, 'no signed state was created');
+    assert.equal(done.not_run.length, 5);
+    assert.ok(done.not_run.some((n) => /graduation/.test(n)) && done.not_run.some((n) => /transcripts/.test(n)));
+    assert.deepEqual(po('process-memory', '--apply').upkeep.ran, [], 'a second pass on an unchanged store rewrites nothing');
+  } finally { p.cleanup(); }
+});
+
+test('process-memory in project-only mode refuses a store, cache folder, lock file or PROJECT.md that is a link out of the folder, and writes nothing outside', { skip: isWin }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const po = (root) => { const r = confined(root, [join(CORE, 'scripts/project-only.mjs'), 'process-memory', '--apply', '--root', root]); return { ...JSON.parse(r.stdout), violations: r.violations }; };
+  const cases = {
+    'linked _memories': (p, out) => { rmSync(join(p.root, '_memories'), { recursive: true }); symlinkSync(out, join(p.root, '_memories')); },
+    'linked _lib': (p, out) => { symlinkSync(out, join(p.root, '_memories', '_lib')); },
+    'linked lock file': (p, out) => { writeFileSync(join(out, 'l'), ''); symlinkSync(join(out, 'l'), join(p.root, '_memories', '.decorate-graph.lock')); },
+    'linked index': (p, out) => { writeFileSync(join(out, 'i.md'), 'outside'); symlinkSync(join(out, 'i.md'), join(p.root, '_memories', 'INDEX-decisions.md')); },
+    'linked PROJECT.md': (p, out) => { writeFileSync(join(out, 'P.md'), 'outside'); rmSync(join(p.root, 'PROJECT.md')); symlinkSync(join(out, 'P.md'), join(p.root, 'PROJECT.md')); },
+  };
+  for (const [name, plant] of Object.entries(cases)) {
+    const p = project();
+    try {
+      const out = join(p.base, 'outside'); mkdirSync(out);
+      writeFileSync(join(out, 'dc-9-planted.md'), unit('dc-9-planted'));
+      plant(p, out);
+      const before = tree(out);
+      const r = po(p.root);
+      assert.deepEqual([r.status, r.state], ['refused', 'refused-link'], name);
+      assert.deepEqual(r.violations, [], name);
+      assert.deepEqual(tree(out), before, `${name}: nothing outside changed`);
+    } finally { p.cleanup(); }
+  }
 });

@@ -29,7 +29,8 @@
  *      node project-only.mjs finalize-record --root <dir> --session <id> --op <op> --status done|skipped|failed
  *      node project-only.mjs pickup|pickup-archive --root <dir> [--harness <h>]   (run from a normal session)
  *      node project-only.mjs purge --root <dir> [--apply]   (a dry run without --apply)
- *      retention, process-memory, maintenance, metrics, metrics-export, configure-project and
+ *      node project-only.mjs process-memory --root <dir> [--apply]   (the script half only)
+ *      retention, metrics, metrics-export, configure-project and
  *      memory-view answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
@@ -199,8 +200,6 @@ export function captureStatus(ctx) {
 const NORMAL = 'is not available in project-only mode; it reads or writes outside the folder. Run it in a normal session';
 const UNAVAILABLE = {
   retention: 'retention is not available in project-only mode',
-  'process-memory': `memory processing ${NORMAL}`,
-  maintenance: `housekeeping (index refresh, scorecards) ${NORMAL}`,
   metrics: `the metrics report ${NORMAL}`,
   'configure-project': `project configuration ${NORMAL}`,
   'memory-view': `the memory view ${NORMAL}`,
@@ -253,6 +252,54 @@ export function purge(ctx, { apply = false } = {}) {
     }
   } finally { releaseFileLock(lockPath, lock.nonce); }
   return { ...base, applied: true, outcome: refused.length ? 'partly-purged-in-project' : removed.length ? 'purged-in-project' : 'nothing-in-project', removed, would_remove: [], refused };
+}
+
+// ---------- memory processing, the script half ----------
+//
+// What `/process-memory` does by script, from the folder alone: check the units, refresh the link
+// blocks, regenerate the indexes, check the PROJECT.md cap. The reasoning half (reading the session
+// for missed observations, graduating them) is the agent's work under the protocol and is not run
+// or proven here. Steps that read outside the folder are named in `not_run`, never skipped silently.
+const PM_NOT_RUN = [
+  'backfill from session transcripts (they are outside the folder)',
+  'native-memory boundary audit and index (the harness memory is outside the folder)',
+  'derived metrics: hindsight judge, scorecard, self-test regrade, rollup (their gate reads the registry and signed manifest)',
+  'capability drift (its history is installed state)',
+  'graduation and look-back (agent reasoning under the protocol, not a script)',
+];
+
+export async function processMemory(ctx, { apply = false } = {}) {
+  const { storeBoundaryProblem } = await import('./generate-summary-index.mjs');
+  const problem = storeBoundaryProblem(ctx.root);
+  if (problem) return { status: 'refused', state: problem.code === 'STORE_OUTSIDE_ROOT' ? 'refused-link' : 'boundary-unverified', reason: problem.path };
+  const mem = join(ctx.root, '_memories');
+  let names;
+  try { const st = lstatSync(mem); if (!st.isDirectory()) throw Object.assign(new Error('no store'), { code: 'ENOENT' }); names = readdirSync(mem); }
+  catch (e) { return e.code === 'ENOENT' ? { status: 'refused', state: 'no-store', reason: 'no _memories/ in this folder' } : { status: 'refused', state: 'unreadable', reason: e.code }; }
+  // Lock files and the files these steps rewrite must not be links out of the folder.
+  for (const [dir, list] of [[mem, names], [ctx.root, ['PROJECT.md', 'PROJECT-ARCHIVE.md']]]) {
+    for (const name of list) {
+      if (dir === mem && !(name.includes('.lock') || name.startsWith('INDEX-') || name === '_maintenance-state.json')) continue;
+      let g; try { g = lstatSync(join(dir, name)); } catch { continue; }
+      if (g.isSymbolicLink()) return { status: 'refused', state: 'refused-link', reason: outside(join(dir, name)).message };
+    }
+  }
+  const { iterActiveUnits, checkSchema, checkIntegrity } = await import('./check-units.mjs');
+  const { decorateStoreLocked } = await import('./decorate-graph.mjs');
+  const { runMaintenance } = await import('./maintenance-run.mjs');
+  const report = [];
+  const units = iterActiveUnits(mem, { includeObservations: false });
+  if (units.length) { checkSchema(units, mem, report); checkIntegrity(units, mem, new Date(), report); }
+  const count = (sev) => report.filter((r) => String(r.severity || r.level || '').toUpperCase() === sev).length;
+  const decoration = decorateStoreLocked(ctx.root, { dryRun: !apply });
+  const upkeep = runMaintenance(ctx.root, { apply, metrics: false });
+  return {
+    status: 'ok', mode: 'project-only', operation: 'process-memory', applied: apply,
+    units_checked: units.length, unit_findings: { fail: count('FAIL'), warn: count('WARN') },
+    decoration: { changed: (decoration.changed || []).length, refused: decoration.refused || [], needs_reconciliation: decoration.needs_reconciliation || [] },
+    upkeep: { ran: upkeep.ranOps || [], notes: upkeep.notes || [] },
+    not_run: PM_NOT_RUN,
+  };
 }
 
 // ---------- /finalize project-only ----------
@@ -437,13 +484,15 @@ export function main(argv) {
   const run = {
     startup, status, 'capture-status': captureStatus, pickup, 'pickup-archive': pickupArchive,
     purge: (ctx) => purge(ctx, { apply: opt.apply === true }),
+    'process-memory': (ctx) => processMemory(ctx, { apply: opt.apply === true }),
     'finalize-begin': finalizeBegin, 'finalize-certify': finalizeCertify, 'finalize-finish': finalizeFinish,
     'finalize-record': (ctx) => finalizeRecord(ctx, { op: opt.op, opStatus: opt.status }),
   }[cmd];
-  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status, purge, pickup, pickup-archive and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
+  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status, purge, process-memory, pickup, pickup-archive and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
   const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd });
   if (!ctx.ok) return out({ status: 'refused', ...ctx });
-  return out(run(ctx));
+  const result = run(ctx);
+  return result instanceof Promise ? result.then(out) : out(result);
 }
 
-if (isCliEntry(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (isCliEntry(import.meta.url)) Promise.resolve(main(process.argv.slice(2))).then((code) => { process.exitCode = code; });
