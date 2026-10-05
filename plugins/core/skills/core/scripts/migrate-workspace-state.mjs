@@ -456,6 +456,8 @@ export function applyMigration(opts = {}) {
 // a startup returns from the record without taking the project's close lock or the shared
 // manifest and registry locks, so one project's startup never queues behind another's.
 const CHECK_RECORD = 'migration-check.json';
+// Older fast records can omit unresolved pointer state; revalidate them once.
+const CHECK_RECORD_VERSION = 1;
 const RECORDABLE = new Set(['migrated', 'already-migrated', 'nothing-to-migrate']);
 
 const tableSha = (table) => createHash('sha256').update(JSON.stringify(table)).digest('hex');
@@ -473,7 +475,7 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
   if (raw === null) return null;
   let rec;
   try { rec = JSON.parse(raw); } catch { return null; }
-  if (!rec || rec.harness !== harness || rec.root !== real || !RECORDABLE.has(rec.status) || !Array.isArray(rec.path_entries)) return null;
+  if (!rec || rec.validation_version !== CHECK_RECORD_VERSION || rec.harness !== harness || rec.root !== real || !RECORDABLE.has(rec.status) || !Array.isArray(rec.path_entries)) return null;
   const index = fileSha(join(coreDir, 'index.json'));
   if (index === 'unreadable' || index !== rec.index_sha256 || tableSha(table) !== rec.table_sha256) return null;
   for (const e of rec.path_entries) {
@@ -505,6 +507,7 @@ function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
   try {
     const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
     writeSignedFile({ dir: durable.dir, name: CHECK_RECORD, coreDir, body: JSON.stringify({
+      validation_version: CHECK_RECORD_VERSION,
       status: result.status, root: real, harness, live: result.live ?? null, superseded: result.superseded || [],
       released: result.released ?? false, checked_at: now.toISOString(), ...inputs,
     }, null, 2) + '\n' });
