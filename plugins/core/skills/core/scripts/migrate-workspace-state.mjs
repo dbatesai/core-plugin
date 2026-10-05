@@ -56,7 +56,7 @@ import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
   writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath, markMetricsEverExternal,
 } from './project-state.mjs';
-import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
+import { acquireFileLock, withAcquiredFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
 import { assertSafeWorkspaceId, isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 
@@ -471,7 +471,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
   mkdirSync(dirname(lockFile), { recursive: true });
   const lock = acquireFileLock(lockFile, { extra: { session_id: `migrate-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
-  try {
+  return withAcquiredFileLock(lockFile, lock.nonce, () => {
     const { manifest } = withManifest(coreDir, table, harness);
     seen.inputs = classifiedInputs(manifest, real, table);
     const mine = manifest.entries.filter((e) => e.path === real && e.harness === harness);
@@ -644,9 +644,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
       files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
     };
-  } finally {
-    releaseFileLock(lockFile, lock.nonce);
-  }
+  });
 }
 
 // ---------- old builds after migration ----------
@@ -704,7 +702,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
   mkdirSync(dirname(lockFile), { recursive: true });
   const lock = acquireFileLock(lockFile, { extra: { session_id: `legacy-drift-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
-  try {
+  return withAcquiredFileLock(lockFile, lock.nonce, () => {
     const hot = hotDir;
     const byFrom = new Map((receipt.files || []).map((f) => [f.from, f]));
     const sources = [
@@ -781,9 +779,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
     }
     if (appended.length || superseded.length) persistReceipt();
     return { status: appended.length || superseded.length ? 'brought-in' : 'unchanged', root: real, harness, appended, superseded };
-  } finally {
-    releaseFileLock(lockFile, lock.nonce);
-  }
+  });
 }
 
 function parseArgs(argv) {
@@ -830,6 +826,13 @@ if (isCliEntry(import.meta.url)) {
     // A migration that could not finish is not a clean run: exit 3 so a caller sees it.
     process.exit(BLOCKED_STATUSES.has(result.status) ? 3 : 0);
   } catch (err) {
+    if (err.code === 'LOCK_RELEASE_FAILED' || err.lockReleaseFailure) {
+      const result = { status: err.code === 'LOCK_RELEASE_FAILED' ? 'lock-release-failed' : 'operation-failed',
+        error: { code: err.code ?? null, message: err.message }, lock_path: err.lockPath,
+        release: err.releaseResult ?? err.lockReleaseFailure, operation: err.operationResult ?? null,
+        additional_lock_releases: err.lockReleaseFailures || [], recovery: err.recovery };
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    }
     process.stderr.write(`migrate-workspace-state: ${err.message}\n`);
     process.exit(2);
   }

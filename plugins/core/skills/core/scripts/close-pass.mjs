@@ -45,7 +45,7 @@ import { readRegisteredRoots, resolveProjectRoot, canonical } from './project-st
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock } from './file-lock.mjs';
+import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock, withAcquiredFileLock } from './file-lock.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -125,8 +125,7 @@ export function beginClose(store, { sessionId, ops = [], storeSignature = null, 
   try {
     atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
   } catch (e) {
-    releaseLock(store, { sessionId });
-    throw e;
+    return withAcquiredFileLock(lockPath(store), lock.nonce, () => { throw e; });
   }
   return { ok: true, marker };
 }

@@ -378,6 +378,12 @@ export function withFileLock(lockPath, fn, {
     }
     sleepSync(retryDelayMs);
   }
+  return withAcquiredFileLock(lockPath, got.nonce, fn);
+}
+
+/** Complete an operation under an already acquired lock. A failed release preserves
+ * the operation's return value; callers must inspect/recover the lock, not replay work. */
+export function withAcquiredFileLock(lockPath, nonce, fn) {
   // releaseFileLock's return value must be read, never discarded — it
   // honestly reports a real failure ({released:false, reason, error} —
   // EPERM/EACCES/a generation another process claimed), and a bare
@@ -397,17 +403,30 @@ export function withFileLock(lockPath, fn, {
     threw = true;
     caught = e;
   }
-  const rel = releaseFileLock(lockPath, got.nonce);
+  const rel = releaseFileLock(lockPath, nonce);
   if (!rel.released) {
     const detail = `${lockPath} (reason: ${rel.reason}${rel.error ? `, error: ${rel.error}` : ''}) — lock may still be live on disk`;
+    const recovery = { retry_operation: false,
+      instruction: 'The project operator must inspect the named lock and operation outcome; recover only this owned generation after confirming its owner. Do not repeat the material operation.' };
     if (threw) {
-      try { if (caught && typeof caught === 'object') caught.lockReleaseFailure = rel; } catch { /* caught may be frozen/non-object */ }
-      process.stderr.write(`withFileLock: lock release failed for ${detail} (masked by an in-flight error from fn(): ${caught && caught.message ? caught.message : caught})\n`);
+      try {
+        if (caught && typeof caught === 'object') {
+          caught.lockReleaseFailure = rel;
+          // An inner lock may already have named itself; preserve its evidence too.
+          caught.lockReleaseFailures = [...(caught.lockReleaseFailures || []), { lockPath, releaseResult: rel }];
+          caught.lockPath ??= lockPath;
+          caught.recovery ??= recovery;
+        }
+      } catch { /* caught may be frozen/non-object; stderr still reports the failed release */ }
+      try { process.stderr.write(`withFileLock: lock release failed for ${detail} (masked by an in-flight error from fn(): ${caught && caught.message ? caught.message : caught})\n`); }
+      catch { /* a closed diagnostic stream must not mask the primary error */ }
     } else {
       const err = new Error(`withFileLock: lock release failed for ${detail}`);
       err.code = 'LOCK_RELEASE_FAILED';
       err.lockPath = lockPath;
       err.releaseResult = rel;
+      err.operationResult = result;
+      err.recovery = recovery;
       throw err;
     }
   }
