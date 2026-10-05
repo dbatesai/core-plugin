@@ -1547,13 +1547,14 @@ test('a git index that git itself rejects is never read as "nothing tracked": ge
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
   const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore', env });
   const truncated = Buffer.alloc(12); truncated.write('DIRC'); truncated.writeUInt32BE(2, 4);
-  for (const shape of ['unborn', 'healthy index', 'truncated index', 'version 1 index with a correct checksum']) {
+  for (const shape of ['unborn', 'healthy index', 'truncated index', 'version 1 index with a correct checksum', 'version 2 index with an extension git does not know']) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-index-unknown-')));
     try {
       git(root, 'init', '-q');
       if (shape === 'healthy index') { writeFileSync(join(root, 'a.txt'), 'a\n'); git(root, 'add', 'a.txt'); }
       const idx = join(root, '.git', 'index');
       if (shape === 'truncated index') writeFileSync(idx, truncated);
+      if (shape.startsWith('version 2')) { const h = Buffer.alloc(20); h.write('DIRC'); h.writeUInt32BE(2, 4); h.write('abcd', 12); writeFileSync(idx, Buffer.concat([h, createHash('sha1').update(h).digest()])); }
       if (shape.startsWith('version 1')) { const h = Buffer.alloc(12); h.write('DIRC'); h.writeUInt32BE(1, 4); writeFileSync(idx, Buffer.concat([h, createHash('sha1').update(h).digest()])); }
       const tracked = trackedStateFiles(root, '_hooks');
       if (shape === 'unborn' || shape === 'healthy index') {

@@ -565,24 +565,11 @@ function gitIndexFile(root) {
   }
 }
 
-// Paths sit in a v2/v3 index as plain bytes, so a file that never mentions the state
-// prefix can't be tracking anything under it; that skips spawning git on every read.
-// A v4 (prefix-compressed) or split index can hide the bytes, so those always ask git.
-function indexMightTrack(root, prefix) {
-  const idx = gitIndexFile(root);
-  if (!idx) return false;
-  let buf;
-  // An unborn repository can lack an index, as can broken metadata. Let Git distinguish them.
-  try { buf = readFileSync(idx); } catch (e) { if (e.code === 'ENOENT') return true; throw e; }
-  if (buf.length < 12 || buf.subarray(0, 4).toString() !== 'DIRC') return true;
-  const version = buf.length >= 8 ? buf.readUInt32BE(4) : 0;
-  if (version !== 2 && version !== 3) return true;
-  if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true;
-  // The bytes only answer for an index git itself would accept: one that ends in the checksum of
-  // everything before it. A truncated or damaged file is git's to judge, not this scan's.
-  const intact = (n, algo) => buf.length >= 12 + n && createHash(algo).update(buf.subarray(0, -n)).digest().equals(buf.subarray(-n));
-  if (!intact(20, 'sha1') && !intact(32, 'sha256')) return true;
-  return buf.includes(prefix);
+// Inside a repository, git alone says what is tracked: a raw scan of the index cannot tell an
+// index git would reject (truncated, an unsupported version, an extension it does not know)
+// from a healthy one that tracks nothing here.
+function indexMightTrack(root) {
+  return gitIndexFile(root) !== null;
 }
 
 // Returned when git ls-files errors or times out while the index says the prefix
@@ -593,7 +580,7 @@ const UNKNOWN_TRACKED = { has: () => true };
 
 export function trackedStateFiles(root, harness) {
   const prefix = `${STATE_DIRNAME}/${harness}/`;
-  try { return indexMightTrack(root, prefix) ? trackedProjectFiles(root, prefix) : new Set(); }
+  try { return indexMightTrack(root) ? trackedProjectFiles(root, prefix) : new Set(); }
   catch { return UNKNOWN_TRACKED; }
 }
 
