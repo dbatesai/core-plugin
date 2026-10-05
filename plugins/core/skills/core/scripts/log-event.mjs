@@ -257,8 +257,19 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
   // Everything below reads the project list and the project's manifest. When one of those reads
   // fails (an unreadable or malformed project list), whether this project opted out is unknown,
   // and unknown is OFF: capture never proceeds on a guess.
-  try { return metricsEnabledFromState({ project, env, home, flag }); } catch { return false; }
+  try { return metricsEnabledFromState({ project, env, home, flag }); }
+  catch (e) {
+    // OFF, and said once per process on stderr so the failure stays visible: a defect in this path
+    // must not look like an ordinary opt-out.
+    metricsGateFailure = String(e?.code || e?.name || 'error');
+    if (!gateFailureSaid) { gateFailureSaid = true; try { process.stderr.write(`CORE metrics gate: could not read project state (${metricsGateFailure}); capture is off for this run\n`); } catch { /* stderr closed */ } }
+    return false;
+  }
 }
+
+/** The reason the gate last failed to read project state in this process, or null. */
+export let metricsGateFailure = null;
+let gateFailureSaid = false;
 
 function metricsEnabledFromState({ project, env, home, flag }) {
   if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in

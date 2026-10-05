@@ -296,12 +296,17 @@ function createOnce(file, content, mode) {
   return readFileSync(file, 'utf8').trim();
 }
 
+// An install id is one token (the writer makes 32 hex characters). Reader and writer hold it to the
+// same shape, so an id the writer would accept is never one the reader calls absent.
+const INSTALL_ID_RE = /^[0-9A-Za-z._-]{1,128}$/;
+
 /** This install's secret and id, created on first use (the secret mode 0600). */
 export function ensureInstallIdentity({ coreDir = defaultCoreDir() } = {}) {
   mkdirSync(coreDir, { recursive: true });
   const secretHex = createOnce(join(coreDir, 'install-secret'), randomBytes(32).toString('hex') + '\n', 0o600);
   const installId = createOnce(join(coreDir, 'install-id'), randomBytes(16).toString('hex') + '\n', 0o644);
   if (!HEX64_RE.test(secretHex)) throw new Error(`install-secret is malformed: ${join(coreDir, 'install-secret')}`);
+  if (!INSTALL_ID_RE.test(installId)) throw new Error(`install-id is malformed: ${join(coreDir, 'install-id')}`);
   return { secret: Buffer.from(secretHex, 'hex'), installId };
 }
 
@@ -314,7 +319,7 @@ export function readInstallIdentity({ coreDir = defaultCoreDir() } = {}) {
   try {
     const secretHex = readFileSync(join(coreDir, 'install-secret'), 'utf8').trim();
     const installId = readFileSync(join(coreDir, 'install-id'), 'utf8').trim();
-    if (!HEX64_RE.test(secretHex) || !installId) return null;
+    if (!HEX64_RE.test(secretHex) || !INSTALL_ID_RE.test(installId)) return null;
     return { secret: Buffer.from(secretHex, 'hex'), installId };
   } catch { return null; }
 }
