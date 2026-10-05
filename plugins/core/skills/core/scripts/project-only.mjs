@@ -41,6 +41,7 @@ import { userInfo } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { useNoMachineIdentity, acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -421,6 +422,7 @@ export function finalizeBegin(ctx, { now = new Date() } = {}) {
   let dir;
   try { ensurePending(ctx); dir = ownDir(ctx, closeDir(ctx)); ownDir(ctx, join(ctx.root, '_memories')); lockChain(ctx); }
   catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
+  ensureStoreIgnores(ctx.root);
   const lock = acquireFileLock(closeLock(ctx), { extra: { session_id: ctx.session, mode: 'project-only' }, machine: null });
   if (!lock.ok) return { status: 'refused', state: 'lock-held', reason: lock.reason };
   writeOwn(dir, 'marker.json', JSON.stringify({ mode: 'project-only', session_id: ctx.session, harness: ctx.harness, begun_at: now.toISOString(), lock_nonce: lock.nonce, ops: { 'memory-refresh': { status: 'unavailable', reason: 'native memory is outside the project folder' } } }, null, 2) + '\n');

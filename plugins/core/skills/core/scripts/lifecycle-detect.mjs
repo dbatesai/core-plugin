@@ -102,6 +102,7 @@ import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBl
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { assertStoreBoundary, storeBoundaryProblem } from './generate-summary-index.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 // ---------- session-start inventory (diagnostic only, non-authoritative) ----------
 
@@ -165,6 +166,7 @@ export function recordSessionStart(projectDir, { sessionId = null, now = new Dat
   const inv = { session: sessionId, started_at: now, paths: inventoryPaths(projectDir) };
   const path = sessionInventoryPath(projectDir);
   assertStoreBoundary(projectDir);
+  ensureStoreIgnores(resolve(projectDir));
   mkdirSync(dirname(path), { recursive: true });
   atomicWriteFileSync(path, JSON.stringify(inv, null, 2) + '\n');
   return inv;

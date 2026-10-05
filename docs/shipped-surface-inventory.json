@@ -625,6 +625,13 @@
       "surface": "shipped"
     },
     {
+      "name": "store-ignores",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/store-ignores.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "target-surface-collab-files-probe",
       "kind": "script",
       "harness": "shared",

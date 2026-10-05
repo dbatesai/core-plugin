@@ -301,6 +301,7 @@ export function main(argv) {
 
   const outPath = join(project, '_memories', '_capability-drift-log.md');
   if (!existsSync(dirname(outPath))) mkdirSync(dirname(outPath), { recursive: true });
+  ensureStoreIgnores(project);
   writeFileSync(outPath, md);
   removeLegacyDriftLog(project);
   console.log(JSON.stringify({
@@ -313,5 +314,6 @@ export function main(argv) {
 
 import { realpathSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 const _c = p => { try { return realpathSync(p); } catch { return p; } };
 if (isCliEntry(import.meta.url)) process.exit(main(process.argv.slice(2)));

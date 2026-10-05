@@ -32,6 +32,7 @@ import { TRIPWIRE_THRESHOLDS } from './metrics-tripwires.mjs';
 import { shouldAuthorFreshRound, markAutoAuthorTriggered } from './self-test-round.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
@@ -65,6 +66,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   const root = resolve(projectPath);
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
+  if (apply) ensureStoreIgnores(root);
 
   let ledger = {};
   if (existsSync(ledgerPath)) {

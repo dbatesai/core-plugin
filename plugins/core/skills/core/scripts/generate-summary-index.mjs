@@ -39,6 +39,7 @@ import { loadValidEnrichments } from './enrichment-sidecar.mjs';
 import { truncate as sharedTruncate } from './text-truncate.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -241,6 +242,7 @@ export function loadFreshIndex(storePath) {
       }
     } catch { /* fall through to regenerate */ }
   }
+  ensureStoreIgnores(root);
   mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
   atomicWriteFileSync(indexPath, JSON.stringify(current, null, 2) + '\n');
   return current;
@@ -529,6 +531,7 @@ export function captureStore(storePath, { retainRaw = false, refreshCache = true
       let cached = null;
       try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
       if (!cached || cached.incomplete || (cached.read_errors || []).length || cached.source_sig !== source_sig) {
+        ensureStoreIgnores(resolve(storePath));
         mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
         atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
       }

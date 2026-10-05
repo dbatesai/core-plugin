@@ -1,0 +1,85 @@
+// CORE's own working files in the memory store are ignored by git from the first write, with no
+// startup having run; project content never is; an ignore file the user already has is left alone.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
+import { ensureStoreIgnores } from '../../plugins/core/skills/core/scripts/store-ignores.mjs';
+import { stampFile } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
+import { loadFreshIndex } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { writeEnrichment } from '../../plugins/core/skills/core/scripts/enrichment-sidecar.mjs';
+import { recordSessionStart } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
+import { decorateStoreLocked } from '../../plugins/core/skills/core/scripts/decorate-graph.mjs';
+import { withProjectMdWriterLock } from '../../plugins/core/skills/core/scripts/lifecycle-core.mjs';
+import { acquireLock, releaseLock } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
+
+const isWin = process.platform === 'win32';
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { env, encoding: 'utf8' });
+
+function project() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
+  git(root, 'init', '-q');
+  mkdirSync(join(root, '_memories'));
+  writeFileSync(join(root, 'PROJECT.md'), '# P\n');
+  writeFileSync(join(root, '_memories', 'u1.md'), '---\nid: u1\ntype: observation\n---\nbody\n');
+  writeFileSync(join(root, '_memories', 'INDEX-decisions.md'), '# Decisions\n');
+  writeFileSync(join(root, '_memories', 'inbox.md'), '\n');
+  return root;
+}
+function files(dir) {
+  const out = [];
+  for (const n of readdirSync(dir)) { const p = join(dir, n); if (statSync(p).isDirectory()) out.push(...files(p)); else out.push(p); }
+  return out;
+}
+const ignored = (root, rel) => spawnSync('git', ['-C', root, 'check-ignore', '-q', '--no-index', rel], { env }).status === 0;
+
+test('every CORE working file a store writer creates is ignored before anything ran startup; project content is not', { skip: isWin }, () => {
+  const root = project();
+  try {
+    stampFile(root, join(root, '_memories', 'u1.md'), 'h', 'test');
+    loadFreshIndex(root);
+    writeEnrichment(root, { unitPath: 'u1.md', writerModelFamily: 'OPUS', answerModelFamily: 'FABLE', aliases: ['x'] });
+    recordSessionStart(root);
+    decorateStoreLocked(root);
+    withProjectMdWriterLock(root, () => {});
+    assert.equal(acquireLock(root, { sessionId: 's1' }).ok, true);
+    releaseLock(root, { sessionId: 's1' });
+    for (const n of ['_close-marker.json', '_maintenance-state.json', '_pm-state.json', '_capability-drift-log.md']) writeFileSync(join(root, '_memories', n), '{}');
+    const content = new Set(['_memories/u1.md', '_memories/INDEX-decisions.md', '_memories/inbox.md', '_memories/.gitignore', '_memories/_lib/.gitignore']);
+    const generated = files(join(root, '_memories')).map((p) => relative(root, p).split('\\').join('/')).filter((r) => !content.has(r));
+    assert.ok(generated.some((r) => r.startsWith('_memories/_lib/')), 'the writers did create cache files');
+    assert.ok(generated.some((r) => /lock/.test(r)), 'and lock files');
+    for (const r of generated) assert.equal(ignored(root, r), true, `${r} is ignored`);
+    for (const r of ['PROJECT.md', '_memories/u1.md', '_memories/INDEX-decisions.md', '_memories/inbox.md']) assert.equal(ignored(root, r), false, `${r} stays committable`);
+    assert.equal(git(root, 'status', '--porcelain', '--untracked-files=all').split('\n').filter((l) => /lock|_lib\/(?!\.gitignore)|_close-marker|_maintenance|_pm-state|drift-log/.test(l)).length, 0, 'git status shows none of them');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a store's existing .gitignore is left byte-identical, and a second call changes nothing", { skip: isWin }, () => {
+  const root = project();
+  try {
+    const mine = '# mine\n!keep-this.json\n';
+    writeFileSync(join(root, '_memories', '.gitignore'), mine);
+    assert.deepEqual(ensureStoreIgnores(root), []);
+    assert.equal(readFileSync(join(root, '_memories', '.gitignore'), 'utf8'), mine);
+    const lib = readFileSync(join(root, '_memories', '_lib', '.gitignore'), 'utf8');
+    assert.deepEqual(ensureStoreIgnores(root), []);
+    assert.equal(readFileSync(join(root, '_memories', '_lib', '.gitignore'), 'utf8'), lib);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('no store, nothing written; a store that is a link is reported, not written through', { skip: isWin }, async () => {
+  const { symlinkSync, existsSync } = await import('node:fs');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
+  try {
+    assert.deepEqual(ensureStoreIgnores(root), []);
+    assert.equal(existsSync(join(root, '_memories')), false);
+    mkdirSync(join(root, 'elsewhere'));
+    symlinkSync(join(root, 'elsewhere'), join(root, '_memories'));
+    assert.match(ensureStoreIgnores(root).join(), /not a real folder/);
+    assert.deepEqual(readdirSync(join(root, 'elsewhere')), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

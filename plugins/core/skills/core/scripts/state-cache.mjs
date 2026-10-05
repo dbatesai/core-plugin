@@ -46,6 +46,7 @@ import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { ensureProjectCacheDir, assertProjectCacheDir } from './project-artifacts.mjs';
 import { trackedProjectFiles } from './project-state.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 export function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -496,6 +497,7 @@ export function stampFiles(projectDir, entries, { now } = {}) {
   const custody = cacheCustodyProblem(projectDir);
   if (custody) return { stamped: false, outcome: 'refused', recovery: 'recovery-required', reason: `cache-custody: ${custody}` };
   try {
+    ensureStoreIgnores(resolve(projectDir));
     mkdirSync(dirname(cachePath), { recursive: true });
     const lockResult = withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
       const cache = readProjectCache(projectDir);

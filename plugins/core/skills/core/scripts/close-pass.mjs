@@ -50,6 +50,7 @@ import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { computeSourceSignature } from './generate-summary-index.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous
 // enough for a manual close that renders and summarizes before finishing.
@@ -84,6 +85,7 @@ export function inspectLock(store, now = Date.now()) {
  */
 export function acquireLock(store, { sessionId = null, now = Date.now() } = {}) {
   mkdirSync(join(resolve(store), '_memories'), { recursive: true });
+  ensureStoreIgnores(resolve(store));
   return acquireFileLock(lockPath(store), {
     extra: { session_id: sessionId },
     now, staleMs: LOCK_STALE_MS, hardStaleMs: LOCK_HARD_STALE_MS,
