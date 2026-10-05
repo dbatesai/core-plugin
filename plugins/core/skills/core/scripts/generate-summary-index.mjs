@@ -30,8 +30,8 @@
  *   node generate-summary-index.mjs --store <storePath>
  */
 
-import { readdirSync, statSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readdirSync, statSync, lstatSync, realpathSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { resolve, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -60,6 +60,37 @@ function isCandidateName(name) {
 // for archived units; status filtering is what does the job for retired ones.
 function isCandidateDir(name) {
   return !name.startsWith('_') && name !== 'archive';
+}
+
+/**
+ * The store and its derived-cache folder must be real directories inside the project. A project can
+ * arrive with `_memories` or `_memories/_lib` (or a file in `_lib`) as a link to somewhere else,
+ * which would bring outside content into retrieval and send cache writes out of the project. Links
+ * are judged with lstat, before anything follows them. An absent store is fine.
+ * @returns {null | { code: 'STORE_OUTSIDE_ROOT', path: string }}
+ */
+export function storeBoundaryProblem(storePath) {
+  const root = resolve(storePath);
+  const mem = join(root, '_memories');
+  const bad = (path) => ({ code: 'STORE_OUTSIDE_ROOT', path });
+  let st;
+  try { st = lstatSync(mem); } catch { return null; }   // absent or unreadable: the capture reports it
+  if (st.isSymbolicLink()) return bad(mem);
+  if (!st.isDirectory()) return null;
+  try { if (!realpathSync.native(mem).startsWith(realpathSync.native(root) + sep)) return bad(mem); } catch { return null; }
+  const lib = join(mem, '_lib');
+  try { st = lstatSync(lib); } catch { return null; }
+  if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
+  let entries = [];
+  try { entries = readdirSync(lib, { withFileTypes: true }); } catch { return null; }
+  const link = entries.find((e) => e.isSymbolicLink());
+  return link ? bad(join(lib, link.name)) : null;
+}
+
+/** Throws STORE_OUTSIDE_ROOT when the store or its cache folder leaves the project. */
+export function assertStoreBoundary(storePath) {
+  const problem = storeBoundaryProblem(storePath);
+  if (problem) throw Object.assign(new Error(`store refused: ${problem.path} is a link or leaves the project folder`), problem);
 }
 
 /**
@@ -115,6 +146,7 @@ function walkCandidateFiles(memoriesDir, onIoError = null) {
  * @returns {string}
  */
 export function computeSourceSignature(storePath) {
+  assertStoreBoundary(storePath);
   const memoriesDir = join(resolve(storePath), '_memories');
   const parts = [];
   for (const f of walkCandidateFiles(memoriesDir)) {
@@ -155,6 +187,7 @@ export function validateIndexRecords(idx) {
  * enforced here, at the loader, not per-caller.
  */
 export function loadFreshIndex(storePath) {
+  assertStoreBoundary(storePath);
   const root = resolve(storePath);
   const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
   // Validate from one honest capture: a signature-only walk drops I/O errors.
@@ -317,6 +350,7 @@ function authorityTier(fm, rel) {
  * not even the derived cache — so its reads must be side-effect free.
  */
 export function captureStore(storePath, { retainRaw = false, refreshCache = true } = {}) {
+  assertStoreBoundary(storePath);
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
   let nextInvalidationAt = null; // earliest still-future t_invalid among included candidates
@@ -482,6 +516,7 @@ function basenameNoMd(rel) {
 }
 
 export function generateSummaryIndex(storePath) {
+  assertStoreBoundary(storePath);
   // One capture — the written index's source_sig describes the exact bytes its
   // records were derived from (never signature-walk the store a second time;
   // that reopens the multi-walk gap captureStore exists to close).

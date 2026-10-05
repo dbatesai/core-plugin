@@ -7,13 +7,16 @@
  * (ENOENT). Nothing outside the project is read or changed: the gate refuses the access before it happens,
  * so the machine's real ~/.core is never touched.
  *
+ * Each row is judged twice, separately: confinement (no outside attempt) and outcome (exit code, reported
+ * state, material effect). A run with no resolvable source pin fails; pass `--pin <sha>` for an exported archive.
+ *
  * Output: one JSON receipt (rows, raw operation logs, tree hashes, lock owners, negative controls) and a
  * markdown table. Exit 0 only when every `confined` row has zero violations, every `unsupported` row is
  * recorded as such, and every negative control produced its violation.
  *
  *   node tests/acceptance/one-folder-packet.mjs <out-dir>
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, realpathSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, realpathSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve, dirname, delimiter } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -23,11 +26,15 @@ import { createHash } from 'node:crypto';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const CORE = join(REPO, 'plugins/core/skills/core');
 const GATE = pathToFileURL(join(REPO, 'tests/scripts/fs-confine.mjs')).href;
-const out = resolve(process.argv[2] || join(tmpdir(), 'one-folder-packet'));
+const out = resolve(process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : join(tmpdir(), 'one-folder-packet'));
 mkdirSync(out, { recursive: true });
 
 const sha = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-const dirty = spawnSync('git', ['-C', REPO, 'status', '--porcelain'], { encoding: 'utf8' }).stdout.trim() !== '';
+const porcelain = spawnSync('git', ['-C', REPO, 'status', '--porcelain'], { encoding: 'utf8' });
+// A run that can't name its own source is not a pinned packet: pass --pin <sha> for an exported archive.
+const pinArg = process.argv.indexOf('--pin') >= 0 ? process.argv[process.argv.indexOf('--pin') + 1] : null;
+const provenance = /^[0-9a-f]{40}$/.test(sha) && porcelain.status === 0 ? 'git' : /^[0-9a-f]{40}$/.test(pinArg || '') ? 'declared' : 'missing';
+const dirty = provenance === 'git' ? porcelain.stdout.trim() !== '' : null;
 
 function fixture(name) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), `packet-${name}-`)));
@@ -75,31 +82,69 @@ for (const errno of ['EACCES', 'ENOENT']) {
   const { base, root } = fixture(errno);
   try {
     const before = tree(root);
-    const step = async (id, entry, args, expect, opts) => {
+    // A row passes on TWO separate checks: confinement (no outside attempt) and outcome (the operation
+    // did what the row says: exit code, reported state, and where named a material effect in the tree).
+    const step = async (id, entry, args, expect, opts = {}) => {
       const r = await runConfined(root, errno, args, opts);
       const s = summarize(r);
-      const ok = expect === 'confined' ? s.violations?.length === 0 && s.outside_attempts === 0
-        : expect === 'unsupported' ? true : false;
-      add({ id, entry, errno, expect, ...s, result: expect === 'unsupported' ? (s.outside_attempts ? 'unsupported-observed-outside-access' : 'unsupported-but-confined') : ok ? 'pass' : 'FAIL' });
+      let parsed = null; try { parsed = JSON.parse(r.stdout.split('\n').pop()); } catch { /* not JSON */ }
+      const want = opts.outcome || {};
+      const problems = [];
+      if (expect !== 'unsupported') {
+        if (want.exit !== undefined && r.status !== want.exit) problems.push(`exit ${r.status}, wanted ${want.exit}`);
+        if (want.status !== undefined && parsed?.status !== want.status) problems.push(`status ${parsed?.status}, wanted ${want.status}`);
+        if (want.stdout && !want.stdout.test(r.stdout)) problems.push(`stdout did not match ${want.stdout}`);
+        if (want.emptyStdout && r.stdout !== '') problems.push('stdout was not empty');
+        for (const f of want.files || []) if (!existsSync(join(root, f))) problems.push(`missing effect: ${f}`);
+        if (want.check) { const why = want.check(parsed, r); if (why) problems.push(why); }
+        if (!Object.keys(want).length) problems.push('row has no outcome expectation');
+      }
+      const confinedOk = s.violations?.length === 0 && s.outside_attempts === 0;
+      const result = expect === 'unsupported' ? (s.outside_attempts ? 'unsupported-observed-outside-access' : 'unsupported-but-confined')
+        : confinedOk && !problems.length ? 'pass' : 'FAIL';
+      add({ id, entry, errno, expect, confinement: confinedOk ? 'confined' : 'outside-access', outcome: problems.length ? problems : 'as-expected', ...s, result });
       return r;
     };
     const po = (...a) => [PO, ...a, '--root', root];
-    await step('startup', 'project-only.mjs startup', po('startup', '--session', 'pk-1'), 'confined');
-    await step('status', 'project-only.mjs status', po('status'), 'confined');
-    await step('capture-status', 'project-only.mjs capture-status', po('capture-status'), 'confined');
-    await step('explicit-retrieval', 'retrieve-context.mjs <root> "<query>"', [join(CORE, 'scripts/retrieve-context.mjs'), root, 'what color are the widgets'], 'confined');
-    await step('hook-user-prompt-submit', 'hooks/retrieve-context-hook.mjs (UserPromptSubmit)', [join(CORE, 'hooks/retrieve-context-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: root, prompt: 'what color are the widgets', session_id: 'pk-1' }) });
-    await step('hook-session-end', 'hooks/close-pass-hook.mjs (SessionEnd)', [join(CORE, 'hooks/close-pass-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionEnd', cwd: root, reason: 'other', session_id: 'pk-1' }) });
-    await step('hook-session-start', 'hooks/session-start-hook.mjs (SessionStart)', [join(CORE, 'hooks/session-start-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: root, source: 'startup', session_id: 'pk-1' }) });
+    await step('startup', 'project-only.mjs startup', po('startup', '--session', 'pk-1'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['.core/.gitignore', '.core/_project-only/claude-code/bootstrap.json'] } });
+    await step('status', 'project-only.mjs status', po('status'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.pending === true ? null : 'pending not reported') } });
+    await step('capture-status', 'project-only.mjs capture-status', po('capture-status'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.in_project?.rows === 1 && j?.outside_history === 'unknown' ? null : 'capture rows or outside-history wrong') } });
+    await step('explicit-retrieval', 'retrieve-context.mjs <root> "<query>"', [join(CORE, 'scripts/retrieve-context.mjs'), root, 'what color are the widgets'], 'confined', { outcome: { exit: 0, stdout: /dc-1-widgets/ } });
+    await step('hook-user-prompt-submit', 'hooks/retrieve-context-hook.mjs (UserPromptSubmit)', [join(CORE, 'hooks/retrieve-context-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: root, prompt: 'what color are the widgets', session_id: 'pk-1' }) , outcome: { exit: 0, emptyStdout: true } });
+    await step('hook-session-end', 'hooks/close-pass-hook.mjs (SessionEnd)', [join(CORE, 'hooks/close-pass-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionEnd', cwd: root, reason: 'other', session_id: 'pk-1' }) , outcome: { exit: 0, emptyStdout: true } });
+    await step('hook-session-start', 'hooks/session-start-hook.mjs (SessionStart)', [join(CORE, 'hooks/session-start-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: root, source: 'startup', session_id: 'pk-1' }) , outcome: { exit: 0, stdout: /project-only/i } });
     for (const [i, a] of [['begin', ['finalize-begin', '--session', 'pk-1']], ['record-capture', ['finalize-record', '--session', 'pk-1', '--op', 'material-capture', '--status', 'done']], ['record-render', ['finalize-record', '--session', 'pk-1', '--op', 'render-project-md', '--status', 'done']], ['record-summary', ['finalize-record', '--session', 'pk-1', '--op', 'session-summary', '--status', 'done']], ['certify', ['finalize-certify', '--session', 'pk-1']], ['finish', ['finalize-finish', '--session', 'pk-1']]]) {
-      await step(`finalize-${i}`, `project-only.mjs ${a[0]}`, po(...a), 'confined');
+      await step(`finalize-${i}`, `project-only.mjs ${a[0]}`, po(...a), 'confined', { outcome: { exit: 0, status: 'ok', files: i === 'certify' ? ['.core/_project-only/claude-code/close/receipts/pk-1.json'] : [] } });
     }
-    await step('purge', 'project-only.mjs purge', po('purge'), 'confined');
-    await step('pickup', 'project-only.mjs pickup (normal-session read)', po('pickup'), 'confined');
+    await step('purge', 'project-only.mjs purge', po('purge'), 'confined', { outcome: { exit: 2, status: 'unavailable' } });
+    for (const name of ['process-memory', 'maintenance', 'metrics', 'metrics-export', 'configure-project', 'memory-view']) await step(`unavailable-${name}`, `project-only.mjs ${name}`, po(name), 'confined', { outcome: { exit: 2, status: 'unavailable' } });
+    await step('pickup', 'project-only.mjs pickup (normal-session read)', po('pickup'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.pending === true && j.partial_closes?.[0]?.session_id === 'pk-1' && j.adopted?.completion === false ? null : 'pickup report wrong') } });
     // Unsupported in this mode: observed, not claimed. Each shows what still reaches outside the folder.
     await step('maintenance-run', 'maintenance-run.mjs <root> (housekeeping)', [join(CORE, 'scripts/maintenance-run.mjs'), root, '--json'], 'unsupported');
     await step('close-pass-detect', 'close-pass.mjs detect <root> (normal close bookkeeping)', [join(CORE, 'scripts/close-pass.mjs'), 'detect', root], 'unsupported');
-    await step('pickup-archive', 'project-only.mjs pickup-archive', po('pickup-archive'), 'confined');
+    await step('pickup-archive', 'project-only.mjs pickup-archive', po('pickup-archive'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.archived === true && !existsSync(join(root, '.core/_project-only/claude-code')) ? null : 'not archived') } });
+    // After pickup the automatic hooks are no longer suppressed: the same hook now goes on to look the
+    // project up in the registry, which under this gate shows as an outside attempt.
+    const post = await runConfined(root, errno, [join(CORE, 'hooks/retrieve-context-hook.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: root, prompt: 'what color are the widgets', session_id: 'pk-2' }) });
+    add({ id: 'post-pickup-hook-not-suppressed', entry: 'hooks/retrieve-context-hook.mjs after pickup-archive', errno, expect: 'reaches-registry', ...summarize(post), result: post.violations?.length ? 'pass' : 'FAIL' });
+    // Static links that arrive with the folder: explicit retrieval refuses them before any outside access.
+    if (process.platform !== 'win32') {
+      const RC = join(CORE, 'scripts/retrieve-context.mjs');
+      const refusal = { outcome: { exit: 3, check: (_j, r) => (/dc-9-planted/.test(r.stdout) ? 'outside unit returned' : null) } };
+      const la = fixture(`${errno}-linkmem`);
+      const outsideStore = join(la.base, 'outside-store'); mkdirSync(outsideStore);
+      writeFileSync(join(outsideStore, 'dc-9-planted.md'), '---\nid: dc-9-planted\ntype: decision\nstatus: active\n---\nSynthetic widget colour is purple.\n');
+      rmSync(join(la.root, '_memories'), { recursive: true }); symlinkSync(outsideStore, join(la.root, '_memories'));
+      const lb = fixture(`${errno}-linklib`);
+      const outsideLib = join(lb.base, 'outside-lib'); mkdirSync(outsideLib);
+      symlinkSync(outsideLib, join(lb.root, '_memories', '_lib'));
+      const stepIn = async (fx, id, entry) => { const saved = root; const r = await runConfined(fx.root, errno, [RC, fx.root, 'synthetic widget colour']); const s2 = summarize(r); const why = refusal.outcome.check(null, r); const problems = [...(r.status !== 3 ? [`exit ${r.status}, wanted 3`] : []), ...(why ? [why] : [])]; const confinedOk = s2.violations?.length === 0 && s2.outside_attempts === 0; add({ id, entry, errno, expect: 'refused-before-outside-access', confinement: confinedOk ? 'confined' : 'outside-access', outcome: problems.length ? problems : 'as-expected', ...s2, result: confinedOk && !problems.length ? 'pass' : 'FAIL' }); void saved; };
+      try {
+        await stepIn(la, 'explicit-retrieval-linked-store', 'retrieve-context.mjs, _memories is a link out of the project');
+        await stepIn(lb, 'explicit-retrieval-linked-lib', 'retrieve-context.mjs, _memories/_lib is a link out of the project');
+        if (readdirSync(outsideLib).length) add({ id: 'explicit-retrieval-linked-lib-wrote-outside', errno, expect: 'nothing written outside', result: 'FAIL' });
+      } finally { rmSync(la.base, { recursive: true, force: true }); rmSync(lb.base, { recursive: true, force: true }); }
+    }
     const after = tree(root);
     const changed = Object.keys({ ...before, ...after }).filter((f) => before[f] !== after[f]);
     add({ id: 'project-tree-delta', errno, expect: 'info', files_changed_or_added: changed, result: 'recorded' });
@@ -160,10 +205,10 @@ const controls = [];
   } finally { rmSync(base, { recursive: true, force: true }); }
 }
 
-const failed = rows.filter((r) => r.result === 'FAIL').length + controls.filter((c) => c.result.startsWith('FAIL')).length;
-const receipt = { pinned_sha: sha, working_tree_dirty: dirty, node: process.version, platform: `${process.platform} ${process.arch}`, ran_at: new Date().toISOString(), gate: 'tests/scripts/fs-confine.mjs (Node fs seam; child processes, native code and a real sandbox are outside it)', rows, negative_controls: controls, failed };
+const failed = rows.filter((r) => r.result === 'FAIL').length + controls.filter((c) => c.result.startsWith('FAIL')).length + (provenance === 'missing' ? 1 : 0);
+const receipt = { pinned_sha: provenance === 'git' ? sha : provenance === 'declared' ? pinArg : null, provenance, working_tree_dirty: dirty, node: process.version, platform: `${process.platform} ${process.arch}`, ran_at: new Date().toISOString(), gate: 'tests/scripts/fs-confine.mjs (Node fs seam; child processes, native code and a real sandbox are outside it)', rows, negative_controls: controls, failed };
 writeFileSync(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
-const md = ['| row | errno | expectation | result | operations | outside attempts |', '|---|---|---|---|---|---|', ...rows.filter((r) => r.operations !== undefined).map((r) => `| ${r.id} | ${r.errno} | ${r.expect} | ${r.result} | ${r.operations} | ${r.outside_attempts} |`), ...rows.filter((r) => r.id === 'two-projects-concurrent-finalize').map((r) => `| ${r.id} | ${r.errno} | ${r.expect} | ${r.result} | ${r.A.operations + r.B.operations} | ${r.A.violations.length + r.B.violations.length} |`), '', ...controls.map((c) => `- ${c.id}: ${c.result}`)].join('\n');
+const md = ['| row | errno | expectation | result | confinement | outcome | operations | outside attempts |', '|---|---|---|---|---|---|---|---|', ...rows.filter((r) => r.operations !== undefined).map((r) => `| ${r.id} | ${r.errno} | ${r.expect} | ${r.result} | ${r.confinement || '-'} | ${Array.isArray(r.outcome) ? r.outcome.join('; ') : r.outcome || '-'} | ${r.operations} | ${r.outside_attempts} |`), ...rows.filter((r) => r.id === 'two-projects-concurrent-finalize').map((r) => `| ${r.id} | ${r.errno} | ${r.expect} | ${r.result} | - | both certified partial | ${r.A.operations + r.B.operations} | ${r.A.violations.length + r.B.violations.length} |`), '', ...controls.map((c) => `- ${c.id}: ${c.result}`)].join('\n');
 writeFileSync(join(out, 'summary.md'), md + '\n');
-process.stdout.write(`${md}\n\npinned ${sha}${dirty ? ' (DIRTY TREE)' : ''}; failed: ${failed}; receipt: ${join(out, 'receipt.json')}\n`);
+process.stdout.write(`${md}\n\npinned ${receipt.pinned_sha || 'UNRESOLVED (packet fails: no source pin)'} [${provenance}]${dirty ? ' (DIRTY TREE)' : ''}; failed: ${failed}; receipt: ${join(out, 'receipt.json')}\n`);
 process.exitCode = failed ? 1 : 0;

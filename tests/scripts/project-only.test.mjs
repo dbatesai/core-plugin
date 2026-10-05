@@ -491,3 +491,82 @@ test('pickup returns only well-formed values from the unverified pending files: 
     assert.ok(!JSON.stringify(r).match(/instruction|delete|rm -rf/i));
   } finally { p.cleanup(); }
 });
+
+// ---------- explicit retrieval stays inside the folder ----------
+
+test('explicit retrieval: a regular store answers; a store or cache folder that is a link out of the project is refused before any outside access, and refusal is not an empty result', { skip: isWin }, async () => {
+  const { symlinkSync, renameSync } = await import('node:fs');
+  const RC = join(CORE, 'scripts/retrieve-context.mjs');
+  const planted = (base) => { const d = join(base, 'outside-store'); mkdirSync(d); writeFileSync(join(d, 'dc-9-planted.md'), '---\nid: dc-9-planted\ntype: decision\nstatus: active\n---\nSynthetic widget colour is purple.\n'); return d; };
+  for (const run of [(root, a) => confined(root, a), (root, a) => { const r = spawnSync(process.execPath, a, { encoding: 'utf8', cwd: root }); return { ...r, violations: [] }; }]) {
+    // regular store: useful retrieval preserved
+    const ok = project();
+    try {
+      const r = run(ok.root, [RC, ok.root, 'what colour are widgets']);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /dc-1-widgets/);
+      assert.deepEqual(r.violations, []);
+      const empty = run(ok.root, [RC, ok.root, 'zzzqqq nothing matches this']);
+      assert.equal(empty.status, 0, 'a legitimate empty retrieval exits 0');
+    } finally { ok.cleanup(); }
+    // _memories is a link to an outside directory
+    const a = project();
+    try {
+      const out = planted(a.base);
+      rmSync(join(a.root, '_memories'), { recursive: true });
+      symlinkSync(out, join(a.root, '_memories'));
+      const r = run(a.root, [RC, a.root, 'synthetic widget colour']);
+      assert.equal(r.status, 3, 'refused, with its own exit code');
+      assert.match(r.stderr, /refused: store refused/);
+      assert.doesNotMatch(r.stdout, /dc-9-planted/);
+      assert.deepEqual(r.violations, [], 'refused before any outside access was attempted');
+    } finally { a.cleanup(); }
+    // _memories is real, its _lib is a link to an outside directory
+    const b = project();
+    try {
+      const out = join(b.base, 'outside-lib'); mkdirSync(out);
+      symlinkSync(out, join(b.root, '_memories', '_lib'));
+      const r = run(b.root, [RC, b.root, 'what colour are widgets']);
+      assert.equal(r.status, 3);
+      assert.deepEqual(r.violations, []);
+      assert.deepEqual(readdirSync(out), [], 'nothing was written outside');
+    } finally { b.cleanup(); }
+    // a file inside a real _lib is a link out
+    const c = project();
+    try {
+      const target = join(c.base, 'outside-index.json'); writeFileSync(target, '{}');
+      mkdirSync(join(c.root, '_memories', '_lib'));
+      symlinkSync(target, join(c.root, '_memories', '_lib', 'unit-summaries.json'));
+      const r = run(c.root, [RC, c.root, 'what colour are widgets']);
+      assert.equal(r.status, 3);
+      assert.deepEqual(r.violations, []);
+      assert.equal(readFileSync(target, 'utf8'), '{}', 'the outside file was not overwritten');
+    } finally { c.cleanup(); }
+  }
+});
+
+test('after pickup-archive the automatic hooks run again; another harness with pending work keeps them off; the archive keeps the history', async () => {
+  const { projectOnlyHint } = await import('../../plugins/core/skills/core/scripts/project-only.mjs');
+  const p = project();
+  try {
+    const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
+    const startHook = () => spawnSync(process.execPath, [join(CORE, 'hooks/session-start-hook.mjs')], { input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: p.root, source: 'startup', session_id: 'h1' }), encoding: 'utf8', cwd: p.root }).stdout;
+    const normalHook = startHook();
+    po('startup', '--session', 's-1');
+    po('startup', '--session', 'c-1', '--harness', 'codex');
+    assert.equal(projectOnlyHint(p.root), true);
+    const suppressed = startHook();
+    assert.notEqual(suppressed, normalHook, 'while pending, SessionStart answers differently (project-only notice)');
+    assert.equal(po('pickup-archive').archived, true);
+    assert.equal(projectOnlyHint(p.root), true, 'codex still has pending work: hooks stay off');
+    assert.equal(startHook(), suppressed);
+    assert.equal(po('pickup-archive', '--harness', 'codex').archived, true);
+    assert.equal(projectOnlyHint(p.root), false, 'nothing active: the archive alone suppresses nothing');
+    assert.equal(startHook(), normalHook, 'SessionStart is back to its normal output');
+    const kept = readdirSync(join(p.root, '.core', PROJECT_ONLY_DIR, '_archive'));
+    assert.equal(kept.length, 2);
+    assert.ok(kept.every((d) => existsSync(join(p.root, '.core', PROJECT_ONLY_DIR, '_archive', d, 'bootstrap.json'))));
+    assert.equal(po('startup', '--session', 's-2').status, 'ok', 'project-only can start again beside the archive');
+    assert.equal(projectOnlyHint(p.root), true);
+  } finally { p.cleanup(); }
+});

@@ -28,7 +28,8 @@
  *      node project-only.mjs finalize-begin|finalize-certify|finalize-finish --root <dir> --session <id>
  *      node project-only.mjs finalize-record --root <dir> --session <id> --op <op> --status done|skipped|failed
  *      node project-only.mjs pickup|pickup-archive --root <dir> [--harness <h>]   (run from a normal session)
- *      purge and retention answer `unavailable`; anything else is refused.
+ *      purge, retention, process-memory, maintenance, metrics, metrics-export, configure-project and
+ *      memory-view answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -44,9 +45,19 @@ const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._'-]{0,39}$/u;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
 
-/** True when `cwd` carries the project-only marker folder. Disable-only: it never grants anything. */
+export const ARCHIVE_DIR = '_archive';
+
+/**
+ * True when `cwd` holds an active project-only folder for any harness: a real directory under
+ * `.core/_project-only/` with a harness name. Disable-only: it never grants anything. What a normal
+ * session has picked up sits under `_archive/`, which is history and suppresses nothing.
+ */
 export function projectOnlyHint(cwd) {
-  try { return !!cwd && existsSync(join(String(cwd), '.core', PROJECT_ONLY_DIR)); } catch { return false; }
+  try {
+    if (!cwd) return false;
+    return readdirSync(join(String(cwd), '.core', PROJECT_ONLY_DIR), { withFileTypes: true })
+      .some((e) => e.isDirectory() && HARNESS_RE.test(e.name));
+  } catch { return false; }
 }
 
 /** The root for a project-only operation: an existing directory resolved physically, or a refusal. */
@@ -184,9 +195,16 @@ export function captureStatus(ctx) {
   return { status: 'ok', mode: 'project-only', in_project: { state, files: files.length, rows, first: files[0] || null, last: files.at(-1) || null }, outside_history: 'unknown', capture: readPendingManifest(ctx).capture };
 }
 
+const NORMAL = 'is not available in project-only mode; it reads or writes outside the folder. Run it in a normal session';
 const UNAVAILABLE = {
   purge: 'the captured-turn purge is not available in project-only mode yet; run it in a normal session',
   retention: 'retention is not available in project-only mode',
+  'process-memory': `memory processing ${NORMAL}`,
+  maintenance: `housekeeping (index refresh, scorecards) ${NORMAL}`,
+  metrics: `the metrics report ${NORMAL}`,
+  'configure-project': `project configuration ${NORMAL}`,
+  'memory-view': `the memory view ${NORMAL}`,
+  'metrics-export': `the metrics export ${NORMAL}`,
 };
 
 // ---------- /finalize project-only ----------
@@ -300,7 +318,9 @@ export function finalizeFinish(ctx) {
 // authority: the report names what is there, nothing in it is adopted as a completed close, and it
 // never registers the folder or touches the signed envelope. The agent merges the typed fields it
 // wants (an agent name when the signed manifest has none; a capture opt-out, which only restricts)
-// through the normal manifest writer, then archives the folder. Archiving renames, never deletes.
+// through the normal manifest writer, then archives the folder. Archiving renames into
+// `_archive/`, never deletes, and ends this harness's hook suppression; another harness's pending
+// folder keeps its own.
 function pendingChain(ctx) {
   for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
     const st = lstatSync(d);   // ENOENT propagates: nothing pending
@@ -348,9 +368,12 @@ export function pickupArchive(ctx, { now = new Date() } = {}) {
   if (r.status !== 'ok' || !r.pending) return r;
   if (r.unfinished_close) return { status: 'refused', state: 'close-in-progress', session_id: r.unfinished_close, reason: 'a project-only close has begun and not certified; finish or release it first' };
   const stamp = now.toISOString().replace(/[:.]/g, '-');
-  const dest = join(ctx.root, '.core', PROJECT_ONLY_DIR, `${ctx.harness}-picked-up-${stamp}`);
-  writeOwn(pendingDir(ctx), 'picked-up.json', JSON.stringify({ picked_up_at: now.toISOString(), merged: 'by the normal session; nothing here was adopted as completed work' }, null, 2) + '\n');
+  let archive;
+  try { archive = ownDir(ctx, join(ctx.root, '.core', PROJECT_ONLY_DIR, ARCHIVE_DIR)); }
+  catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
+  const dest = join(archive, `${ctx.harness}-${stamp}`);
   if (existsSync(dest)) return { status: 'refused', state: 'destination-exists', reason: dest };
+  writeOwn(pendingDir(ctx), 'picked-up.json', JSON.stringify({ picked_up_at: now.toISOString(), merged: 'by the normal session; nothing here was adopted as completed work' }, null, 2) + '\n');
   renameSync(pendingDir(ctx), dest);
   return { status: 'ok', mode: 'pickup', archived: true, to: dest };
 }
