@@ -293,7 +293,17 @@ jobs:
         shell: bash
         run: node scripts/release/real-home-guard.mjs snapshot "$RUNNER_TEMP/real-home.json"
 
+      # Linux: the suite runs against a disposable, seeded account home whose ~/.core takes no new
+      # entries, after controls that prove the account resolved, a write refused, and the test root writable.
+      - name: Run node test suite (isolated account home)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: node scripts/release/run-suite-isolated.mjs
+
+      # Windows: the write-deny form is measured on one local machine, not on a hosted runner, so this job
+      # runs the plain suite and relies on the real-home snapshot check below until it is measured here.
       - name: Run node test suite
+        if: runner.os == 'Windows'
         shell: bash
         run: node --test tests/scripts/*.test.mjs
 
