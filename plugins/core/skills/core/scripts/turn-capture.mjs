@@ -108,13 +108,15 @@ let gateFailureSaid = false;
 
 export function turnCaptureEnabled({ project, env = process.env, home: homeIn } = {}) {
   turnCaptureGateFailure = null;
-  if (!metricsEnabled({ project, env, home: homeIn })) return false;
+  let home;
+  try { home = homeIn ?? coreHome(); }
+  catch (e) { turnCaptureGateFailure = String(e?.code || 'error'); return false; }   // no account home: OFF
+  if (!metricsEnabled({ project, env, home })) return false;
   const flag = (env.CORE_TURN_CAPTURE || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false;
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
     try {
-      const home = homeIn ?? coreHome();
       const coreDir = join(home, '.core');
       const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
         harness: detectStateHarness(env), coreDir, throwReadErrors: true });

@@ -72,3 +72,36 @@ test('native transcript root and CORE authority are separate parameters', async 
     assert.equal(notFound.status === 'UNAVAILABLE' || notFound.status === 'DISABLED', true, 'swapping the roots finds no transcript');
   } finally { for (const d of [core, native, proj]) rmSync(d, { recursive: true, force: true }); }
 });
+
+test('the account home is read once: an account record that answers differently later changes nothing', () => {
+  const B = fresh('acct-B-'), C = fresh('acct-C-');
+  try {
+    const preload = `import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';let n=0;os.userInfo=()=>({homedir:n++===0?${JSON.stringify(B)}:${JSON.stringify(C)}});syncBuiltinESMExports();`;
+    const r = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), '--input-type=module', '-e', `
+      import {coreHome} from ${JSON.stringify(SCRIPTS + 'trusted-home.mjs')};
+      console.log(JSON.stringify([coreHome(), coreHome(), coreHome()]));`], { encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' }, timeout: 20000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), [B, B, B]);
+  } finally { rmSync(B, { recursive: true, force: true }); rmSync(C, { recursive: true, force: true }); }
+});
+
+test('with nothing passed, CORE authority is the account home and transcripts come from the user home', () => {
+  const B = fresh('acct-B-'), C = fresh('acct-C-'), proj = fresh('acct-proj-');
+  try {
+    mkdirSync(join(B, '.core')); writeFileSync(join(B, '.core', 'projects.json'), JSON.stringify([{ path: proj }]));
+    mkdirSync(join(proj, '_memories'));
+    const preload = `import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';os.userInfo=()=>({homedir:${JSON.stringify(B)}});os.homedir=()=>${JSON.stringify(C)};syncBuiltinESMExports();`;
+    const r = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), '--input-type=module', '-e', `
+      import {mkdirSync, writeFileSync} from 'node:fs';
+      import {join} from 'node:path';
+      import {mapProjectPathToSlug} from ${JSON.stringify(SCRIPTS + 'project-slug.mjs')};
+      import {runClassification} from ${JSON.stringify(SCRIPTS + 'classify-turns.mjs')};
+      const t = join(${JSON.stringify(C)}, '.claude', 'projects', mapProjectPathToSlug(${JSON.stringify(proj)}));
+      mkdirSync(t, { recursive: true });
+      writeFileSync(join(t, 's1.jsonl'), JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' }, sessionId: 's1', timestamp: '2026-10-05T00:00:00Z' }) + '\\n');
+      console.log(JSON.stringify(runClassification({ project: ${JSON.stringify(proj)}, cwd: ${JSON.stringify(proj)}, sessionId: 's1', env: { CORE_HARNESS: 'claude-code' }, today: '2026-10-05' })));`],
+      { encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' }, timeout: 20000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.notEqual(JSON.parse(r.stdout).status, 'UNAVAILABLE', r.stdout);
+  } finally { for (const d of [B, C, proj]) rmSync(d, { recursive: true, force: true }); }
+});
