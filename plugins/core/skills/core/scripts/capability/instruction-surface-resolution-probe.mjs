@@ -118,7 +118,8 @@ export function classifyInstructionSurface(chainStates) {
 }
 
 export async function probe(opts = {}) {
-  const home = opts.home || homedir();
+  // The harness's own files live under the native root: an explicit nativeHome, else an explicit home, else the user's home.
+  const home = opts.nativeHome || opts.home || homedir();
   const cwd = opts.cwd || process.cwd();
   const observed_at = new Date().toISOString();
 

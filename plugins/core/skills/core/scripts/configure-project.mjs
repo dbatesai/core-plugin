@@ -235,7 +235,7 @@ export async function configureProject({
 
   let probeRows = null;
   if (probe) {
-    try { probeRows = await probe({ coreRoot, harness }); }
+    try { probeRows = await probe({ coreRoot, harness, cwd: proj, env: process.env, home: homeIn, nativeHome }); }
     catch (e) { probeRows = { error: e.message }; }
   }
 
@@ -341,10 +341,10 @@ export async function main(argv) {
  * lazily so a probe-side failure can't stop the rest of the report. `runStartup` reads
  * `opts.harness`, so that is the key the harness travels under.
  */
-export async function probeForHarness({ harness: h }, { load = () => import('./capability-probe.mjs') } = {}) {
+export async function probeForHarness({ harness: h, cwd, env, home, nativeHome }, { load = () => import('./capability-probe.mjs') } = {}) {
   try {
     const { runStartup } = await load();
-    return await runStartup({ harness: h });
+    return await runStartup({ harness: h, cwd, env, home, nativeHome });
   } catch (e) { return { error: e.message }; }
 }
 

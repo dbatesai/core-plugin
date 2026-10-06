@@ -105,3 +105,43 @@ test('with nothing passed, CORE authority is the account home and transcripts co
     assert.notEqual(JSON.parse(r.stdout).status, 'UNAVAILABLE', r.stdout);
   } finally { for (const d of [B, C, proj]) rmSync(d, { recursive: true, force: true }); }
 });
+
+test('the startup delegates read the harness\'s own files from nativeHome, and the recorder and connector probe forward the selected context', async () => {
+  const { probe: autoMem } = await import('../../plugins/core/skills/core/scripts/capability/auto-memory-injection-probe.mjs');
+  const { probe: instr } = await import('../../plugins/core/skills/core/scripts/capability/instruction-surface-resolution-probe.mjs');
+  const { probeForHarness } = await import('../../plugins/core/skills/core/scripts/configure-project.mjs');
+  const core = fresh('acct-core-'), native = fresh('acct-native-'), proj = fresh('acct-proj-');
+  try {
+    mkdirSync(join(native, '.claude'), { recursive: true });
+    writeFileSync(join(native, '.claude', 'CLAUDE.md'), 'native instructions\n');
+    const seen = JSON.stringify(await instr({ cwd: proj, home: core, nativeHome: native, env: {} }));
+    assert.ok(seen.includes(native), 'the instruction chain was read under nativeHome');
+    assert.ok(!seen.includes(core), 'the CORE account home was not used for it');
+    const mem = JSON.stringify(await autoMem({ cwd: proj, home: core, nativeHome: native, env: {} }));
+    assert.ok(!mem.includes(core), 'auto-memory does not look under the CORE account home');
+    let got = null;
+    await probeForHarness({ harness: 'claude-code', cwd: proj, env: { A: '1' }, home: core, nativeHome: native }, { load: async () => ({ runStartup: async (o) => { got = o; return { rows: [] }; } }) });
+    assert.deepEqual([got.cwd, got.env.A, got.home, got.nativeHome], [proj, '1', core, native]);
+  } finally { for (const d of [core, native, proj]) rmSync(d, { recursive: true, force: true }); }
+});
+
+test('every account-home default in one process agrees, even if the account record later answers differently', () => {
+  const B = fresh('acct-B-'), C = fresh('acct-C-');
+  try {
+    const preload = `import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';let n=0;os.userInfo=()=>({homedir:n++===0?${JSON.stringify(B)}:${JSON.stringify(C)}});syncBuiltinESMExports();`;
+    const r = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), '--input-type=module', '-e', `
+      import {coreHome, trustedHome, requireTrustedHome} from ${JSON.stringify(SCRIPTS + 'trusted-home.mjs')};
+      import {defaultCoreDir} from ${JSON.stringify(SCRIPTS + 'project-state.mjs')};
+      import {defaultCoreDir as regDir} from ${JSON.stringify(SCRIPTS + 'index-registry.mjs')};
+      import {turnCapturePurgeScope} from ${JSON.stringify(SCRIPTS + 'turn-capture.mjs')};
+      const first = coreHome();
+      const scope = JSON.stringify(turnCapturePurgeScope(${JSON.stringify(B)}, { env: {} }));
+      console.log(JSON.stringify({ first, trusted: trustedHome(), required: requireTrustedHome(), state: defaultCoreDir(), reg: regDir(), scopeHasC: scope.includes(${JSON.stringify(C)}) }));`],
+      { encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' }, timeout: 20000 });
+    assert.equal(r.status, 0, r.stderr);
+    const o = JSON.parse(r.stdout);
+    assert.deepEqual([o.first, o.trusted, o.required], [B, B, B]);
+    assert.deepEqual([o.state, o.reg], [join(B, '.core'), join(B, '.core')]);
+    assert.equal(o.scopeHasC, false, 'purge uses the same account home as the gates');
+  } finally { rmSync(B, { recursive: true, force: true }); rmSync(C, { recursive: true, force: true }); }
+});
