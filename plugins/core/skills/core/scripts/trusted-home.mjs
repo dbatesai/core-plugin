@@ -40,6 +40,18 @@ export function requireTrustedHome({ resolve: resolveHome = trustedHome } = {}) 
   return home;
 }
 
+let memoHome = null;
+/**
+ * The account home every CORE authority default resolves from: once per process, from the OS account
+ * record, never from $HOME. A test or owner seam passes `home` explicitly; nothing in the
+ * environment switches it. Harness-native roots (transcripts, memory, connector config) are a separate
+ * `nativeHome`.
+ */
+export function coreHome() {
+  if (!memoHome) memoHome = requireTrustedHome();
+  return memoHome;
+}
+
 // ---------- workspace identity ----------
 
 /**

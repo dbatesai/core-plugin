@@ -30,6 +30,7 @@ import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 export const DETECTOR_VERSION = '0.2.0';
 
@@ -373,11 +374,15 @@ function walkMd(dir, cb, depth = 0, withPath = false) {
 // Unified runner
 // ============================================================
 
-export function runDetectors({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, env }) {
+export function runDetectors({ project, harness = 'claude-code', cwd, home: homeIn, nativeHome, sessionId, today, env }) {
+  // `home` is CORE authority (default: the OS account home). `nativeHome` is where the harness keeps its own
+  // transcripts; it defaults to the user's home, or to an explicit `home` (the single-root test seam).
+  const home = homeIn ?? coreHome();
+  const nativeRoot = nativeHome ?? homeIn ?? homedir();
   if (!metricsEnabled({ project, env, home })) {
     return { status: 'DISABLED', reason: 'metrics opt-in not set' };
   }
-  const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
+  const t = readTranscript({ harness, cwd: cwd || project, home: nativeRoot, sessionId, env });
   if (!t.available) return { status: 'UNAVAILABLE', reason: 'transcript unavailable' };
   // A file was found, but it's the mtime fallback standing in for a session id that had
   // no transcript of its own — some OTHER session's events. Detector findings written

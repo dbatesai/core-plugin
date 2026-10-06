@@ -46,7 +46,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
-import { trustedHome } from './trusted-home.mjs';
+import { trustedHome, coreHome } from './trusted-home.mjs';
 import { VALID_TYPES, VALID_STATUSES, VALID_EDGE_TYPES, isActiveStatus } from './unit-vocab.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './outcome-vocab.mjs';
@@ -1421,7 +1421,8 @@ export function runPackage(argv, { homeOverride } = {}) {
     else if (args[i] === '--home') { flagsIn.home = args[i + 1]; i += 1; }
     else positional.push(args[i]);
   }
-  const home = flagsIn.home || trustedHome() || homedir();
+  // --home is a test/owner seam; without it the OS account home decides, never $HOME.
+  const home = flagsIn.home || coreHome();
   const coreDir = join(home, '.core');
   if (flagsIn.all && !flagsIn.scratchProject) return { exit: 2, error: '--all requires --scratch-project naming one exported project' };
 

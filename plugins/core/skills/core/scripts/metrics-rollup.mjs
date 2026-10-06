@@ -26,6 +26,7 @@ import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './
 import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { aggregateCalibration } from './calibrate-classifier.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
@@ -99,7 +100,7 @@ function trailingAvg(dedupedDays, today, state, days = 7) {
   return rates.reduce((a, b) => a + b, 0) / rates.length;
 }
 
-export function buildRollup({ project, today, home = homedir(), env }) {
+export function buildRollup({ project, today, home = coreHome(), env }) {
   if (!metricsEnabled({ project, env, home })) {
     return { date: today || todayUTC(), disabled: true, distribution: {}, headline: null, trailing_avg: null, provisional: true, signal: 'metrics disabled (opt-in not set)' };
   }
@@ -193,7 +194,7 @@ export function writeRollup(r) {
 }
 
 /** What the startup readiness pass reads — the pre-computed one-line signal. */
-export function readOrientSignal(project, { home = homedir(), env = process.env } = {}) {
+export function readOrientSignal(project, { home = coreHome(), env = process.env } = {}) {
   const meta = trustedMetricsDir(project, { home, env });
   if (!meta) return null;
   const f = join(meta, 'orient-signal.txt');

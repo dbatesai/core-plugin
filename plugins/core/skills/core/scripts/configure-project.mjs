@@ -42,6 +42,7 @@ import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-
 import { generate as generateHarnessMd } from './generate-harness-md.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { outsideObservationOff } from './restrictive-mode.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 // ── CORE_ROOT (the plugin root) ──────────────────────────────────────────────
 // This script lives at <CORE_ROOT>/skills/core/scripts/configure-project.mjs, so
@@ -217,15 +218,18 @@ export async function planAgentsMd(projectPath, { apply = false } = {}) {
 // ── Assemble the structured report ───────────────────────────────────────────
 export async function configureProject({
   projectPath, coreRoot, harness, apply = false,
-  home = homedir(), today = new Date(), probe = null,
+  home: homeIn, nativeHome, today = new Date(), probe = null,
 } = {}) {
+  // CORE identity from the account home; the harness's connector config from its own root.
+  const home = homeIn ?? coreHome();
+  const nativeRoot = nativeHome ?? homeIn ?? homedir();
   const proj = resolve(projectPath);
   const coreDir = join(home, '.core');
 
   const manifests = checkManifests(coreRoot);
   const store = validateStore(proj, today);
   const identity = detectIdentity(proj, coreDir, harness || detectHarness());
-  const mcp = readConfiguredMcp(proj, harness, home);
+  const mcp = readConfiguredMcp(proj, harness, nativeRoot);
   const connectorMap = readConnectorMap(proj);
   const agentsMd = await planAgentsMd(proj, { apply });
 

@@ -76,6 +76,7 @@ import { evaluateTripwires } from './metrics-tripwires.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { ensureProjectArtifactDir } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -213,7 +214,7 @@ const run = (script, args) => {
 // a crash of the whole health check.
 // ============================================================
 
-export function checkCalibrationPool(project, { home = homedir() } = {}) {
+export function checkCalibrationPool(project, { home = coreHome() } = {}) {
   try {
     const r = readinessReport({ project, home });
     return {
@@ -682,7 +683,7 @@ export function renderReport(out, { workspaceName } = {}) {
 // gathering itself is a plain function so it stays testable/importable).
 // ============================================================
 
-export async function gatherMetrics(cwd, { home = homedir() } = {}) {
+export async function gatherMetrics(cwd, { home = coreHome() } = {}) {
   // THE canonical object. Its top-level structure IS the three-evidence-class
   // taxonomy (mechanics/regression/readiness) plus identity and run
   // metadata — the renderer consumes this exact object and --json emits it
@@ -844,7 +845,7 @@ ${body}
   // Turn-capture evidence-stream state (default-ON) — a
   // mechanics/instrumentation fact. Always rendered: ON shows the disclosure +
   // off-switches; OFF confirms the user's opt-out took effect.
-  mech.turn_capture = turnCaptureStats(cwd);
+  mech.turn_capture = turnCaptureStats(cwd, { home });
 
   // ---- mechanics status: hard evidence only; routine upkeep never demotes
   // it. Scoped to mechanics (mech.status), never an umbrella claim. ----

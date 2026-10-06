@@ -31,6 +31,7 @@ import { stateDir, assertHarnessName } from './project-state.mjs';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
@@ -63,7 +64,7 @@ function resolveStorePaths(target, opts = {}, { forWrite = false } = {}) {
     return { file: projectHistoryPath(opts.project, harness), lock: projectLockPath(opts.project, harness) };
   }
   if (!root) throw new Error('capability-history: target.root is required');
-  const home = opts.home || homedir();
+  const home = opts.home || coreHome();
   const s = stateDir({ root, harness, kind: 'hot', coreDir: join(home, '.core'), forWrite });
   if (!s) return null;
   return { file: join(s.dir, 'capability-history.jsonl'), lock: join(s.dir, 'capability-history.lock') };

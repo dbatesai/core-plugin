@@ -51,7 +51,7 @@ import { resolveStoragePath, prepareStorageDir, metricsEnabled, metricsHistoryFo
 import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, coreHome } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -106,14 +106,15 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 export let turnCaptureGateFailure = null;
 let gateFailureSaid = false;
 
-export function turnCaptureEnabled({ project, env = process.env, home = homedir() } = {}) {
+export function turnCaptureEnabled({ project, env = process.env, home: homeIn } = {}) {
   turnCaptureGateFailure = null;
-  if (!metricsEnabled({ project, env, home })) return false;
+  if (!metricsEnabled({ project, env, home: homeIn })) return false;
   const flag = (env.CORE_TURN_CAPTURE || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false;
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
     try {
+      const home = homeIn ?? coreHome();
       const coreDir = join(home, '.core');
       const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
         harness: detectStateHarness(env), coreDir, throwReadErrors: true });
@@ -468,10 +469,12 @@ function countRows(files) {
  * Cheap census for the /metrics mechanics line: whether the stream is on and
  * how much is captured. Row count is a line count (no per-row parse).
  */
-export function turnCaptureStats(projectDir, { env = process.env } = {}) {
-  const enabled = turnCaptureEnabled({ project: projectDir, env });
+export function turnCaptureStats(projectDir, { env = process.env, home } = {}) {
+  // The selected home reaches the gate and the history lookup, so one report consults one account root.
+  const homeOpt = home ? { home } : {};
+  const enabled = turnCaptureEnabled({ project: projectDir, env, ...homeOpt });
   const files = listTurnCaptureFiles(projectDir);
-  const history = metricsHistoryFolders(projectDir, { env }).map(({ folder }) => {
+  const history = metricsHistoryFolders(projectDir, { env, ...homeOpt }).map(({ folder }) => {
     const found = dateFilesIn(join(folder, TURN_CAPTURE_DIRNAME));
     return { dir: join(folder, TURN_CAPTURE_DIRNAME), days: found.length, rows: countRows(found) };
   });

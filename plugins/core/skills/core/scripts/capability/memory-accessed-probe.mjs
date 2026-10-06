@@ -31,6 +31,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readTranscript } from '../read-transcript.mjs';
 import { projectRootFor, detectStateHarness, readManifest } from '../project-state.mjs';
+import { coreHome } from '../trusted-home.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-accessed';
@@ -105,13 +106,15 @@ function readWorkspaceId(cwd, home) {
 }
 
 export async function probe(opts = {}) {
-  const home = opts.home || homedir();
+  // CORE identity comes from the account home; the transcript from the harness's own root.
+  const home = opts.home || coreHome();
+  const nativeRoot = opts.nativeHome || opts.home || homedir();
   const cwd = opts.cwd || process.cwd();
   const env = opts.env || process.env;
   const harness = opts.harness || 'claude-code';
   const observed_at = new Date().toISOString();
 
-  const t = readTranscript({ harness, cwd, home, override: opts.transcriptPath, sessionId: opts.sessionId, env });
+  const t = readTranscript({ harness, cwd, home: nativeRoot, override: opts.transcriptPath, sessionId: opts.sessionId, env });
   const extraction = t.meta?.codex_tool_extraction;
   const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const coreStorePresent = opts.coreStorePresent != null ? opts.coreStorePresent : coreStorePresentAt(cwd);

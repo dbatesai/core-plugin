@@ -40,6 +40,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { detectStateHarness } from './project-state.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
@@ -588,7 +589,7 @@ export function importLabels({ worksheetFile, metaDir, expectedHarness, minLabel
  * that can't be read, or belongs to an older instrument, counts as not cleared, and the unreadable ones
  * are named.
  */
-export function aggregateCalibration(project, { home = homedir(), env = process.env } = {}) {
+export function aggregateCalibration(project, { home = coreHome(), env = process.env } = {}) {
   const byHarness = {};
   const unreadable = [];
   for (const name of CALIBRATION_HARNESSES) {
@@ -623,7 +624,7 @@ export function aggregateCalibration(project, { home = homedir(), env = process.
  * How close is the calibration pool to the minimum? Useful for the agent to know
  * when to launch the labeling pass.
  */
-export function readinessReport({ project, home = homedir(), env = process.env, harness }) {
+export function readinessReport({ project, home = coreHome(), env = process.env, harness }) {
   const minLabeled = resolveMinLabeled(project);
   let metaDir = null, classifiedDir = null;
   let state = emptyCalibrationState(), turns = [], failure = null;

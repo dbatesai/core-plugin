@@ -37,6 +37,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
 import { metricsHistoryFolders, localClassifiedHistory } from './log-event.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 /**
  * Bump whenever the notice describes something materially new being stored.
@@ -69,7 +70,7 @@ export const NOTICE_TEXT = [
  * written there. A project whose records name an older external folder (an earlier Windows
  * OneDrive redirect to AppData) gets a line saying where the earlier rows are kept.
  */
-export function noticeTextFor(projectDir, { home = homedir(), env = process.env } = {}) {
+export function noticeTextFor(projectDir, { home = coreHome(), env = process.env } = {}) {
   let history = [];
   try { history = metricsHistoryFolders(projectDir, { home, env }).filter((h) => !h.foreign); } catch { /* unknown: base text */ }
   const classified = localClassifiedHistory(projectDir, { home, env });
@@ -83,7 +84,7 @@ export function noticeTextFor(projectDir, { home = homedir(), env = process.env 
   return paragraphs.join('\n\n');
 }
 
-export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {
+export function checkMetricsDisclosure({ projectDir, home = coreHome(), env = process.env } = {}) {
   if (!projectDir) {
     return { ok: false, shown: false, alreadyShown: false, noticeText: null, reason: 'missing-project-dir' };
   }

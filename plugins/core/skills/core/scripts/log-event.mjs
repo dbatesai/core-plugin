@@ -23,7 +23,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { containedPath } from './trusted-home.mjs';
+import { containedPath, coreHome } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
@@ -36,7 +36,7 @@ import { STATE_DIRNAME } from './state-dirname.mjs';
  * not pin storage. Returns the marker path when capture is disabled, null otherwise; the next
  * metrics-init clears it.
  */
-export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = process.env } = {}) {
+export function captureDisabledMarkerPath(projectDir, { home = coreHome(), env = process.env } = {}) {
   if (!projectDir) return null;
   const operationalMetaDir = trustedMetricsDir(projectDir, { home, env });
   for (const candidate of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
@@ -75,13 +75,13 @@ export function prepareStorageDir(projectDir) {
  *
  * @returns {{folder: string, foreign?: boolean}[]}
  */
-export function metricsHistoryFolders(projectDir, { home = homedir(), env = process.env } = {}) {
+export function metricsHistoryFolders(projectDir, { home = coreHome(), env = process.env } = {}) {
   return historyDiscovery(projectDir, { home, env }).folders;
 }
 
 /** Retired classified copies under this project's local key, across both harnesses.
  * Read-only discovery: refuse unsafe parent chains and retain uncertainty for disclosure. */
-export function localClassifiedHistory(projectDir, { home = homedir(), env = process.env } = {}) {
+export function localClassifiedHistory(projectDir, { home = coreHome(), env = process.env } = {}) {
   const folders = [], problems = [];
   try {
     const coreDir = join(home, '.core'), root = projectRootFor(projectDir, { home, coreDir });
@@ -171,7 +171,7 @@ function historyDiscovery(projectDir, { home, env }) {
  *
  * @returns {{what: string, reason: string}[]}
  */
-export function metricsHistoryHeld(projectDir, { home = homedir(), env = process.env } = {}) {
+export function metricsHistoryHeld(projectDir, { home = coreHome(), env = process.env } = {}) {
   const coreDir = join(home, '.core');
   const held = [];
   let root;
@@ -238,7 +238,7 @@ export function todayUTC() {
  * is read-only history. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
  * Creates the directory (stamping new state) — use trustedMetricsDir for a pure read.
  */
-export function operationalMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+export function operationalMetricsDir(projectDir, { home = coreHome(), env = process.env, harness } = {}) {
   const coreDir = join(home, '.core');
   const root = projectRootFor(projectDir, { home, coreDir });
   const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, forWrite: true });
@@ -249,7 +249,7 @@ export function operationalMetricsDir(projectDir, { home = homedir(), env = proc
 
 /** The metrics dir when trustworthy state already exists; null otherwise. Never writes.
  * guardReadParents opts strict consumers into selected-parent checks and visible IO errors. */
-export function trustedMetricsDir(projectDir, { home = homedir(), env = process.env, harness, guardReadParents = false } = {}) {
+export function trustedMetricsDir(projectDir, { home = coreHome(), env = process.env, harness, guardReadParents = false } = {}) {
   try {
     if (guardReadParents) home = realpathSync(home); // Account-root aliases are allowed.
     const coreDir = join(home, '.core');
@@ -314,13 +314,14 @@ function checkMetricsParentChain(anchor, dir) {
  * A failure while reading the project list or manifest → OFF on the default path. The explicit
  * environment opt-in (step 3) is the user's own word and is decided before those reads.
  */
-export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
+export function metricsEnabled({ project, env = process.env, home: homeIn } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
   // Everything below reads the project list and the project's manifest. When one of those reads
   // fails (an unreadable or malformed project list), whether this project opted out is unknown,
   // and unknown is OFF: capture never proceeds on a guess.
-  try { const on = metricsEnabledFromState({ project, env, home, flag }); metricsGateFailure = null; return on; }
+  // No account home to read the project's state from means whether it opted out is unknown, so OFF.
+  try { const home = homeIn ?? coreHome(); const on = metricsEnabledFromState({ project, env, home, flag }); metricsGateFailure = null; return on; }
   catch (e) {
     // OFF, and said once per process on stderr so the failure stays visible: a defect in this path
     // must not look like an ordinary opt-out.

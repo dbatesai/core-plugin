@@ -29,6 +29,7 @@ import { sep, join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { operationalMetricsDir } from './log-event.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 // Typed marker an older scaffold wrote when it could not pin storage, and that capture read to
 // stay off. Nothing writes it now; one left behind by an earlier version is read by
@@ -67,7 +68,7 @@ function clearCaptureDisabledMarkers({ projectDir, operationalMetaDir }) {
  * @param {object} [args.env] - Environment for harness detection.
  * @returns {object} - { ok, storagePath, detection, scaffold_log_line }
  */
-export function initMetrics({ projectDir, home = homedir(), env = process.env }) {
+export function initMetrics({ projectDir, home = coreHome(), env = process.env }) {
   if (!projectDir) {
     return { ok: false, reason: 'missing-required-args' };
   }
