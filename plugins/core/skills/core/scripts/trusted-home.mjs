@@ -20,8 +20,14 @@ import { userInfo } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
 import { resolve, join, dirname, basename, sep, relative, isAbsolute } from 'node:path';
 
+let memoHome = null;
+/** The OS account's home, resolved once per process (a failure is not remembered, so a later call may succeed). */
 export function trustedHome() {
-  try { return userInfo().homedir || null; } catch { return null; }
+  if (memoHome) return memoHome;
+  let home = null;
+  try { home = userInfo().homedir || null; } catch { home = null; }
+  if (home) memoHome = home;
+  return home;
 }
 
 /**
@@ -40,16 +46,14 @@ export function requireTrustedHome({ resolve: resolveHome = trustedHome } = {}) 
   return home;
 }
 
-let memoHome = null;
 /**
  * The account home every CORE authority default resolves from: once per process, from the OS account
- * record, never from $HOME. A test or owner seam passes `home` explicitly; nothing in the
- * environment switches it. Harness-native roots (transcripts, memory, connector config) are a separate
- * `nativeHome`.
+ * record, never from $HOME, and the same value for every caller (trustedHome and requireTrustedHome
+ * share it). A test or owner seam passes `home` explicitly; nothing in the environment switches it.
+ * Harness-native roots (transcripts, memory, connector config) are a separate `nativeHome`.
  */
 export function coreHome() {
-  if (!memoHome) memoHome = requireTrustedHome();
-  return memoHome;
+  return requireTrustedHome();
 }
 
 // ---------- workspace identity ----------
