@@ -289,9 +289,17 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Record the real account ~/.core before the suite
+        shell: bash
+        run: node scripts/release/real-home-guard.mjs snapshot "$RUNNER_TEMP/real-home.json"
+
       - name: Run node test suite
         shell: bash
         run: node --test tests/scripts/*.test.mjs
+
+      - name: The suite must not have written to the real account ~/.core
+        shell: bash
+        run: node scripts/release/real-home-guard.mjs check "$RUNNER_TEMP/real-home.json"
 
   source-package-smoke:
     name: source-package smoke (package built from committed source)
