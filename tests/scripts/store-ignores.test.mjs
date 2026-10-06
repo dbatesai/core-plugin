@@ -318,7 +318,6 @@ test('a .git that cannot be examined is unknown: the cache folder is refused and
 });
 
 test('a later lock generation or round re-included by the user is seen: present files are checked, and re-includes are named as unchecked', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
   const root = project();
   try {
     const all = '_close.lock*\n._close.lock*\n.*.lock*\n.*.tmp-*\n_close-marker.json\n_maintenance-state.json\n_pm-state.json\n_capability-drift-log.md\n';

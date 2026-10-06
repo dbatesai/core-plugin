@@ -21,10 +21,9 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
+import {  existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { containedPath, coreHome } from './trusted-home.mjs';
-import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';

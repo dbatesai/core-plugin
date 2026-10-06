@@ -33,7 +33,6 @@
  */
 
 import { isCliEntry } from './cli-entry.mjs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
 import { metricsHistoryFolders, localClassifiedHistory } from './log-event.mjs';

@@ -695,7 +695,7 @@ test('a purge removes classified rows in the project folder and the local fallba
     const inProject = write();
     writeFileSync(join(coreDir, 'projects.json'), '[]\n');
     const localDir=join(seedLocalMetrics(projectDir,home),'classified');mkdirSync(localDir,{recursive:true});
-    const local=join(localDir,'2026-10-03.jsonl');writeFileSync(local,'{\"user_text\":\"synthetic\"}\n');
+    const local=join(localDir,'2026-10-03.jsonl');writeFileSync(local,'{"user_text":"synthetic"}\n');
     assert.notEqual(inProject, local, 'the two rows are in different places');
     const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
     assert.equal(r.purged, true, r.reason);

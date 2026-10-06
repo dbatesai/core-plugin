@@ -26,7 +26,7 @@
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
 import { sep, join } from 'node:path';
-import { homedir, platform } from 'node:os';
+import {  platform } from 'node:os';
 import { operationalMetricsDir } from './log-event.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 import { coreHome } from './trusted-home.mjs';

@@ -34,7 +34,6 @@ import {
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { todayUTC, operationalMetricsDir, trustedMetricsDir } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';

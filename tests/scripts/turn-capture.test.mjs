@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
 import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
+import { installAccountHome } from '../helpers/account-home.mjs';
 import {
   captureTurnEvidence,
   turnCaptureEnabled,
@@ -31,8 +32,7 @@ process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state;
 // unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
 // redirected for this file's process.
 const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
-process.env.HOME = TEST_HOME;
-process.env.USERPROFILE = TEST_HOME;
+installAccountHome(TEST_HOME);   // CORE resolves the account home from the OS record, not HOME
 process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
 function writeManifestFlags(project, fields) {
   registerFixtureProject(TEST_HOME, project);

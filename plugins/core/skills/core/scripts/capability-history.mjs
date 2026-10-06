@@ -26,7 +26,6 @@ import {
   readFileSync, existsSync, mkdirSync, chmodSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { stateDir, assertHarnessName } from './project-state.mjs';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';

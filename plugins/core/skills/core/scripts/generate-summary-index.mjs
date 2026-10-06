@@ -30,7 +30,7 @@
  *   node generate-summary-index.mjs --store <storePath>
  */
 
-import { readdirSync, statSync, lstatSync, realpathSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, lstatSync, realpathSync,  readFileSync, existsSync } from 'node:fs';
 import { resolve, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';

@@ -37,7 +37,7 @@
  * build on.
  */
 
-import { readFileSync, mkdirSync, renameSync, existsSync, lstatSync, realpathSync, readdirSync } from 'node:fs';
+import { readFileSync,  renameSync, existsSync, lstatSync, realpathSync, readdirSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, dirname, resolve, relative, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -209,7 +209,8 @@ function legacyImportSnapshot(home, path) {
   return { status: 'clean', path, bytes: raw.length, sha256: digest(raw), identity: identity(after), files: parsed.files };
 }
 function sealImportReceipt(receipt) {
-  const { checksum, ...body } = receipt;
+  const body = { ...receipt };
+  delete body.checksum;
   return { ...body, checksum: digest(stableJson(body)) };
 }
 function receiptValid(receipt, root) {
@@ -383,7 +384,8 @@ export function importLegacyProjectCache(projectDir, { apply = false, recover = 
       } else {
         const chosen = plan(current.data);
         if (!chosen.entries.length && chosen.held.length) return importError('selected-evidence-held', chosen);
-        const { files, ...meta } = source;
+        const meta = { ...source };
+        delete meta.files;
         receipt = sealImportReceipt({ schema: 1, import_id: randomUUID(), root: physicalRoot, key_root: root, key_scope: 'exact-lexical-keys', source: meta, phase: 'applied-unverified', coverage: chosen.held.length ? 'held' : 'complete',
           imports: chosen.entries.map(x => ({ path: x.path, stamp_sha256: digest(stableJson(x.stamp)), last_written: x.stamp.last_written, last_written_by: x.stamp.last_written_by })),
           held: chosen.held, retained: chosen.retained, prior_sha256: current.raw === null ? null : digest(current.raw), imported_at: now,

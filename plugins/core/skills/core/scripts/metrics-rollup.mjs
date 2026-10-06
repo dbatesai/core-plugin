@@ -20,7 +20,6 @@
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { todayUTC, operationalMetricsDir, trustedMetricsDir, metricsEnabled } from './log-event.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';

@@ -64,7 +64,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';

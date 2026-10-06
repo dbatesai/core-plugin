@@ -90,7 +90,7 @@
  * 1 fatal failure (including fail-closed producer identity).
  */
 import { lstatSync, readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
-import { join, resolve, basename, dirname, sep } from 'node:path';
+import { join, resolve, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { ensureScratchFor } from './project-artifacts.mjs';

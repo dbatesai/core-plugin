@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename, sep } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { symlinkSync, realpathSync } from 'node:fs';
 // A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.

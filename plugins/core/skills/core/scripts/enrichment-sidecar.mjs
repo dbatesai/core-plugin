@@ -10,10 +10,8 @@
 
 import {
   chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-} from 'node:fs';
+  existsSync, 
+  readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { join, dirname, resolve } from 'node:path';
+import { join,  resolve } from 'node:path';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { registryEnvFor } from './trusted-test-tmp.mjs';

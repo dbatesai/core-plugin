@@ -45,7 +45,6 @@
 
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { homedir } from 'node:os';
 import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
 import { resolveStoragePath, prepareStorageDir, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';

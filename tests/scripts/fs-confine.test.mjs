@@ -2,9 +2,9 @@
 // whether the code imports fs by default or by name, and the outside sentinel's bytes never change.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync,  realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, delimiter } from 'node:path';
+import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 

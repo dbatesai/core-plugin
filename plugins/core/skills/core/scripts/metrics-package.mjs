@@ -37,16 +37,14 @@
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
-  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync, openSync, writeSync, closeSync,
-  constants as fsConstants,
-} from 'node:fs';
+  mkdtempSync, rmSync, chmodSync,  cpSync, openSync, writeSync, closeSync,
+  constants as fsConstants } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
-import { homedir } from 'node:os';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
-import { trustedHome, coreHome } from './trusted-home.mjs';
+import { coreHome } from './trusted-home.mjs';
 import { VALID_TYPES, VALID_STATUSES, VALID_EDGE_TYPES, isActiveStatus } from './unit-vocab.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './outcome-vocab.mjs';

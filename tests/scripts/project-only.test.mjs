@@ -495,7 +495,7 @@ test('pickup returns only well-formed values from the unverified pending files: 
 // ---------- explicit retrieval stays inside the folder ----------
 
 test('explicit retrieval: a regular store answers; a store or cache folder that is a link out of the project is refused before any outside access, and refusal is not an empty result', { skip: isWin }, async () => {
-  const { symlinkSync, renameSync } = await import('node:fs');
+  const { symlinkSync } = await import('node:fs');
   const RC = join(CORE, 'scripts/retrieve-context.mjs');
   const planted = (base) => { const d = join(base, 'outside-store'); mkdirSync(d); writeFileSync(join(d, 'dc-9-planted.md'), '---\nid: dc-9-planted\ntype: decision\nstatus: active\n---\nSynthetic widget colour is purple.\n'); return d; };
   for (const run of [(root, a) => confined(root, a), (root, a) => { const r = spawnSync(process.execPath, a, { encoding: 'utf8', cwd: root }); return { ...r, violations: [] }; }]) {
