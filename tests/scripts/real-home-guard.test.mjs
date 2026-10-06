@@ -58,3 +58,15 @@ test('the global stamp lock an older installed version takes is allowed; a new t
     assert.equal(run('check', snap, '--home', home).status, 1);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test('known limit (Rook\'s falsifier): a delete and an exact restore between the two snapshots is not detected', async () => {
+  const { utimesSync, statSync, readFileSync } = await import('node:fs');
+  const { home, snap } = fixture();
+  try {
+    const f = join(home, '.core', 'projects.json');
+    const st = statSync(f), body = readFileSync(f);
+    run('snapshot', snap, '--home', home);
+    rmSync(f); writeFileSync(f, body); utimesSync(f, st.atime, st.mtime);
+    assert.equal(run('check', snap, '--home', home).status, 0, 'the snapshot records endpoints, so this passes; the protected-home runner is what refuses the write itself');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
