@@ -47,3 +47,14 @@ test('an added file, a changed file, a removed file and a new folder each fail t
     } finally { rmSync(home, { recursive: true, force: true }); }
   }
 });
+
+test('the global stamp lock an older installed version takes is allowed; a new top-level name is not', () => {
+  const { home, snap } = fixture();
+  try {
+    run('snapshot', snap, '--home', home);
+    writeFileSync(join(home, '.core', 'state-cache.lock.g9.done'), '{}');
+    assert.equal(run('check', snap, '--home', home).status, 0);
+    writeFileSync(join(home, '.core', 'topics.md'), 'x');
+    assert.equal(run('check', snap, '--home', home).status, 1);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

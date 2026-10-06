@@ -14,7 +14,10 @@ import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { userInfo } from 'node:os';
 
-export const BASELINE = ['close-pass-last.log'];   // written by close-hook-regression-parent-sha and close-index-path-validation
+// Names this tree's suite is known to write (close-hook-regression-parent-sha and close-index-path-validation
+// write close-pass-last.log), and the global stamp lock that an older installed version's hooks take on a
+// developer machine while the suite runs. Neither is allowed to grow without a line here.
+export const BASELINE = [/^close-pass-last\.log$/, /^\.?state-cache\.lock(\.|$)/];
 
 export function snapshot(home) {
   const root = join(home, '.core');
@@ -24,7 +27,7 @@ export function snapshot(home) {
     try { names = readdirSync(dir); } catch { return; }
     for (const name of names) {
       const r = rel ? `${rel}/${name}` : name;
-      if (r === '.test-tmp' || BASELINE.includes(r)) continue;
+      if (r === '.test-tmp' || BASELINE.some((re) => re.test(r))) continue;
       const p = join(dir, name);
       let st;
       try { st = lstatSync(p); } catch { continue; }
