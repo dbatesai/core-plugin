@@ -70,3 +70,20 @@ test('known limit (Rook\'s falsifier): a delete and an exact restore between the
     assert.equal(run('check', snap, '--home', home).status, 0, 'the snapshot records endpoints, so this passes; the protected-home runner is what refuses the write itself');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test('an unreadable folder is recorded as unreadable, so a change in it is not mistaken for "empty"; the signature includes ctime and inode', async () => {
+  const { chmodSync, statSync } = await import('node:fs');
+  const { snapshot } = await import('../../scripts/release/real-home-guard.mjs');
+  const { home } = fixture();
+  try {
+    const f = join(home, '.core', 'local', 'a.json');
+    writeFileSync(f, '{}');
+    const sig = snapshot(home)['local/a.json'];
+    assert.equal(sig.split(':').length, 4, sig);
+    if (process.platform !== 'win32' && !(process.getuid && process.getuid() === 0)) {
+      chmodSync(join(home, '.core', 'local'), 0o000);
+      try { assert.match(snapshot(home)['local/'], /^unreadable:EACCES/); } finally { chmodSync(join(home, '.core', 'local'), 0o755); }
+    }
+    void statSync;
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

@@ -24,14 +24,14 @@ export function snapshot(home) {
   const out = {};
   const walk = (dir, rel) => {
     let names;
-    try { names = readdirSync(dir); } catch { return; }
+    try { names = readdirSync(dir); } catch (e) { if (rel) out[`${rel}/`] = `unreadable:${e.code}`; else out['.'] = `unreadable:${e.code}`; return; }   // an unreadable folder is a recorded state, never an empty one
     for (const name of names) {
       const r = rel ? `${rel}/${name}` : name;
       if (r === '.test-tmp' || BASELINE.some((re) => re.test(r))) continue;
       const p = join(dir, name);
       let st;
       try { st = lstatSync(p); } catch { continue; }
-      out[r] = st.isDirectory() ? 'dir' : `${st.size}:${Math.trunc(st.mtimeMs)}`;
+      out[r] = st.isDirectory() ? 'dir' : `${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.ino}`;
       if (st.isDirectory() && !st.isSymbolicLink()) walk(p, r);
     }
   };
