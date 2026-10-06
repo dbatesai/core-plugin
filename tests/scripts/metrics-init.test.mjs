@@ -14,10 +14,10 @@ import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-import { accountHomeArgs } from '../helpers/account-home.mjs';
   initMetrics,
   detectStoragePath,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
