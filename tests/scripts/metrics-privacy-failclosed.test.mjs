@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
@@ -18,7 +19,7 @@ const INIT_URL = pathToFileURL(join(SCRIPTS, 'metrics-init.mjs')).href;
 const LOG_EVENT_URL = pathToFileURL(join(SCRIPTS, 'log-event.mjs')).href;
 
 function runChild(runner, env) {
-  return spawnSync(process.execPath, ['--input-type=module', '-e', runner], {
+  return spawnSync(process.execPath, [...(env.HOME ? accountHomeArgs(env.HOME) : []), '--input-type=module', '-e', runner], {
     encoding: 'utf8',
     env: { ...process.env, ...env },
   });

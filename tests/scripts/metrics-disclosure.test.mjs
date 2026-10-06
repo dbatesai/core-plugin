@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { tmpdir, platform } from 'node:os';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION, HISTORY_NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { updateManifest, readManifest, stateDir, writeSignedFile, writePinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 const SCRIPT = join(process.cwd(), 'plugins/core/skills/core/scripts/metrics-disclosure.mjs');
 const HARNESS = 'claude-code';
@@ -130,10 +131,10 @@ test('the notice text names both opt-out mechanisms and where the log lives', ()
 
 test('CLI: first run prints the notice text; second run prints ALREADY-SHOWN', { skip: platform() === 'win32' ? 'shell redirection differs on Windows CI' : false }, () => {
   sandbox(({ home, project }) => {
-    const env = { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: HARNESS };
-    const firstOut = execFileSync('node', [SCRIPT, 'check', project], { encoding: 'utf8', env });
+    const env = { ...process.env, CORE_HARNESS: HARNESS };
+    const firstOut = execFileSync('node', [...accountHomeArgs(home), SCRIPT, 'check', project], { encoding: 'utf8', env });
     assert.equal(firstOut.trim(), NOTICE_TEXT.trim());
-    const secondOut = execFileSync('node', [SCRIPT, 'check', project], { encoding: 'utf8', env });
+    const secondOut = execFileSync('node', [...accountHomeArgs(home), SCRIPT, 'check', project], { encoding: 'utf8', env });
     assert.equal(secondOut.trim(), 'ALREADY-SHOWN');
   });
 });

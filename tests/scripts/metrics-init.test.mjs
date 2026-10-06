@@ -14,6 +14,7 @@ import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+import { accountHomeArgs } from '../helpers/account-home.mjs';
   initMetrics,
   detectStoragePath,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
@@ -45,7 +46,7 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
     process.env.HOME = fakeHome;
     process.env.USERPROFILE = fakeHome; // os.homedir() source on Windows
     try {
-      const result = initMetrics({ projectDir, env: {} });
+      const result = initMetrics({ projectDir, home: fakeHome, env: {} });
 
       assert.equal(result.ok, true);
       assert.equal(result.storagePath, join(projectDir, '_metrics'));
@@ -65,7 +66,7 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
       assert.match(readFileSync(join(result.storagePath, '.gitignore'), 'utf8'), /^\*$/m, 'generated captures stay out of git');
 
       // Idempotent: a re-run still reports ok against existing structure
-      assert.equal(initMetrics({ projectDir, env: {} }).ok, true);
+      assert.equal(initMetrics({ projectDir, home: fakeHome, env: {} }).ok, true);
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
@@ -156,7 +157,7 @@ test('a signed pin naming an AppData folder routes nothing: the scaffold and eve
     writeFileSync(join(old, 'evidence.jsonl'), '{"row":1}\n');
     signedPin(meta, home, old, projectDir);
 
-    const r = initMetrics({ projectDir, env: E });
+    const r = initMetrics({ projectDir, home, env: E });
     assert.equal(r.storagePath, join(projectDir, '_metrics'));
     assert.equal(resolveStoragePath(projectDir), join(projectDir, '_metrics'));
     assert.equal(readFileSync(join(old, 'evidence.jsonl'), 'utf8'), '{"row":1}\n', 'history untouched');
@@ -220,7 +221,7 @@ test('two projects whose records name the same folder both see it as history, an
     signedPin(operationalMetricsDir(B, { home, env: E }), home, shared, B);
     for (const p of [A, B]) {
       assert.deepEqual(metricsHistoryFolders(p, { home, env: E }), [{ folder: shared }]);
-      assert.equal(initMetrics({ projectDir: p, env: E }).storagePath, join(p, '_metrics'));
+      assert.equal(initMetrics({ projectDir: p, home, env: E }).storagePath, join(p, '_metrics'));
       assert.equal(purgeTurnCapture(p, { apply: true, home, env: E }).purged, false);
     }
     assert.equal(readFileSync(join(shared, 'evidence.jsonl'), 'utf8'), '{"who":"unknown"}\n');
@@ -251,7 +252,7 @@ test('a capture-disabled marker an earlier scaffold left is cleared by the next 
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     writeFileSync(join(meta, 'capture-disabled.json'), '{"marker":"core-capture-disabled"}\n');
     assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), false);
-    assert.equal(initMetrics({ projectDir, env: E }).ok, true);
+    assert.equal(initMetrics({ projectDir, home, env: E }).ok, true);
     assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), true);
   });
 });
@@ -275,7 +276,7 @@ test('stats report project and history rows separately; purge empties the projec
     const newRows = join(projectDir, '_metrics', 'turn-capture', '2026-10-03.jsonl');
     writeFileSync(newRows, '{"row":3}\n');
 
-    const stats = turnCaptureStats(projectDir, { env: E });
+    const stats = turnCaptureStats(projectDir, { env: E, home });
     assert.equal(stats.rows, 1, 'project rows only');
     assert.deepEqual(stats.history.map((h) => [h.dir, h.days, h.rows]), [[join(old, 'turn-capture'), 1, 2]]);
 
@@ -323,7 +324,7 @@ test('the status command reports project rows and history rows separately', asyn
     mkdirSync(join(old, 'turn-capture'), { recursive: true });
     writeFileSync(join(old, 'turn-capture', '2026-09-28.jsonl'), '{"row":1}\n{"row":2}\n');
     signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-    const out = spawnSync(process.execPath, [script, projectDir, '--status'], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' } });
+    const out = spawnSync(process.execPath, [...accountHomeArgs(home), script, projectDir, '--status'], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' } });
     const status = JSON.parse(out.stdout);
     assert.equal(status.rows, 0);
     assert.deepEqual(status.history.map((h) => h.rows), [2]);

@@ -9,6 +9,7 @@ import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 import { resolveStoragePath, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { readPinSigned, writePinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS ||= 'claude-code';
@@ -34,7 +35,7 @@ test('wire-in: metrics-init scaffolds project-local storage, and log-event resol
     mkdirSync(old, { recursive: true });
     writePinSigned({ dir: operationalMetricsDir(project, { home, env }), path: old, root: projectRootFor(project, { home, coreDir }), coreDir });
 
-    const r = initMetrics({ projectDir: project, env });
+    const r = initMetrics({ projectDir: project, home, env });
     assert.ok(r.ok, `scaffold ok: ${JSON.stringify(r)}`);
     assert.equal(r.storagePath, join(project, '_metrics'));
     assert.ok(existsSync(r.storagePath), 'storage root scaffolded');
@@ -63,8 +64,8 @@ test('wire-in: metrics-init is idempotent (second run leaves the storage path st
     process.env.HOME = home;
     process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
     assert.equal(homedir(), home);
-    const r1 = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
-    const r2 = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
+    const r1 = initMetrics({ projectDir: project, home, env: { CORE_HARNESS: 'claude-code' } });
+    const r2 = initMetrics({ projectDir: project, home, env: { CORE_HARNESS: 'claude-code' } });
     assert.ok(r1.ok && r2.ok);
     assert.equal(r1.storagePath, r2.storagePath, 'storage path stable across runs');
   } finally {
@@ -88,7 +89,7 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
   const link = join(linkDir, 'metrics-init.mjs');
   try {
     symlinkSync(METRICS_INIT, link);
-    const out = execFileSync('node', [link, project], {
+    const out = execFileSync('node', [...accountHomeArgs(home), link, project], {
       env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' }, // USERPROFILE: Windows homedir()
       encoding: 'utf8',
     });
