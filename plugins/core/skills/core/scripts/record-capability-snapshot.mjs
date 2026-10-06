@@ -66,7 +66,7 @@ export async function recordSnapshot(opts = {}) {
   const sessionId = resolveSessionId(opts);
 
   // The startup probe already ran this session: its saved result is recorded, not a second probe.
-  const startup = opts.from ? JSON.parse(readFileSync(opts.from, 'utf8')) : await runStartup({ harness, cwd, env: opts.env, home: opts.home, nativeHome: opts.nativeHome });
+  const startup = opts.from ? JSON.parse(readFileSync(opts.from, 'utf8')) : await (opts._runStartup || runStartup)({ harness, cwd, env: opts.env, home: opts.home, nativeHome: opts.nativeHome });
   if (opts.from) {
     // A saved result is recorded only if it is a startup probe for the harness whose history it goes
     // into, and an explicit --harness that names another harness is a conflict, not a choice.

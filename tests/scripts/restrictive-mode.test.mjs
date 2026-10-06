@@ -90,3 +90,15 @@ test('a saved probe goes only into the history of its own harness, with real row
     assert.equal(r.appended, 1, JSON.stringify(r));
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
+
+test('the snapshot recorder hands the selected cwd, env, account home and native root to the startup probe', async () => {
+  const f = fixture({ projectOnly: false });
+  try {
+    registerProject(join(f.home, '.core'), f.root);
+    let got = null;
+    const env = { CORE_HARNESS: 'claude-code', MARK: 'x' };
+    await recordSnapshot({ cwd: f.root, root: f.root, harness: 'claude-code', home: f.home, nativeHome: join(f.base, 'native'), env,
+      _runStartup: async (o) => { got = o; return { harness: 'claude-code', mode: 'startup', complete: true, rows: [{ capability_id: 'x', identity_status: 'UNKNOWN' }], summary: {} }; } });
+    assert.deepEqual([got.cwd, got.env.MARK, got.home, got.nativeHome], [f.root, 'x', f.home, join(f.base, 'native')]);
+  } finally { rmSync(f.base, { recursive: true, force: true }); }
+});
