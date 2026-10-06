@@ -12,7 +12,8 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { localStateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
+import { trustedHome } from '../../plugins/core/skills/core/scripts/trusted-home.mjs';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -52,7 +53,7 @@ export function removeLocalStateOnExit(project) {
 }
 
 export function trustedTestTmpRoot() {
-  const dir = join(homedir(), '.core', '.test-tmp');
+  const dir = join(trustedHome(), '.core', '.test-tmp');   // the account record: that is the root CORE trusts
   mkdirSync(dir, { recursive: true });
   return dir;
 }
