@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { trustedHome } from '../../plugins/core/skills/core/scripts/trusted-home.mjs';
+const homedir = () => trustedHome();   // the account record, which is what CORE resolves
 import { resolveIndexPath } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 
 const DEFAULT = join(homedir(), '.core', 'projects.json');

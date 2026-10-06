@@ -17,7 +17,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, chmodSync, rmSync, 
 import { spawnSync } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
@@ -61,7 +61,10 @@ try {
   if (ok.stdout.trim() !== 'OK') { fail(`control 3: the test root inside it refused a write (${ok.stderr.trim().slice(0, 120)})`); process.exit(1); }
   process.stdout.write(`isolated suite: controls passed (account ${home}; write refused with ${code})\n`);
 
-  const run = spawnSync(process.execPath, ['--import', PRELOAD, '--test', ...files], { cwd: ROOT, stdio: 'inherit', env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home } });
+  // NODE_OPTIONS carries the preload into every node process a test spawns (hooks, CLIs), not just the test files.
+  const preloadUrl = pathToFileURL(PRELOAD).href;
+  const run = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit',
+    env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${preloadUrl}`.trim() } });
   restore(); restore = () => {};
   const after = readdirSync(core).sort();
   if (JSON.stringify(after) !== JSON.stringify(seed)) fail(`the suite left new entries in the protected ~/.core: ${after.filter((n) => !seed.includes(n)).join(', ')}`);
