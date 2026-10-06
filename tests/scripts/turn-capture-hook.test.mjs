@@ -182,7 +182,7 @@ test('every metrics-on invocation stamps a turn_capture status on its receipt', 
 test('DEFAULT-ON through the real hook: a clean environment still captures', () => {
   const store = tempStore();
   const env = { ...process.env };
-  for (const k of Object.keys(env)) if (k.startsWith('CORE_')) delete env[k];
+  for (const k of Object.keys(env)) if (k.startsWith('CORE_') && k !== 'CORE_TEST_ACCOUNT_HOME') delete env[k];   // the suite runner's account home is not a CORE tuning switch
   env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
   env.CORE_CLOSE_INDEX = registryEnvFor(store).CORE_CLOSE_INDEX; // registration is a trust input, not a CORE_ tuning switch
   execFileSync('node', [HOOK], {
