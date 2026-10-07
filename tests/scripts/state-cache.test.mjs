@@ -261,7 +261,7 @@ test("race: 40 processes preparing the same fresh cache folder all succeed, over
     try {
       const code = `import { ensureLibDir } from ${JSON.stringify(ENSURE)}; console.log(ensureLibDir(${JSON.stringify(project)}));`;
       const procs = await Promise.all(Array.from({ length: 40 }, () => spawnAsync(['--input-type=module', '-e', code])));
-      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().slice(0, 300)}`);
+      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().split('\n').filter((l) => /Error|refused/.test(l)).join(' | ').slice(0, 500)}`);
       const ignore = readFileSync(join(project, '_memories', '_lib', '.gitignore'), 'utf8');
       assert.ok(ignore.trimEnd().endsWith('*'), `round ${round}: the ignore file is whole`);
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -276,7 +276,7 @@ test("race: 40 processes preparing the same fresh metrics folder all succeed, ov
     try {
       const code = `import { prepareStorageDir } from ${JSON.stringify(LOG)}; console.log(prepareStorageDir(${JSON.stringify(project)}));`;
       const procs = await Promise.all(Array.from({ length: 40 }, () => spawnAsync(['--input-type=module', '-e', code])));
-      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().slice(0, 300)}`);
+      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().split('\n').filter((l) => /Error|refused/.test(l)).join(' | ').slice(0, 500)}`);
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
 });

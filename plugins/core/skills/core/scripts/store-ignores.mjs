@@ -8,7 +8,7 @@
  * names are returned as a problem, so the gap is reported rather than hidden.
  * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md, curated gold sets) is never matched.
  */
-import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { STATE_DIRNAME } from './state-dirname.mjs';
@@ -87,19 +87,18 @@ export function ensureLibDir(projectRoot) {
   let st = null;
   try { st = lstatSync(ignore); } catch (e) { if (e.code !== 'ENOENT') refuse('cache-ignore-unsafe', `ignore file could not be examined (${e.code})`); }
   if (!st) {
-    try { writeFileSync(ignore, HEADER + '*\n', { flag: 'wx', mode: 0o600 }); }
-    catch (e) { if (e.code !== 'EEXIST') throw e; }   // a concurrent writer created it first: judge theirs below
+    // Written whole under a name _memories already ignores, then renamed into place: a concurrent process never finds the
+    // ignore file half-written, and nothing is ever written into _lib before its ignore file exists. Racing writers put down
+    // identical bytes, and a rename replaces a link instead of following it.
+    const tmp = join(projectRoot, '_memories', `.lib-ignore.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
+    writeFileSync(tmp, HEADER + '*\n', { flag: 'wx', mode: 0o600 });
+    try { renameSync(tmp, ignore); }
+    catch (e) { try { unlinkSync(tmp); } catch { /* already gone */ } throw e; }
     st = lstatSync(ignore);
   }
   if (st) {
     if (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1) refuse('cache-ignore-unsafe', 'its ignore file is a link, a second name or not a file');
-    // A racing writer may have created the file but not yet written it: look again briefly before judging it.
-    let rules;
-    for (let i = 0; ; i++) {
-      rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-      if (rules.at(-1) === '*' || i >= 10) break;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3);
-    }
+    const rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     if (rules.at(-1) !== '*' || rules.some((r) => r.startsWith('!'))) refuse('cache-ignore-unsafe', 'its ignore file does not end in * or re-includes a file');
   }
   const repo = ownRepository(projectRoot);
