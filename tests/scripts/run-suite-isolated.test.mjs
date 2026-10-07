@@ -52,9 +52,32 @@ test('restoreProblem: success is null; a nonzero exit, a spawn that never starte
 
 test('the runner reads the restore result at both call sites and keeps the primary exit status', () => {
   const src = readFileSync(RUNNER, 'utf8');
-  assert.match(src, /restoreProblem\(spawnSync\('icacls'/);
+  assert.match(src, /denyWithCompensation\(spawnSync, dir, account, rights\)/);
+  assert.match(readFileSync(new URL('../../scripts/release/restore-result.mjs', import.meta.url), 'utf8'), /restoreProblem\(run\('icacls', \[dir, '\/remove:d'/);
   assert.match(src, /const stuck = restore\(\);\s*restore = \(\) => null;\s*if \(stuck\) fail\(stuck\)/);
   assert.match(src, /const left = restore\(\);\s*if \(left\) fail\(left\)/);
   assert.match(src, /process\.exitCode = process\.exitCode \|\| 1/);
   assert.match(src, /was left behind/);
+});
+
+// A deny that was applied before its own command reported failure must still be removed, without hiding the setup error.
+import { denyWithCompensation } from '../../scripts/release/restore-result.mjs';
+
+test('denyWithCompensation: a failed deny still attempts the removal and keeps the setup error; a failed removal is named beside it', () => {
+  const calls = [];
+  const fake = (deny, remove) => (cmd, args) => { calls.push(args[1]); return args[1] === '/deny' ? deny : remove; };
+  assert.throws(() => denyWithCompensation(fake({ status: 5, stderr: 'Access is denied.' }, { status: 0 }), 'D', 'u', '(WD)'),
+    (e) => /deny failed: Access is denied\./.test(e.message) && !/compensating/.test(e.message));
+  assert.deepEqual(calls, ['/deny', '/remove:d'], 'the removal was attempted after the failed deny');
+  assert.throws(() => denyWithCompensation(fake({ status: null, error: new Error('spawn icacls ENOENT') }, { status: 5, stderr: 'nope' }), 'D', 'u', '(WD)'),
+    (e) => /ENOENT/.test(e.message) && /compensating removal also failed: .*exit 5: nope/.test(e.message));
+});
+
+test('denyWithCompensation: on success the removal is not run until the returned closure is called, and it reports its own result', () => {
+  const calls = [];
+  const run = (cmd, args) => { calls.push(args[1]); return { status: args[1] === '/deny' ? 0 : 5, stderr: 'late' }; };
+  const undo = denyWithCompensation(run, 'D', 'u', '(WD)');
+  assert.deepEqual(calls, ['/deny']);
+  assert.match(undo(), /exit 5: late/);
+  assert.deepEqual(calls, ['/deny', '/remove:d']);
 });

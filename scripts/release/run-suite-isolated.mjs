@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { restoreProblem } from './restore-result.mjs';
+import { denyWithCompensation } from './restore-result.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
@@ -32,9 +32,7 @@ function protect(dir) {
   // Folder-only deny (no inheritance): new entries directly in ~/.core are refused; the writable test root below it is not.
   const account = userInfo().username;
   const rights = '(WD,AD,WEA,WA,DC)';
-  const r = spawnSync('icacls', [dir, '/deny', `${account}:${rights}`], { encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(`icacls deny failed: ${r.stderr || r.stdout}`);
-  return () => restoreProblem(spawnSync('icacls', [dir, '/remove:d', account], { encoding: 'utf8' }));
+  return denyWithCompensation(spawnSync, dir, account, rights);
 }
 
 const probe = (home, code) => spawnSync(process.execPath, ['--import', PRELOAD_URL, '--input-type=module', '-e', code],
