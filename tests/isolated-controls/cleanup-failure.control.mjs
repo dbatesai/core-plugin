@@ -4,10 +4,11 @@
 import { test } from 'node:test';
 import { renameSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
+import { isRunnerHome } from '../helpers/disposable-home.mjs';
 
 test('make the runner clean up badly, then fail', () => {
   const home = process.env.CORE_TEST_ACCOUNT_HOME || '';
-  if (!/core-suite-home-/.test(home)) throw new Error(`refusing to run outside the runner's disposable home: ${home || '(none)'}`);
+  if (!isRunnerHome(home)) throw new Error(`refusing to run outside the runner's disposable home: ${home || '(none)'}`);
   renameSync(join(home, '.core'), join(home, '.core-moved'));
   mkdirSync(join(home, 'locked'));
   writeFileSync(join(home, 'locked', 'f'), 'x');

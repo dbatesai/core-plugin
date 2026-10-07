@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { isRunnerHome } from '../helpers/disposable-home.mjs';
 import { fileURLToPath } from 'node:url';
 
 const RUNNER = fileURLToPath(new URL('../../scripts/release/run-suite-isolated.mjs', import.meta.url));
@@ -116,17 +117,45 @@ test('oneLine and restoreProblem keep a multi-line spawn error on one line', () 
 test('the runner process reports a failed restore and a failed removal, names the leftover home, and exits nonzero when the suite fails', { skip }, () => {
   const r = run(FIX('cleanup-failure'));
   const err = r.stderr;
+  const named = /^isolated suite: the temporary home (\S+) was left behind \(.*\)$/m.exec(err);   // `.` stops at a newline: the whole message is on one line
+  let cleanupProblem = null;
   try {
     assert.notEqual(r.status, 0, 'the suite failure is not hidden');
-    assert.match(err, /isolated suite: chmod .*\.core failed \(/, 'the failed restore is named');
-    const left = /isolated suite: the temporary home (\S+) was left behind \(/.exec(err);
-    assert.ok(left, `the leftover home is named (stderr: ${err.slice(-600)})`);
-    assert.match(left[1], /core-suite-home-/);
-    for (const l of err.split('\n').filter((x) => x.startsWith('isolated suite:'))) assert.ok(l.length > 0);
+    assert.match(err, /^isolated suite: chmod \S+\.core failed \(.*\)$/m, 'the failed restore is named, on one line');
+    assert.match(err, /^isolated suite: the protected ~\/\.core could not be read after the run \(ENOENT\)$/m, 'the unreadable inventory is reported, not thrown');
+    assert.ok(named, `the leftover home is named (stderr: ${err.slice(-600)})`);
+    assert.doesNotMatch(err, /Uncaught|at (async )?(Object\.)?readdirSync/, 'no uncaught exception from the runner');
     assert.match(r.stdout, /controls passed/);
   } finally {
-    const left = /the temporary home (\S+) was left behind/.exec(err);
-    if (left) { for (const d of ['locked', '.core-moved']) { try { chmodSync(join(left[1], d), 0o700); } catch { /* already gone */ } }
-      try { rmSync(left[1], { recursive: true, force: true }); } catch { /* best effort: the home is under the system temp folder */ } }
+    // Only the folder the runner itself created may be removed, and a failed or refused cleanup is reported, never dropped.
+    if (named) {
+      if (!isRunnerHome(named[1])) cleanupProblem = `refused to remove ${named[1]}: not the runner's disposable home`;
+      else {
+        for (const d of ['locked', '.core-moved']) { try { chmodSync(join(named[1], d), 0o700); } catch (e) { if (e.code !== 'ENOENT') cleanupProblem = `could not unlock ${d}: ${e.code}`; } }
+        try { rmSync(named[1], { recursive: true }); } catch (e) { cleanupProblem = `could not remove ${named[1]}: ${e.code}`; }
+      }
+    }
   }
+  assert.equal(cleanupProblem, null, 'the test left nothing behind');
+});
+
+// The test that removes a leftover home trusts only a folder the runner itself would have made.
+import { mkdtempSync as mk, mkdirSync as mkd, symlinkSync as sym, writeFileSync as wf } from 'node:fs';
+import { tmpdir } from 'node:os';
+
+test('isRunnerHome accepts a runner-shaped folder in the temp root and refuses lookalikes', () => {
+  const real = mk(join(tmpdir(), 'core-suite-home-'));
+  const elsewhere = mk(join(tmpdir(), 'elsewhere-'));
+  try {
+    assert.equal(isRunnerHome(real), true);
+    assert.equal(isRunnerHome(join(tmpdir(), 'core-suite-home-short')), false, 'a missing folder');
+    const lookalike = join(elsewhere, 'core-suite-home-abc123'); mkd(lookalike);
+    assert.equal(isRunnerHome(lookalike), false, 'right name, wrong parent');
+    const link = join(tmpdir(), `core-suite-home-L${String(process.pid).slice(-5).padStart(5, '0')}`); sym(elsewhere, link);
+    try { assert.equal(isRunnerHome(link), false, 'a link with a matching name'); } finally { rmSync(link, { force: true }); }
+    const file = join(tmpdir(), `core-suite-home-F${String(process.pid).slice(-5).padStart(5, '0')}`); wf(file, 'x');
+    try { assert.equal(isRunnerHome(file), false, 'a file with a matching name'); } finally { rmSync(file, { force: true }); }
+    assert.equal(isRunnerHome(undefined), false);
+    assert.equal(isRunnerHome('/'), false);
+  } finally { rmSync(real, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
 });

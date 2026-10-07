@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { denyWithCompensation, reportFailure, cleanupTempHome } from './restore-result.mjs';
+import { denyWithCompensation, reportFailure, cleanupTempHome, oneLine } from './restore-result.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
@@ -68,11 +68,12 @@ try {
   // NODE_OPTIONS carries the preload into every node process a test spawns (hooks, CLIs), not just the test files.
     const run = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit',
     env: { ...inherited, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${PRELOAD_URL}`.trim() } });
+  if (run.status !== 0) process.exitCode = run.status || 1;   // assigned first: nothing below can lose the suite's own result
   const stuck = restore(); restore = () => null;
   if (stuck) fail(stuck);
-  const after = readdirSync(core).sort();
-  if (JSON.stringify(after) !== JSON.stringify(seed)) fail(`the suite left new entries in the protected ~/.core: ${after.filter((n) => !seed.includes(n)).join(', ')}`);
-  if (run.status !== 0) process.exitCode = run.status || 1;
+  let after = null;
+  try { after = readdirSync(core).sort(); } catch (e) { fail(`the protected ~/.core could not be read after the run (${oneLine(e.code || e.message)})`); }
+  if (after && JSON.stringify(after) !== JSON.stringify(seed)) fail(`the suite left new entries in the protected ~/.core: ${after.filter((n) => !seed.includes(n)).join(', ')}`);
 } catch (e) {
   if (e !== STOP) throw e;
 } finally {
