@@ -218,7 +218,7 @@ test("race: 40 concurrent processes each stamping a distinct file all survive â€
     const N = 40;
     const code = (i) => [
       `import { stampFile } from ${JSON.stringify(STATE_CACHE_SCRIPT)};`,
-      `console.log(JSON.stringify(stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)} })));`,
+      `console.log(JSON.stringify(stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)}, lock: { retries: 400 } })));`,   // a generous wait: this proves nothing is lost, not how long a stamp may wait
     ].join('\n');
 
     const procs = await Promise.all(
@@ -323,5 +323,28 @@ test("publishWhole: a failed rename is absorbed when the destination exists and 
     const tmp3 = join(root, 'tmp3'); writeFileSync(tmp3, 'ok');
     publishWhole(tmp3, dest);                                                           // the normal path still publishes
     assert.equal(readFileSync(dest, 'utf8'), 'ok');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// The default wait for the cache lock is short on purpose; a stamp that runs out of it must say so, never report success, and leave the cache alone.
+test("a stamp that cannot take the cache lock in time returns stamped:false (LOCK_HELD) and changes nothing; it lands once the lock is free", async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { STAMP_LOCK_BUDGET } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  assert.deepEqual(STAMP_LOCK_BUDGET, { retries: 20, retryDelayMs: 50 }, 'the shipped default is unchanged');
+  const { root, project, cachePath } = setup();
+  try {
+    const lockPath = join(dirname(cachePath), '.state-cache.lock');
+    const held = acquireFileLock(lockPath);
+    assert.equal(held.ok, true);
+    const t0 = Date.now();
+    const r = stampFile(project, '/a.md', hashText('a'), 'lock-test', { now: '2026-07-22T00:00:00Z', lock: { retries: 2, retryDelayMs: 1 } });
+    assert.ok(Date.now() - t0 < 400, 'the caller\'s wait was used, not the one-second default');
+    assert.equal(r.stamped, false);
+    assert.equal(r.reason, 'LOCK_HELD');
+    assert.equal(r.recovery, 'recovery-required');
+    assert.equal(existsSync(cachePath), false, 'a refused stamp writes no cache');
+    releaseFileLock(lockPath, held.nonce);
+    assert.equal(stampFile(project, '/a.md', hashText('a'), 'lock-test', { now: '2026-07-22T00:00:00Z' }).stamped, true);
+    assert.ok(readProjectCache(project).files['/a.md']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

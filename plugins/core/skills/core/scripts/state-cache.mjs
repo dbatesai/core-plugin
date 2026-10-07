@@ -451,6 +451,10 @@ export function quarantineCache(path, now = nowIso()) {
   try { renameSync(path, dest); return dest; } catch { return null; }
 }
 
+// The stamp's wait for the cache lock: about one second in all. A stamp that cannot take the lock in that time
+// returns stamped:false (attribution-unknown, LOCK_HELD); it never reports success.
+export const STAMP_LOCK_BUDGET = { retries: 20, retryDelayMs: 50 };
+
 /**
  * stampFiles — record one or more file writes as CORE's own authorship, in
  * the project-local cache. It never prunes or locks a residual global cache.
@@ -479,11 +483,11 @@ export function quarantineCache(path, now = nowIso()) {
  *   (whole-file or domain-specific, caller's choice) recorded as
  *   `last_hash`; `extra` merges additional fields into the stamp (e.g.
  *   `outside_hash` for a marker-delimited-block classifier).
- * @param {{now?: string}} [opts]
+ * @param {{now?: string, lock?: {retries?: number, retryDelayMs?: number}}} [opts]  `lock` overrides the default wait for the cache lock.
  * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string,
  *   primaryError?: object, lockReleaseFailures?: object[], lockRecovery?: object}}
  */
-export function stampFiles(projectDir, entries, { now } = {}) {
+export function stampFiles(projectDir, entries, { now, lock } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return { stamped: true };
   const ts = now || nowIso();
   const cachePath = projectCachePath(projectDir);
@@ -551,7 +555,7 @@ export function stampFiles(projectDir, entries, { now } = {}) {
       // The checked-release helper must receive the actual stamp outcome so
       // cleanup failure cannot turn a completed stamp into a failed stamp.
       return stampOutcome;
-    }, { retries: 20, retryDelayMs: 50 });
+    }, { ...STAMP_LOCK_BUDGET, ...lock });
     // The callback's refusal is the stamp's outcome, not a success.
     if (lockResult && lockResult.stamped === false) stampOutcome = lockResult;
   } catch (e) {
@@ -598,6 +602,6 @@ export function stampRecoveryMessage(outcome) {
 
 /** Convenience single-file wrapper around stampFiles. Returns the same
  *  truthful outcome. */
-export function stampFile(projectDir, path, hash, lastWrittenBy, { now, extra } = {}) {
-  return stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now });
+export function stampFile(projectDir, path, hash, lastWrittenBy, { now, extra, lock } = {}) {
+  return stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now, lock });
 }
