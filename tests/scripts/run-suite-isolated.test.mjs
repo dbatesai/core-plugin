@@ -3,7 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, chmodSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RUNNER = fileURLToPath(new URL('../../scripts/release/run-suite-isolated.mjs', import.meta.url));
@@ -108,4 +109,24 @@ test('oneLine and restoreProblem keep a multi-line spawn error on one line', () 
   assert.equal(oneLine('a\r\nb\u0007c'), 'a b c');
   assert.doesNotMatch(restoreProblem({ status: 5, stderr: 'Access\nis denied\n' }), /\n/);
   assert.doesNotMatch(restoreProblem({ status: null, error: new Error('x\ny') }), /\n/);
+});
+
+// The runner process itself, with its cleanup made to fail twice and the suite failing: both failures are named on one line
+// each, the leftover home is named, and the run still exits nonzero.
+test('the runner process reports a failed restore and a failed removal, names the leftover home, and exits nonzero when the suite fails', { skip }, () => {
+  const r = run(FIX('cleanup-failure'));
+  const err = r.stderr;
+  try {
+    assert.notEqual(r.status, 0, 'the suite failure is not hidden');
+    assert.match(err, /isolated suite: chmod .*\.core failed \(/, 'the failed restore is named');
+    const left = /isolated suite: the temporary home (\S+) was left behind \(/.exec(err);
+    assert.ok(left, `the leftover home is named (stderr: ${err.slice(-600)})`);
+    assert.match(left[1], /core-suite-home-/);
+    for (const l of err.split('\n').filter((x) => x.startsWith('isolated suite:'))) assert.ok(l.length > 0);
+    assert.match(r.stdout, /controls passed/);
+  } finally {
+    const left = /the temporary home (\S+) was left behind/.exec(err);
+    if (left) { for (const d of ['locked', '.core-moved']) { try { chmodSync(join(left[1], d), 0o700); } catch { /* already gone */ } }
+      try { rmSync(left[1], { recursive: true, force: true }); } catch { /* best effort: the home is under the system temp folder */ } }
+  }
 });
