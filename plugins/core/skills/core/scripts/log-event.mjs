@@ -27,7 +27,7 @@ import { containedPath, coreHome } from './trusted-home.mjs';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
-import { ensureStoreIgnores, folderChain, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
+import { ensureStoreIgnores, folderChain, makeRealDir, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
 import { STATE_DIRNAME } from './state-dirname.mjs';
 
 /**
@@ -57,7 +57,7 @@ export function resolveStoragePath(projectDir) {
 export function prepareStorageDir(projectDir) {
   const base = resolveStoragePath(projectDir);
   const chain = folderChain(projectDir, '_metrics');
-  if (chain === 'absent') mkdirSync(base);
+  if (chain === 'absent') makeRealDir(projectDir, '_metrics');
   // A linked or unreadable `_metrics` comes back as a problem here, before any lock or data is written.
   const problems = ensureStoreIgnores(projectDir, { families: [METRICS_IGNORE], verify: false });
   if (problems.length) throw Object.assign(new Error(`not stored: ${problems.join('; ')}`), { code: 'STORAGE_UNSAFE' });
@@ -432,12 +432,12 @@ export function logEvent(projectDir, filename, event, { today, now } = {}) {
   // A linked folder on the way, or an ignore file that couldn't be made, means nothing is appended.
   const chain = folderChain(projectDir, '_sessions');
   if (chain !== 'real' && chain !== 'absent') { outcome.reason = 'sessions-folder-unsafe'; return outcome; }
-  try { if (chain === 'absent') mkdirSync(join(projectDir, '_sessions')); }
+  try { if (chain === 'absent') makeRealDir(projectDir, '_sessions'); }
   catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
   if (ensureStoreIgnores(projectDir, { families: [SESSIONS_IGNORE], verify: false }).length) { outcome.reason = 'ignore-policy-not-established'; return outcome; }
   const dated = folderChain(projectDir, `_sessions/${date}`);
   if (dated !== 'real' && dated !== 'absent') { outcome.reason = 'sessions-folder-unsafe'; return outcome; }
-  try { if (dated === 'absent') mkdirSync(sessionDir); }
+  try { if (dated === 'absent') makeRealDir(projectDir, `_sessions/${date}`); }
   catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };

@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve, delimiter } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -266,4 +266,35 @@ test("race: 40 processes preparing the same fresh cache folder all succeed, over
       assert.ok(ignore.trimEnd().endsWith('*'), `round ${round}: the ignore file is whole`);
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+});
+
+// Same race for the metrics folder: 40 processes preparing a fresh project's `_metrics/` at once.
+test("race: 40 processes preparing the same fresh metrics folder all succeed, over repeated rounds", async () => {
+  const LOG = new URL('../../plugins/core/skills/core/scripts/log-event.mjs', import.meta.url).href;
+  for (let round = 0; round < 12; round++) {
+    const { root, project } = setup();
+    try {
+      const code = `import { prepareStorageDir } from ${JSON.stringify(LOG)}; console.log(prepareStorageDir(${JSON.stringify(project)}));`;
+      const procs = await Promise.all(Array.from({ length: 40 }, () => spawnAsync(['--input-type=module', '-e', code])));
+      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().slice(0, 300)}`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+// The deterministic form of the race: the loser of a folder creation finds the folder already there.
+test("makeRealDir: a folder that appeared meanwhile is accepted; a link or file in its place is refused", async () => {
+  const { makeRealDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  const { root, project } = setup();
+  try {
+    mkdirSync(join(project, '_memories'));
+    makeRealDir(project, '_memories');                                  // already a real folder: no EEXIST
+    makeRealDir(project, '_memories/_lib', { mode: 0o700 });            // absent: created
+    makeRealDir(project, '_memories/_lib', { mode: 0o700 });            // and again: accepted
+    writeFileSync(join(project, 'a-file'), 'x');
+    assert.throws(() => makeRealDir(project, 'a-file'), { code: 'cache-folder-unsafe' });
+    if (process.platform !== 'win32') {
+      symlinkSync(join(root, 'elsewhere'), join(project, 'a-link'));
+      assert.throws(() => makeRealDir(project, 'a-link'), { code: 'cache-folder-unsafe' });
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
