@@ -63,22 +63,43 @@ const gitEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter
  * throws before any lock, temp or payload write. A repository above the project isn't consulted, since
  * that would read outside the folder.
  */
+// Another process may create the folder between the check and the mkdir: the loser looks again
+// and accepts it only if it is now a real folder.
+function makeRealDir(projectRoot, rel, options) {
+  try { mkdirSync(join(projectRoot, ...rel.split('/')), options); }
+  catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    const now = folderChain(projectRoot, rel);
+    if (now !== 'real') refuse('cache-folder-unsafe', now);
+  }
+}
+
 export function ensureLibDir(projectRoot) {
   const store = folderChain(projectRoot, '_memories');
-  if (store === 'absent') mkdirSync(join(projectRoot, '_memories'));
+  if (store === 'absent') makeRealDir(projectRoot, '_memories');
   else if (store !== 'real') refuse('cache-folder-unsafe', store);
   ensureStoreIgnores(projectRoot);
   const lib = join(projectRoot, '_memories', '_lib');
   const state = folderChain(projectRoot, '_memories/_lib');
-  if (state === 'absent') mkdirSync(lib, { mode: 0o700 });
+  if (state === 'absent') makeRealDir(projectRoot, '_memories/_lib', { mode: 0o700 });
   else if (state !== 'real') refuse('cache-folder-unsafe', state);
   const ignore = join(lib, '.gitignore');
   let st = null;
   try { st = lstatSync(ignore); } catch (e) { if (e.code !== 'ENOENT') refuse('cache-ignore-unsafe', `ignore file could not be examined (${e.code})`); }
-  if (!st) writeFileSync(ignore, HEADER + '*\n', { flag: 'wx', mode: 0o600 });
-  else {
+  if (!st) {
+    try { writeFileSync(ignore, HEADER + '*\n', { flag: 'wx', mode: 0o600 }); }
+    catch (e) { if (e.code !== 'EEXIST') throw e; }   // a concurrent writer created it first: judge theirs below
+    st = lstatSync(ignore);
+  }
+  if (st) {
     if (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1) refuse('cache-ignore-unsafe', 'its ignore file is a link, a second name or not a file');
-    const rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    // A racing writer may have created the file but not yet written it: look again briefly before judging it.
+    let rules;
+    for (let i = 0; ; i++) {
+      rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      if (rules.at(-1) === '*' || i >= 10) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3);
+    }
     if (rules.at(-1) !== '*' || rules.some((r) => r.startsWith('!'))) refuse('cache-ignore-unsafe', 'its ignore file does not end in * or re-includes a file');
   }
   const repo = ownRepository(projectRoot);

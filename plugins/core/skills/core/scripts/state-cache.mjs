@@ -98,7 +98,9 @@ export function cacheFileCustodyProblem(rootDir, file, { lockPath = null, ordina
       const inside = relative(root, real);
       if (inside === '..' || inside.startsWith('..' + sep)) return `${rel(d)} is outside the selected root`;
     }
-    const st = kind(path);
+    // A writer replacing the file by rename gives it two names for an instant; a name that is still doubled after a short look is someone else's.
+    let st = kind(path);
+    for (let i = 0; st && st.isFile() && st.nlink !== 1 && i < 10; i++) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3); st = kind(path); }
     if (st && (st.isSymbolicLink() || (st.isFile() && st.nlink !== 1))) return `${rel(path)} is a link or has another name`;
     // Preserve E05's pre-read FIFO/socket/device refusal and ordinary unreadable cache directories.
     // Explicit legacy-source selection additionally requires a regular file.

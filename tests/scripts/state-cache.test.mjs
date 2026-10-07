@@ -250,3 +250,20 @@ test('an unreadable cache is not absent — only ENOENT is absence', async () =>
     assert.equal(r.baseline_trustworthy_hint, false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- The first write into a fresh project: many processes create _memories, _lib and its ignore file at once.
+// Each one checks "absent" and then creates; the losers used to throw EEXIST (or judge a half-written ignore file),
+// and a stamp lost that way still exited 0. Every process must now get the folder back, and the ignore file must be whole. ----
+test("race: 40 processes preparing the same fresh cache folder all succeed, over repeated rounds", async () => {
+  const ENSURE = new URL('../../plugins/core/skills/core/scripts/store-ignores.mjs', import.meta.url).href;
+  for (let round = 0; round < 12; round++) {
+    const { root, project } = setup();
+    try {
+      const code = `import { ensureLibDir } from ${JSON.stringify(ENSURE)}; console.log(ensureLibDir(${JSON.stringify(project)}));`;
+      const procs = await Promise.all(Array.from({ length: 40 }, () => spawnAsync(['--input-type=module', '-e', code])));
+      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().slice(0, 300)}`);
+      const ignore = readFileSync(join(project, '_memories', '_lib', '.gitignore'), 'utf8');
+      assert.ok(ignore.trimEnd().endsWith('*'), `round ${round}: the ignore file is whole`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
