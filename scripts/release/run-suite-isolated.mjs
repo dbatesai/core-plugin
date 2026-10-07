@@ -18,22 +18,23 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { restoreProblem } from './restore-result.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
 const PRELOAD_URL = pathToFileURL(PRELOAD).href;   // Windows Node rejects a bare C:\ path after --import
 const STOP = Symbol('stop');                         // a failed control unwinds through finally, which removes the deny and the temp home
 const win = process.platform === 'win32';
-const fail = (msg) => { process.stderr.write(`isolated suite: ${msg}\n`); process.exitCode = 1; };
+const fail = (msg) => { process.stderr.write(`isolated suite: ${msg}\n`); process.exitCode = process.exitCode || 1; };   // keeps a test run's own nonzero status
 
 function protect(dir) {
-  if (!win) { chmodSync(dir, 0o555); return () => chmodSync(dir, 0o755); }
+  if (!win) { chmodSync(dir, 0o555); return () => { try { chmodSync(dir, 0o755); return null; } catch (e) { return `chmod ${dir} failed (${e.message})`; } }; }
   // Folder-only deny (no inheritance): new entries directly in ~/.core are refused; the writable test root below it is not.
   const account = userInfo().username;
   const rights = '(WD,AD,WEA,WA,DC)';
   const r = spawnSync('icacls', [dir, '/deny', `${account}:${rights}`], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`icacls deny failed: ${r.stderr || r.stdout}`);
-  return () => spawnSync('icacls', [dir, '/remove:d', account], { encoding: 'utf8' });
+  return () => restoreProblem(spawnSync('icacls', [dir, '/remove:d', account], { encoding: 'utf8' }));
 }
 
 const probe = (home, code) => spawnSync(process.execPath, ['--import', PRELOAD_URL, '--input-type=module', '-e', code],
@@ -44,7 +45,7 @@ const files = tests.length ? tests : readdirSync(join(ROOT, 'tests', 'scripts'))
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'core-suite-home-')));
 const core = join(home, '.core');
-let restore = () => {};
+let restore = () => null;   // returns null, or why the protected folder was not restored
 try {
   mkdirSync(join(core, '.test-tmp'), { recursive: true });
   writeFileSync(join(core, 'projects.json'), '[]');
@@ -66,14 +67,15 @@ try {
   // NODE_OPTIONS carries the preload into every node process a test spawns (hooks, CLIs), not just the test files.
     const run = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit',
     env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${PRELOAD_URL}`.trim() } });
-  restore(); restore = () => {};
+  const stuck = restore(); restore = () => null;
+  if (stuck) fail(stuck);
   const after = readdirSync(core).sort();
   if (JSON.stringify(after) !== JSON.stringify(seed)) fail(`the suite left new entries in the protected ~/.core: ${after.filter((n) => !seed.includes(n)).join(', ')}`);
   if (run.status !== 0) process.exitCode = run.status || 1;
 } catch (e) {
   if (e !== STOP) throw e;
 } finally {
-  restore();
-  try { chmodSync(core, 0o755); } catch { /* gone or Windows */ }
-  rmSync(home, { recursive: true, force: true });
+  const left = restore();
+  if (left) fail(left);
+  try { rmSync(home, { recursive: true, force: true }); } catch (e) { fail(`the temporary home ${home} was left behind (${e.message})`); }
 }

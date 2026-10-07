@@ -37,3 +37,24 @@ test('the control probes import the preload as a file URL, and a failed control 
   assert.ok(!/process\.exit\(/.test(src), 'process.exit inside the try skips finally and leaves the protected temp home behind');
   assert.match(src, /catch \(e\) \{\s*if \(e !== STOP\) throw e;/);
 });
+
+// A failed permission restore must be reported, not ignored: the restore result is the only signal that the
+// temporary home may be undeletable.
+import { restoreProblem } from '../../scripts/release/restore-result.mjs';
+
+test('restoreProblem: success is null; a nonzero exit, a spawn that never started, and a missing result each name why', () => {
+  assert.equal(restoreProblem({ status: 0 }), null);
+  assert.match(restoreProblem({ status: 5, stderr: 'Access is denied.\n' }), /exit 5: Access is denied\./);
+  assert.match(restoreProblem({ status: null, error: new Error('spawnSync icacls ENOENT') }), /ENOENT/);
+  assert.match(restoreProblem({ status: 0, error: new Error('timed out') }), /timed out/);
+  assert.match(restoreProblem(undefined), /exit unknown/);
+});
+
+test('the runner reads the restore result at both call sites and keeps the primary exit status', () => {
+  const src = readFileSync(RUNNER, 'utf8');
+  assert.match(src, /restoreProblem\(spawnSync\('icacls'/);
+  assert.match(src, /const stuck = restore\(\);\s*restore = \(\) => null;\s*if \(stuck\) fail\(stuck\)/);
+  assert.match(src, /const left = restore\(\);\s*if \(left\) fail\(left\)/);
+  assert.match(src, /process\.exitCode = process\.exitCode \|\| 1/);
+  assert.match(src, /was left behind/);
+});
