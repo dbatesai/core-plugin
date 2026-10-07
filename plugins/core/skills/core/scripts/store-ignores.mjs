@@ -8,10 +8,11 @@
  * names are returned as a problem, so the gap is reported rather than hidden.
  * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md, curated gold sets) is never matched.
  */
-import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { STATE_DIRNAME } from './state-dirname.mjs';
+import { renameWithRetrySync } from './fs-atomic.mjs';
 
 const HEADER = '# Written by CORE: its own working files in this folder, never project content.\n';
 // The names CORE actually writes for each rule: git is asked about these, so an exact exception a
@@ -74,6 +75,17 @@ export function makeRealDir(projectRoot, rel, options) {
   }
 }
 
+// Puts a fully written temp file in place by rename (with the bounded Windows retry). When the rename still fails
+// but something is already at the destination, another writer got there first: the temp file is dropped and the caller
+// judges what is there. With nothing there, the failure stands.
+export function publishWhole(tmp, dest, rename = renameWithRetrySync) {
+  try { rename(tmp, dest); }
+  catch (e) {
+    try { unlinkSync(tmp); } catch { /* already gone */ }
+    try { lstatSync(dest); } catch { throw e; }
+  }
+}
+
 export function ensureLibDir(projectRoot) {
   const store = folderChain(projectRoot, '_memories');
   if (store === 'absent') makeRealDir(projectRoot, '_memories');
@@ -92,8 +104,7 @@ export function ensureLibDir(projectRoot) {
     // identical bytes, and a rename replaces a link instead of following it.
     const tmp = join(projectRoot, '_memories', `.lib-ignore.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
     writeFileSync(tmp, HEADER + '*\n', { flag: 'wx', mode: 0o600 });
-    try { renameSync(tmp, ignore); }
-    catch (e) { try { unlinkSync(tmp); } catch { /* already gone */ } throw e; }
+    publishWhole(tmp, ignore);
     st = lstatSync(ignore);
   }
   if (st) {

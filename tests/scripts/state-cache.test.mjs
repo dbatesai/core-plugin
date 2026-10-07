@@ -298,3 +298,21 @@ test("makeRealDir: a folder that appeared meanwhile is accepted; a link or file 
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// A rename onto the shared ignore file that fails (Windows refuses it under contention) must not lose the writer when another writer's file is already there.
+test("publishWhole: a failed rename is absorbed when the destination exists and rethrown when it does not; the temp file is dropped either way", async () => {
+  const { publishWhole } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  const { root } = setup();
+  try {
+    const dest = join(root, 'dest'), refuse = () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
+    const tmp1 = join(root, 'tmp1'); writeFileSync(tmp1, 'x'); writeFileSync(dest, 'theirs');
+    publishWhole(tmp1, dest, refuse);                                                   // another writer's file is there: absorbed
+    assert.equal(existsSync(tmp1), false); assert.equal(readFileSync(dest, 'utf8'), 'theirs');
+    const tmp2 = join(root, 'tmp2'); writeFileSync(tmp2, 'x'); rmSync(dest);
+    assert.throws(() => publishWhole(tmp2, dest, refuse), { code: 'EPERM' });           // nothing there: the failure stands
+    assert.equal(existsSync(tmp2), false);
+    const tmp3 = join(root, 'tmp3'); writeFileSync(tmp3, 'ok');
+    publishWhole(tmp3, dest);                                                           // the normal path still publishes
+    assert.equal(readFileSync(dest, 'utf8'), 'ok');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
