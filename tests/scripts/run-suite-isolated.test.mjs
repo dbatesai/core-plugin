@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const RUNNER = fileURLToPath(new URL('../../scripts/release/run-suite-isolated.mjs', import.meta.url));
@@ -26,4 +27,13 @@ test('a test that writes only to the shared test root passes, and the controls r
 test('a spawned node process resolves the same protected account home, so a stray write there is refused too', { skip }, () => {
   const r = run(FIX('child-stray-write'));
   assert.equal(r.status, 0, r.stdout + r.stderr);   // the fixture asserts the child got EACCES
+});
+
+// Source-level guards for two defects R11 (Windows) found; the behavioral proof is the R11 rerun at the final pin.
+test('the control probes import the preload as a file URL, and a failed control unwinds through finally', () => {
+  const src = readFileSync(RUNNER, 'utf8');
+  assert.ok(!/\['--import', PRELOAD,/.test(src), 'a bare path after --import fails on Windows Node');
+  assert.match(src, /'--import', PRELOAD_URL/);
+  assert.ok(!/process\.exit\(/.test(src), 'process.exit inside the try skips finally and leaves the protected temp home behind');
+  assert.match(src, /catch \(e\) \{\s*if \(e !== STOP\) throw e;/);
 });

@@ -21,6 +21,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
+const PRELOAD_URL = pathToFileURL(PRELOAD).href;   // Windows Node rejects a bare C:\ path after --import
+const STOP = Symbol('stop');                         // a failed control unwinds through finally, which removes the deny and the temp home
 const win = process.platform === 'win32';
 const fail = (msg) => { process.stderr.write(`isolated suite: ${msg}\n`); process.exitCode = 1; };
 
@@ -34,7 +36,7 @@ function protect(dir) {
   return () => spawnSync('icacls', [dir, '/remove:d', account], { encoding: 'utf8' });
 }
 
-const probe = (home, code) => spawnSync(process.execPath, ['--import', PRELOAD, '--input-type=module', '-e', code],
+const probe = (home, code) => spawnSync(process.execPath, ['--import', PRELOAD_URL, '--input-type=module', '-e', code],
   { encoding: 'utf8', env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: '' } });
 
 const tests = process.argv.slice(2);
@@ -51,24 +53,25 @@ try {
 
   // 1. resolved account
   const who = probe(home, "import os from 'node:os'; console.log(os.userInfo().homedir)");
-  if (who.stdout.trim() !== home) { fail(`control 1: the preload resolved ${who.stdout.trim() || '(nothing)'} instead of ${home}`); process.exit(1); }
+  if (who.stdout.trim() !== home) { fail(`control 1: the preload resolved ${who.stdout.trim() || '(nothing)'} instead of ${home}`); throw STOP; }
   // 2. a write attempt is refused before mutation
   const denied = probe(home, `import {writeFileSync} from 'node:fs'; try { writeFileSync(${JSON.stringify(join(core, 'stray.txt'))}, 'x'); console.log('WROTE'); } catch (e) { console.log(e.code); }`);
   const code = denied.stdout.trim();
-  if (!['EACCES', 'EPERM'].includes(code) || existsSync(join(core, 'stray.txt'))) { fail(`control 2: a write into the protected ~/.core gave '${code}' (running as a user the folder mode cannot bind, such as root?)`); process.exit(1); }
+  if (!['EACCES', 'EPERM'].includes(code) || existsSync(join(core, 'stray.txt'))) { fail(`control 2: a write into the protected ~/.core gave '${code}' (running as a user the folder mode cannot bind, such as root?)`); throw STOP; }
   // 3. positive control
   const ok = probe(home, `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(core, '.test-tmp', 'ok.txt'))}, 'x'); console.log('OK')`);
-  if (ok.stdout.trim() !== 'OK') { fail(`control 3: the test root inside it refused a write (${ok.stderr.trim().slice(0, 120)})`); process.exit(1); }
+  if (ok.stdout.trim() !== 'OK') { fail(`control 3: the test root inside it refused a write (${ok.stderr.trim().slice(0, 120)})`); throw STOP; }
   process.stdout.write(`isolated suite: controls passed (account ${home}; write refused with ${code})\n`);
 
   // NODE_OPTIONS carries the preload into every node process a test spawns (hooks, CLIs), not just the test files.
-  const preloadUrl = pathToFileURL(PRELOAD).href;
-  const run = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit',
-    env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${preloadUrl}`.trim() } });
+    const run = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit',
+    env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${PRELOAD_URL}`.trim() } });
   restore(); restore = () => {};
   const after = readdirSync(core).sort();
   if (JSON.stringify(after) !== JSON.stringify(seed)) fail(`the suite left new entries in the protected ~/.core: ${after.filter((n) => !seed.includes(n)).join(', ')}`);
   if (run.status !== 0) process.exitCode = run.status || 1;
+} catch (e) {
+  if (e !== STOP) throw e;
 } finally {
   restore();
   try { chmodSync(core, 0o755); } catch { /* gone or Windows */ }
