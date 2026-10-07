@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { denyWithCompensation } from './restore-result.mjs';
+import { denyWithCompensation, reportFailure, cleanupTempHome } from './restore-result.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
@@ -28,7 +28,7 @@ const win = process.platform === 'win32';
 // The file-lock tests set these themselves; an inherited value could point a lock's signal write outside the disposable home.
 const inherited = { ...process.env };
 delete inherited.CORE_FILELOCK_TEST_SIGNAL_FILE; delete inherited.CORE_FILELOCK_TEST_DELAY_MS;
-const fail = (msg) => { process.stderr.write(`isolated suite: ${msg}\n`); process.exitCode = process.exitCode || 1; };   // keeps a test run's own nonzero status
+const fail = (msg) => reportFailure(process, msg);   // keeps a test run's own nonzero status
 
 function protect(dir) {
   if (!win) { chmodSync(dir, 0o555); return () => { try { chmodSync(dir, 0o755); return null; } catch (e) { return `chmod ${dir} failed (${e.message})`; } }; }
@@ -76,7 +76,5 @@ try {
 } catch (e) {
   if (e !== STOP) throw e;
 } finally {
-  const left = restore();
-  if (left) fail(left);
-  try { rmSync(home, { recursive: true, force: true }); } catch (e) { fail(`the temporary home ${home} was left behind (${e.message})`); }
+  cleanupTempHome({ restore, remove: () => rmSync(home, { recursive: true, force: true }), home, report: fail });
 }

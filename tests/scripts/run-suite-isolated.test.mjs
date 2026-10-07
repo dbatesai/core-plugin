@@ -55,9 +55,8 @@ test('the runner reads the restore result at both call sites and keeps the prima
   assert.match(src, /denyWithCompensation\(spawnSync, dir, account, rights\)/);
   assert.match(readFileSync(new URL('../../scripts/release/restore-result.mjs', import.meta.url), 'utf8'), /restoreProblem\(run\('icacls', \[dir, '\/remove:d'/);
   assert.match(src, /const stuck = restore\(\);\s*restore = \(\) => null;\s*if \(stuck\) fail\(stuck\)/);
-  assert.match(src, /const left = restore\(\);\s*if \(left\) fail\(left\)/);
-  assert.match(src, /process\.exitCode = process\.exitCode \|\| 1/);
-  assert.match(src, /was left behind/);
+  assert.match(src, /cleanupTempHome\(\{ restore, remove: \(\) => rmSync\(home/);
+  assert.match(src, /reportFailure\(process, msg\)/);
 });
 
 // A deny that was applied before its own command reported failure must still be removed, without hiding the setup error.
@@ -80,4 +79,33 @@ test('denyWithCompensation: on success the removal is not run until the returned
   assert.deepEqual(calls, ['/deny']);
   assert.match(undo(), /exit 5: late/);
   assert.deepEqual(calls, ['/deny', '/remove:d']);
+});
+
+// Hale's end-to-end gap, as a deterministic control: a failed restore AND a failed removal, after a failing test run.
+import { reportFailure, cleanupTempHome, oneLine } from '../../scripts/release/restore-result.mjs';
+
+test('a failed restore and a failed removal are both reported by name, the failing suite keeps its own exit status, and nothing is printed over several lines', () => {
+  const written = [], proc = { exitCode: 2, stderr: { write: (s) => written.push(s) } };
+  cleanupTempHome({
+    restore: () => 'icacls /remove:d did not restore the folder (exit 5: Access is denied.)',
+    remove: () => { throw Object.assign(new Error('EPERM: cannot remove\nsecond line\tTAB'), { code: 'EPERM' }); },
+    home: '/tmp/core-suite-home-x', report: (m) => reportFailure(proc, m),
+  });
+  assert.equal(proc.exitCode, 2, 'the suite failure status is kept');
+  assert.equal(written.length, 2);
+  assert.match(written[0], /did not restore the folder/);
+  assert.match(written[1], /temporary home \/tmp\/core-suite-home-x was left behind \(EPERM: cannot remove second line TAB\)/);
+  for (const w of written) assert.equal(w.trimEnd().split('\n').length, 1, 'one line per diagnostic');
+  const clean = { exitCode: undefined, stderr: { write() {} } };
+  cleanupTempHome({ restore: () => null, remove: () => {}, home: 'h', report: (m) => reportFailure(clean, m) });
+  assert.equal(clean.exitCode, undefined, 'a clean cleanup changes nothing');
+  const only = { exitCode: undefined, stderr: { write() {} } };
+  cleanupTempHome({ restore: () => 'x', remove: () => {}, home: 'h', report: (m) => reportFailure(only, m) });
+  assert.equal(only.exitCode, 1, 'a restore failure alone fails a passing run');
+});
+
+test('oneLine and restoreProblem keep a multi-line spawn error on one line', () => {
+  assert.equal(oneLine('a\r\nb\u0007c'), 'a b c');
+  assert.doesNotMatch(restoreProblem({ status: 5, stderr: 'Access\nis denied\n' }), /\n/);
+  assert.doesNotMatch(restoreProblem({ status: null, error: new Error('x\ny') }), /\n/);
 });
