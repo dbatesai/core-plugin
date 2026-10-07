@@ -29,7 +29,7 @@ test('a spawned node process resolves the same protected account home, so a stra
   assert.equal(r.status, 0, r.stdout + r.stderr);   // the fixture asserts the child got EACCES
 });
 
-// Source-level guards for two defects R11 (Windows) found; the behavioral proof is the R11 rerun at the final pin.
+// Source-level guards for two Windows-only defects; the behavioral proof is a run of the runner on Windows.
 test('the control probes import the preload as a file URL, and a failed control unwinds through finally', () => {
   const src = readFileSync(RUNNER, 'utf8');
   assert.ok(!/\['--import', PRELOAD,/.test(src), 'a bare path after --import fails on Windows Node');
