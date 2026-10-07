@@ -81,7 +81,7 @@ test('denyWithCompensation: on success the removal is not run until the returned
   assert.deepEqual(calls, ['/deny', '/remove:d']);
 });
 
-// Hale's end-to-end gap, as a deterministic control: a failed restore AND a failed removal, after a failing test run.
+// A deterministic control for the cleanup path: a failed restore AND a failed removal, after a failing test run.
 import { reportFailure, cleanupTempHome, oneLine } from '../../scripts/release/restore-result.mjs';
 
 test('a failed restore and a failed removal are both reported by name, the failing suite keeps its own exit status, and nothing is printed over several lines', () => {
