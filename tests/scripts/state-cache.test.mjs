@@ -218,13 +218,17 @@ test("race: 40 concurrent processes each stamping a distinct file all survive â€
     const N = 40;
     const code = (i) => [
       `import { stampFile } from ${JSON.stringify(STATE_CACHE_SCRIPT)};`,
-      `stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)} });`,
+      `console.log(JSON.stringify(stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)} })));`,
     ].join('\n');
 
     const procs = await Promise.all(
       Array.from({ length: N }, (_, i) => spawnAsync(['--input-type=module', '-e', code(i)]))
     );
     for (const p of procs) assert.equal(p.status, 0, `stamp process ${p} exited 0 (stderr: ${p.stderr})`);
+    // A stamp that did not land says why in its return value (exit 0 either way): name every such reason, so a lost stamp is never only a count.
+    const unstamped = procs.map((p) => { try { return JSON.parse(p.stdout.trim().split('\n').pop()); } catch { return { stamped: false, reason: `unreadable output: ${p.stdout.slice(0, 200)} ${p.stderr.slice(0, 200)}` }; } })
+      .filter((r) => r.stamped !== true).map((r) => `${r.outcome || ''} ${r.reason || ''} ${r.primaryError?.message || ''}`.replace(/\S*state-cache-\w+/g, '<tmp>').trim());
+    assert.deepEqual(unstamped, [], `${unstamped.length} of ${N} stamps were refused: ${[...new Set(unstamped)].join(' || ')}`);
 
     const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
     const survived = Object.keys(cache.files).length;
@@ -290,6 +294,11 @@ test("makeRealDir: a folder that appeared meanwhile is accepted; a link or file 
     makeRealDir(project, '_memories');                                  // already a real folder: no EEXIST
     makeRealDir(project, '_memories/_lib', { mode: 0o700 });            // absent: created
     makeRealDir(project, '_memories/_lib', { mode: 0o700 });            // and again: accepted
+    // The loser's mkdir finds the winner's entry already there: the winner is created first, then the loser's real mkdir throws EEXIST.
+    const winnerFirst = (make) => (p, o) => { make(p); return mkdirSync(p, o); };
+    makeRealDir(project, 'won-by-folder', undefined, winnerFirst((p) => mkdirSync(p)));                     // a real folder won: accepted
+    assert.throws(() => makeRealDir(project, 'won-by-file', undefined, winnerFirst((p) => writeFileSync(p, 'x'))), { code: 'cache-folder-unsafe' });
+    if (process.platform !== 'win32') assert.throws(() => makeRealDir(project, 'won-by-link', undefined, winnerFirst((p) => symlinkSync(root, p))), { code: 'cache-folder-unsafe' });
     writeFileSync(join(project, 'a-file'), 'x');
     assert.throws(() => makeRealDir(project, 'a-file'), { code: 'cache-folder-unsafe' });
     if (process.platform !== 'win32') {

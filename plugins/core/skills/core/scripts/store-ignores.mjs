@@ -66,8 +66,8 @@ const gitEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter
  */
 // Another process may create the folder between the check and the mkdir: the loser looks again
 // and accepts it only if it is now a real folder.
-export function makeRealDir(projectRoot, rel, options) {
-  try { mkdirSync(join(projectRoot, ...rel.split('/')), options); }
+export function makeRealDir(projectRoot, rel, options, mkdir = mkdirSync) {
+  try { mkdir(join(projectRoot, ...rel.split('/')), options); }
   catch (e) {
     if (e.code !== 'EEXIST') throw e;
     const now = folderChain(projectRoot, rel);

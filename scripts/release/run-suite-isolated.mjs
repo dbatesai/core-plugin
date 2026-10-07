@@ -25,6 +25,9 @@ const PRELOAD = join(ROOT, 'tests', 'helpers', 'account-home-preload.mjs');
 const PRELOAD_URL = pathToFileURL(PRELOAD).href;   // Windows Node rejects a bare C:\ path after --import
 const STOP = Symbol('stop');                         // a failed control unwinds through finally, which removes the deny and the temp home
 const win = process.platform === 'win32';
+// The file-lock tests set these themselves; an inherited value could point a lock's signal write outside the disposable home.
+const inherited = { ...process.env };
+delete inherited.CORE_FILELOCK_TEST_SIGNAL_FILE; delete inherited.CORE_FILELOCK_TEST_DELAY_MS;
 const fail = (msg) => { process.stderr.write(`isolated suite: ${msg}\n`); process.exitCode = process.exitCode || 1; };   // keeps a test run's own nonzero status
 
 function protect(dir) {
@@ -36,7 +39,7 @@ function protect(dir) {
 }
 
 const probe = (home, code) => spawnSync(process.execPath, ['--import', PRELOAD_URL, '--input-type=module', '-e', code],
-  { encoding: 'utf8', env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: '' } });
+  { encoding: 'utf8', env: { ...inherited, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: '' } });
 
 const tests = process.argv.slice(2);
 const files = tests.length ? tests : readdirSync(join(ROOT, 'tests', 'scripts')).filter((n) => n.endsWith('.test.mjs')).sort().map((n) => join('tests', 'scripts', n));
@@ -64,7 +67,7 @@ try {
 
   // NODE_OPTIONS carries the preload into every node process a test spawns (hooks, CLIs), not just the test files.
     const run = spawnSync(process.execPath, ['--test', ...files], { cwd: ROOT, stdio: 'inherit',
-    env: { ...process.env, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${PRELOAD_URL}`.trim() } });
+    env: { ...inherited, CORE_TEST_ACCOUNT_HOME: home, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import ${PRELOAD_URL}`.trim() } });
   const stuck = restore(); restore = () => null;
   if (stuck) fail(stuck);
   const after = readdirSync(core).sort();
