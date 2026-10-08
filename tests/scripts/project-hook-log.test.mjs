@@ -10,7 +10,7 @@ import { symlinkCapable } from './trusted-test-tmp.mjs';
 const norm = p => String(p).split(sep).join('/');
 const source = fileURLToPath(new URL('../../', import.meta.url));
 const hookBase = new URL('../../plugins/core/skills/core/hooks/', import.meta.url);
-const gate = fileURLToPath(new URL('./fs-confine.mjs', import.meta.url));
+const gate = new URL('./fs-confine.mjs', import.meta.url).href;   // --import takes a URL; a bare Windows path fails
 const logger = new URL('hook-log.mjs', hookBase).href;
 function fixture() {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'project-hook-log-')));

@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { accountHomeArgs } from '../helpers/account-home.mjs';
 
-const SCRIPTS = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/', import.meta.url));
+// A file:// URL, not a path: on Windows a bare `D:\\...` import reads the drive letter as a URL scheme.
+const SCRIPTS = new URL('../../plugins/core/skills/core/scripts/', import.meta.url).href;
 const run = (home, code, env = {}) => spawnSync(process.execPath, [...accountHomeArgs(home), '--input-type=module', '-e', code], { encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', ...env }, timeout: 20000 });
 const fresh = (n) => realpathSync(mkdtempSync(join(tmpdir(), n)));
 

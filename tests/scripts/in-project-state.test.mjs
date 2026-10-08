@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, chmodSync, statSync, utimesSync, symlinkSync, renameSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, sep } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -1741,8 +1741,12 @@ test('a migration receipt written under .core still verifies after the rename; t
   try {
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
     const dir = join(p, '_core', H);
-    const body = readFileSync(join(dir, RECEIPT_NAME), 'utf8').replaceAll(`${p}/_core/`, `${p}/.core/`);
-    assert.ok(body.includes(`${p}/.core/`), 'the fixture receipt names the older folder');
+    // Parsed and rewritten by path prefix, so the fixture holds on Windows separators too.
+    const receipt = JSON.parse(readFileSync(join(dir, RECEIPT_NAME), 'utf8'));
+    const [newer, older] = [join(p, '_core') + sep, join(p, '.core') + sep];
+    receipt.files = receipt.files.map((f) => (f.to.startsWith(newer) ? { ...f, to: older + f.to.slice(newer.length) } : f));
+    const body = JSON.stringify(receipt, null, 2) + '\n';
+    assert.ok(receipt.files.some((f) => f.to.startsWith(older)), 'the fixture receipt names the older folder');
     writeSignedFile({ dir, name: RECEIPT_NAME, body, coreDir: s.coreDir });
     const pointer = existsSync(join(p, 'workspace.json')) ? readFileSync(join(p, 'workspace.json'), 'utf8') : null;
     renameSync(join(p, '_core'), join(p, '.core'));
