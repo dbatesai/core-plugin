@@ -167,7 +167,7 @@ node "${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs" "<project>"
 
 The script is the only writer of the generated block — it sits between `<!-- CORE:BEGIN_EDGES -->` / `<!-- CORE:END_EDGES -->` markers and is fully regenerated each run; a unit is only rewritten when its computed block actually differs from what's on disk. Retired/archived units are excluded from the snapshot entirely, so they're never decorated. A unit whose markers are duplicated, orphaned, or out of order is refused and left byte-identical rather than guessed at — name any refused file plainly, it needs a manual look. Narrate "decorated N units" only if N > 0; "none needed" is a clean result, not a failure.
 
-*On failure:* each file writes atomically, but a non-zero exit means at least one unit was refused, not that nothing landed — other units may have decorated cleanly in the same run. Name the refused file(s) plainly, then continue to Step 5.
+*On failure:* each file writes atomically, and a non-zero exit never means nothing landed. It means one of three things: at least one unit was refused (others may have decorated cleanly in the same run), or the writes landed but their stamp did not, or the stamp landed but its lock cleanup failed. The script's diagnostics say which. Name the refused file(s), or the stamp or cleanup failure and the recovery the script names. Don't re-run to cover it or clear a lock by hand. Then continue to Step 5.
 
 ---
 

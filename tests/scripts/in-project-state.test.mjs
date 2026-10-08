@@ -1992,3 +1992,157 @@ test('a session log line is written whole even when the system writes it in piec
     assert.deepEqual(JSON.parse(readFileSync(join(p, '_sessions', '2026-10-05', 'retrieval-log.jsonl'), 'utf8')), { ts: 'T', kind: 'a-long-enough-event' });
   } finally { fs.writeSync = real; syncBuiltinESMExports(); s.cleanup(); }
 });
+
+// ---------- custody of the folders a run writes into ----------
+
+const entries = (dir) => readdirSync(dir).sort();
+
+test('a linked _memories holds migration and drift before the lock, leaving the folder it points to untouched', { skip: isWin }, () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'NoLegacy');
+    const away = s.mk('away-memories');
+    symlinkSync(away, join(p, '_memories'));
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'DESTINATION_UNSAFE');
+    assert.deepEqual(entries(away), [], 'no lock, generation or .done file was made through the link');
+    const q = s.mk('Projects', 'Ordinary');
+    assert.equal(applyMigration({ root: q, harness: H, coreDir: s.coreDir }).status, 'nothing-to-migrate', 'positive: an absent _memories still works');
+  } finally { s.cleanup(); }
+  const { s: s2, p: p2, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p2, harness: H, coreDir: s2.coreDir, table }).status, 'migrated');
+    renameSync(join(p2, '_memories'), join(s2.base, 'memories-kept'));
+    const away = s2.mk('away-memories');
+    symlinkSync(away, join(p2, '_memories'));
+    const d = checkLegacyDrift({ root: p2, harness: H, coreDir: s2.coreDir });
+    assert.equal(d.status, 'legacy-held');
+    assert.equal(d.code, 'DESTINATION_UNSAFE');
+    assert.deepEqual(entries(away), [], 'drift takes no lock through the link');
+  } finally { s2.cleanup(); }
+});
+
+test('a linked destination folder holds the copy before any byte lands outside, and no receipt is written', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+    const away = s.mk('away-metrics');
+    symlinkSync(away, join(hot, 'metrics'));
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'DESTINATION_UNSAFE');
+    assert.deepEqual(entries(away), [], 'the legacy metrics were not copied through the link');
+    assert.equal(existsSync(join(hot, RECEIPT_NAME)), false, 'no signed receipt for a copy that did not happen');
+  } finally { s.cleanup(); }
+});
+
+test('drift refuses a new destination under a linked folder, for an append and for a set-aside copy', { skip: isWin }, () => {
+  const now = new Date('2026-10-08T12:00:00Z');
+  for (const variant of ['append', 'aside']) {
+    const { s, p, table } = migrationFixture();
+    try {
+      assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+      const durable = stateDir({ root: p, harness: H, kind: 'durable', coreDir: s.coreDir }).dir;
+      const legacy = join(s.coreDir, 'workspaces', 'legacy');
+      const receiptFile = join(durable, RECEIPT_NAME);
+      const receiptBefore = sha(receiptFile);
+      const away = s.mk(`away-${variant}`);
+      if (variant === 'append') {
+        mkdirSync(join(legacy, 'notes'));
+        writeFileSync(join(legacy, 'notes', 'new.jsonl'), '{"row":"new"}\n');
+        symlinkSync(away, join(durable, 'notes'));
+      } else {
+        writeFileSync(join(legacy, 'hot-section-draft.md'), 'changed after migration\n');
+        symlinkSync(away, join(durable, 'superseded', 'legacy-2026-10-08'));
+      }
+      const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir, now });
+      assert.equal(d.status, 'legacy-held', variant);
+      assert.equal(d.code, 'DESTINATION_UNSAFE', variant);
+      assert.deepEqual(entries(away), [], `${variant}: nothing written through the link`);
+      assert.equal(sha(receiptFile), receiptBefore, `${variant}: the receipt records nothing that did not happen`);
+    } finally { s.cleanup(); }
+  }
+});
+
+test('drift refuses a replaced legacy workspace or workspaces folder before listing it', { skip: isWin }, () => {
+  for (const which of ['workspace', 'workspaces']) {
+    const { s, p, table } = migrationFixture();
+    try {
+      assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+      const receiptFile = stateFile(p, RECEIPT_NAME);
+      const receiptBefore = sha(receiptFile);
+      const target = which === 'workspace' ? join(s.coreDir, 'workspaces', 'legacy') : join(s.coreDir, 'workspaces');
+      const foreign = join(s.base, `foreign-${which}`);
+      renameSync(target, foreign);
+      writeFileSync(join(which === 'workspace' ? foreign : join(foreign, 'legacy'), 'new.jsonl'), '{"foreign":true}\n');
+      symlinkSync(foreign, target);
+      const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
+      assert.equal(d.status, 'legacy-held', which);
+      assert.equal(d.code, 'LEGACY_SYMLINK', which);
+      assert.equal(sha(receiptFile), receiptBefore, `${which}: receipt unchanged`);
+      assert.equal(existsSync(join(dirname(receiptFile), 'new.jsonl')), false, `${which}: nothing imported from the linked root`);
+    } finally { s.cleanup(); }
+  }
+});
+
+test('a sibling receipt missing a listed file does not count toward release; repairing it lets the next run release', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table }).status, 'migrated');
+    const listed = JSON.parse(readFileSync(join(p, '_core', 'claude-code', RECEIPT_NAME), 'utf8')).files.find((f) => f.to.endsWith('hot-section-draft.md')).to;
+    const kept = readFileSync(listed);
+    rmSync(listed);
+    const pointerBefore = readFileSync(join(p, 'workspace.json'), 'utf8');
+    const r = applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table });
+    assert.equal(r.status, 'migrated');
+    assert.equal(r.released, false, 'the damaged sibling does not complete the path');
+    assert.equal(r.release_held?.[0]?.harness, 'claude-code');
+    assert.ok(r.release_held[0].problems.some((x) => x.includes('missing')));
+    assert.equal(readFileSync(join(p, 'workspace.json'), 'utf8'), pointerBefore, 'pointer kept');
+    assert.equal(existsSync(join(p, '_core', 'legacy-moved.md')), false, 'no moved note');
+    assert.ok(!JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8')).some((e) => e.migrated), 'no index entry marked');
+    const again = applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table });
+    assert.equal(again.fast, undefined, 'a held release is not recorded as settled');
+    writeFileSync(listed, kept);
+    const healed = applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table });
+    assert.equal(healed.released, true, 'positive: once the sibling verifies, release goes ahead');
+  } finally { s.cleanup(); }
+});
+
+test('the scaffold refuses a linked operational metrics folder, a linked subfolder or a linked _metrics, writing nothing through it', { skip: isWin }, async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const env = { CORE_HARNESS: H };
+  for (const which of ['metrics', 'classified', '_metrics']) {
+    const s = sandbox();
+    try {
+      const p = s.mk('Projects', 'Scaffold');
+      registerProject(s.coreDir, p);
+      updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+      const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+      const away = s.mk(`away-${which}`);
+      if (which === 'metrics') symlinkSync(away, join(hot, 'metrics'));
+      else if (which === 'classified') { mkdirSync(join(hot, 'metrics')); symlinkSync(away, join(hot, 'metrics', 'classified')); }
+      else symlinkSync(away, join(p, '_metrics'));
+      const r = initMetrics({ projectDir: p, home: s.home, env });
+      assert.equal(r.ok, false, which);
+      assert.deepEqual(entries(away), [], `${which}: nothing written through the link`);
+      const q = s.mk('Projects', 'Ordinary');
+      registerProject(s.coreDir, q);
+      updateManifest({ root: q, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Finch' } });
+      assert.equal(initMetrics({ projectDir: q, home: s.home, env }).ok, true, 'positive: an ordinary project scaffolds');
+      assert.ok(existsSync(join(q, '_metrics', '.gitignore')));
+    } finally { s.cleanup(); }
+  }
+});
+
+test('the startup and process-memory instructions name all three nonzero outcomes', () => {
+  const skills = fileURLToPath(new URL('../../plugins/core/skills/', import.meta.url));
+  const startup = readFileSync(join(skills, 'core', 'protocols', 'startup.md'), 'utf8');
+  const pm = readFileSync(join(skills, 'process-memory', 'SKILL.md'), 'utf8');
+  for (const [name, text] of [['startup.md', startup], ['process-memory', pm]]) {
+    assert.match(text, /the writes landed but (the|their) stamp did(n't| not)/, `${name}: landed write, failed stamp`);
+    assert.match(text, /the stamp landed but its lock cleanup failed/, `${name}: landed stamp, failed cleanup`);
+    assert.doesNotMatch(text, /There is nothing to reconcile by hand here\./, `${name}: no blanket all-clear`);
+  }
+});

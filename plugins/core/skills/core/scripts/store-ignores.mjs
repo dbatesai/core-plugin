@@ -75,6 +75,32 @@ export function makeRealDir(projectRoot, rel, options, mkdir = mkdirSync) {
   }
 }
 
+/**
+ * Each folder of `rel` below `base` (a folder the caller has already checked), made one level at a time.
+ * Every level must end up a real folder, never a link; returns the full path. Anything else throws
+ * FOLDER_UNSAFE before a byte is written below it.
+ */
+export function ensureRealFolders(base, rel, options) {
+  const parts = rel.split(/[\\/]/).filter(Boolean);
+  if (parts.includes('..')) throw Object.assign(new Error(`folder refused: ${rel} leaves its folder`), { code: 'FOLDER_UNSAFE' });
+  for (let i = 1; i <= parts.length; i++) {
+    const sub = parts.slice(0, i).join('/');
+    const now = folderChain(base, sub);
+    if (now === 'real') continue;
+    if (now !== 'absent') throw Object.assign(new Error(`folder refused: ${now}`), { code: 'FOLDER_UNSAFE' });
+    try { makeRealDir(base, sub, options); }
+    catch (e) { throw e.code === 'cache-folder-unsafe' ? Object.assign(new Error(`folder refused: ${sub} is not a real folder`), { code: 'FOLDER_UNSAFE' }) : e; }
+  }
+  return join(base, ...parts);
+}
+
+/** A file about to be written is either absent or an ordinary single-named file; a link or anything else throws FILE_UNSAFE. */
+export function assertOrdinaryLeaf(path) {
+  let st;
+  try { st = lstatSync(path); } catch (e) { if (e.code === 'ENOENT') return; throw Object.assign(new Error(`file refused: could not be examined (${e.code})`), { code: 'FILE_UNSAFE' }); }
+  if (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1) throw Object.assign(new Error('file refused: a link, a second name or not a regular file'), { code: 'FILE_UNSAFE' });
+}
+
 // Puts a fully written temp file in place by rename (with the bounded Windows retry). When the rename still fails
 // but something is already at the destination, another writer got there first: the temp file is dropped and the caller
 // judges what is there. With nothing there, the failure stands.

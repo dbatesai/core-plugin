@@ -49,7 +49,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync, truncateSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, lstatSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync, truncateSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -63,6 +63,7 @@ import { acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
 import { assertSafeWorkspaceId, isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
+import { ensureRealFolders, assertOrdinaryLeaf } from './store-ignores.mjs';
 
 // Bookkeeping, not data: a folder holding only these has nothing worth migrating.
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
@@ -359,13 +360,36 @@ function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
 }
 
-function copyTree(src, dest, recorded) {
+/**
+ * Ready a destination inside one of `stateDirs` (folders stateDir has already checked): every folder
+ * between them is made one level at a time and must be a real folder, and the file itself is absent
+ * or an ordinary file. A link anywhere on the way holds the run before anything lands outside.
+ */
+function prepareDest(stateDirs, to) {
+  const base = stateDirs.find((d) => containedPath(d, to));
+  if (!base) throw new LegacyStateError('DESTINATION_UNSAFE', to, 'destination outside the project state');
+  try {
+    ensureRealFolders(base, relative(base, dirname(to)));
+    assertOrdinaryLeaf(to);
+  } catch (e) {
+    if (e.code === 'FOLDER_UNSAFE' || e.code === 'FILE_UNSAFE') throw new LegacyStateError('DESTINATION_UNSAFE', to, e.message);
+    throw e;
+  }
+}
+
+/** The project's `_memories` folder, which holds the close lock: made if absent, refused if it is a link or not a folder. */
+function lockParent(real) {
+  try { return ensureRealFolders(real, '_memories'); }
+  catch (e) { if (e.code === 'FOLDER_UNSAFE') throw new LegacyStateError('DESTINATION_UNSAFE', join(real, '_memories'), e.message); throw e; }
+}
+
+function copyTree(src, dest, recorded, stateDirs) {
   for (const rel of listFiles(src, { strict: true })) {
     const base = rel.split('/').pop();
     if (SKIP_ON_COPY.some((re) => re.test(base))) continue;
     const from = join(src, rel);
     const to = join(dest, rel);
-    mkdirSync(dirname(to), { recursive: true });
+    prepareDest(stateDirs, to);
     copyFileSync(from, to);
     recorded.push({ from, to, sha256: sha256(from), length: statSync(from).size });
   }
@@ -431,20 +455,24 @@ function manifestPath(coreDir) { return join(coreDir, 'migration-manifest.json')
 /**
  * The "already migrated" marks for the workspaces on one project path: what an older install recorded
  * in the account's migration-manifest.json (read only, never written now), plus the ids named by this
- * project's own signed receipts, one per harness. A receipt that is not signed by this install, is
- * git-tracked, or does not say complete contributes nothing.
+ * project's own signed receipts, one per harness. A receipt counts only when it passes the same check
+ * as the running harness's own (signed, complete, every listed file inside that harness's state and
+ * present); one that fails contributes nothing and is named in `unverified`, so release waits.
  */
-function migratedMarks(coreDir, real) {
+function migratedMarks(coreDir, real, unverified = []) {
   const marks = new Map();
   const prior = readJson(manifestPath(coreDir), null);
   for (const e of prior?.entries || []) if (e.migrated_at) marks.set(e.workspace_id, { migrated_at: e.migrated_at, migrated_to: e.migrated_to, migrated_by: e.migrated_by });
   let harnesses = [];
   try { harnesses = readdirSync(join(real, STATE_DIRNAME), { withFileTypes: true }).filter((d) => d.isDirectory() && HARNESS_RE.test(d.name)).map((d) => d.name); } catch { /* no state folder yet */ }
   for (const h of harnesses) {
-    const raw = readSignedFile({ root: real, harness: h, name: RECEIPT, coreDir });
-    let receipt = null;
-    try { receipt = raw === null ? null : JSON.parse(raw); } catch { /* unreadable: no marks */ }
-    if (!receipt || receipt.complete !== true) continue;
+    const durable = stateDir({ root: real, harness: h, kind: 'durable', coreDir });
+    const hot = stateDir({ root: real, harness: h, kind: 'hot', coreDir });
+    if (!durable || !hot) continue;
+    if (readSignedFile({ root: real, harness: h, name: RECEIPT, coreDir }) === null) continue;
+    const checked = verifiedReceipt({ root: real, harness: h, coreDir, stateDirs: [durable.dir, hot.dir] });
+    if (!checked.ok) { if (checked.receipt?.complete === true) unverified.push({ harness: h, problems: checked.problems.slice(0, 10) }); continue; }
+    const receipt = checked.receipt;
     for (const id of [receipt.live, ...(Array.isArray(receipt.superseded) ? receipt.superseded : [])]) {
       if (typeof id === 'string' && id) marks.set(id, { migrated_at: receipt.migrated_at, migrated_to: join(real, STATE_DIRNAME, h), migrated_by: h });
     }
@@ -458,8 +486,8 @@ function migratedMarks(coreDir, real) {
  * folder and no account-wide lock is taken: the project's close lock, held by the caller, is the only
  * serialization, and a mark persists as the project's signed receipt.
  */
-function withManifest(coreDir, table, applyHarness, mutate, real) {
-  const marks = migratedMarks(coreDir, real);
+function withManifest(coreDir, table, applyHarness, mutate, real, unverified) {
+  const marks = migratedMarks(coreDir, real, unverified);
   const m = buildManifest({ coreDir, table, applyHarness });
   for (const e of m.entries) if (marks.has(e.workspace_id)) Object.assign(e, marks.get(e.workspace_id));
   const out = mutate ? mutate(m) : undefined;
@@ -559,8 +587,9 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
 }
 
 function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
-  // A root pointer kept because git could not say is unresolved: every run re-inspects it and says so.
-  if (!RECORDABLE.has(result.status) || result.metrics_held || result.root_pointer || !inputs) return;
+  // A root pointer kept because git could not say, or a release held on a sibling's damaged receipt,
+  // is unresolved: every run re-inspects it and says so.
+  if (!RECORDABLE.has(result.status) || result.metrics_held || result.root_pointer || result.release_held || !inputs) return;
   // Only a classification made from bytes that were all read is recorded.
   if (inputs.index_sha256 === 'unreadable' || inputs.path_entries.some((e) => e.manifest_sha256 === 'unreadable')) return;
   try {
@@ -593,8 +622,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
   assertLegacyFolder(join(coreDir, 'workspaces'));
   const real = canonical(root);
   const iso = now.toISOString();
-  const lockFile = join(real, '_memories', '_close.lock');
-  mkdirSync(dirname(lockFile), { recursive: true });
+  const lockFile = join(lockParent(real), '_close.lock');
   const lock = acquireFileLock(lockFile, { extra: { session_id: `migrate-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
   return withAcquiredFileLock(lockFile, lock.nonce, () => {
@@ -637,7 +665,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
         for (const e of late) {
           assertSafeWorkspaceId(e.workspace_id);
           const src = join(coreDir, 'workspaces', e.workspace_id);
-          if (existsSync(src)) copyTree(src, join(durable.dir, 'superseded', e.workspace_id), lateCopies);
+          if (existsSync(src)) copyTree(src, join(durable.dir, 'superseded', e.workspace_id), lateCopies, [durable.dir, hot.dir]);
         }
         for (const c of lateCopies) {
           if (sha256(c.to) !== c.sha256) throw new Error(`copy verification failed: ${c.to}`);
@@ -668,7 +696,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
         const src = join(coreDir, 'workspaces', e.workspace_id);
         if (!existsSync(src)) continue;
         if (superseded) {
-          copyTree(src, join(durable.dir, 'superseded', e.workspace_id), copies);
+          copyTree(src, join(durable.dir, 'superseded', e.workspace_id), copies, [durable.dir, hot.dir]);
           continue;
         }
         // Live workspace: hot files to the hot location, everything else to durable.
@@ -678,7 +706,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
           try { st = lstatSync(from); } catch (e) { throw new LegacyStateError('LEGACY_UNREADABLE', from, `cannot stat (${e.code || e.message})`); }
           if (st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', from, 'symlink inside the legacy workspace');
           const target = HOT_TOP.has(name) ? hot.dir : durable.dir;
-          if (st.isDirectory()) { copyTree(from, join(target, name), copies); continue; }
+          if (st.isDirectory()) { copyTree(from, join(target, name), copies, [durable.dir, hot.dir]); continue; }
           if (SKIP_ON_COPY.some((re) => re.test(name))) continue;
           // The legacy manifest is kept verbatim beside the live one, which is built from its fields.
           const to = join(target, name === 'workspace.json' ? LEGACY_MANIFEST : name);
@@ -686,6 +714,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
             // A control file: carried over with its MAC so it verifies in the new layout.
             writeSignedFile({ dir: target, name, body: readFileSync(from), coreDir, mode: 0o600 });
           } else {
+            prepareDest([durable.dir, hot.dir], to);
             copyFileSync(from, to);
           }
           copies.push({ from, to, sha256: sha256(from), length: statSync(from).size });
@@ -747,13 +776,14 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
 
     // Record the marks, then release the old surfaces once every harness on the path has migrated.
     const ids = [...(live ? [live.workspace_id] : []), ...dups.map((e) => e.workspace_id)];
+    const unverified = [];
     const { out: release } = withManifest(coreDir, table, harness, (m) => {
       for (const e of m.entries) {
         if (ids.includes(e.workspace_id) && !e.migrated_at) Object.assign(e, { migrated_at: iso, migrated_to: durable.dir, migrated_by: harness });
       }
       const onPath = m.entries.filter((e) => e.path === real && e.registered && (e.class === 'migrate' || e.class === 'supersede' || e.class === 'hold'));
       return { allDone: onPath.length > 0 && onPath.every((e) => e.migrated_at), onPath };
-    }, real);
+    }, real, unverified);
 
     mutateProjects(coreDir, (entries) => {
       if (entries.some((e) => e && typeof e.path === 'string' && canonical(e.path) === real)) return entries;
@@ -783,7 +813,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     return {
       status: copies === null ? 'already-migrated' : 'migrated',
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-      files: copies ? copies.length : 0, released, ...historyField(history), ...(pointerKept ? { root_pointer: `kept (${pointerKept})` } : {}), ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
+      files: copies ? copies.length : 0, released, ...(unverified.length ? { release_held: unverified } : {}), ...historyField(history), ...(pointerKept ? { root_pointer: `kept (${pointerKept})` } : {}), ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
     };
   });
 }
@@ -839,12 +869,12 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
   if (!checked.ok) return { status: 'receipt-unverified', root: real, harness, problems: checked.problems.slice(0, 10) };
   const receipt = checked.receipt;
 
-  const lockFile = join(real, '_memories', '_close.lock');
-  mkdirSync(dirname(lockFile), { recursive: true });
+  const lockFile = join(lockParent(real), '_close.lock');
   const lock = acquireFileLock(lockFile, { extra: { session_id: `legacy-drift-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
   return withAcquiredFileLock(lockFile, lock.nonce, () => {
     const hot = hotDir;
+    const stateDirs = [durable.dir, hot.dir];
     const byFrom = new Map((receipt.files || []).map((f) => [f.from, f]));
     const sources = [
       ...(receipt.live ? [{ id: receipt.live, superseded: false }] : []),
@@ -856,9 +886,11 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
     const persistReceipt = () => writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n' });
     // Every source is listed before anything is written: an unreadable folder or a symlink
     // must stop the check with the project's copies and the receipt still as they were.
+    assertLegacyFolder(join(coreDir, 'workspaces'));
     const listed = sources.map(({ id, superseded: isSup }) => {
       assertSafeWorkspaceId(id);
       const src = join(coreDir, 'workspaces', id);
+      assertLegacyFolder(src);
       return { id, isSup, src, rels: existsSync(src) ? listFiles(src, { strict: true }) : [] };
     });
     for (const { id, isSup, src, rels } of listed) {
@@ -869,12 +901,13 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
         const size = statSync(from).size;
         let known = byFrom.get(from);
         if (known && known.pending) {
+          prepareDest(stateDirs, known.to);
           const resolved = resolvePendingAppend({ from, known });
           if (resolved.conflict) {
             // The recorded range is gone from the source, or the project's copy holds something
             // that is neither the tail nor a part of it: keep the legacy bytes aside and say so.
             const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
-            mkdirSync(dirname(aside), { recursive: true });
+            prepareDest(stateDirs, aside);
             copyFileSync(from, aside);
             superseded.push({ from, to: aside, reason: 'unresolved-pending-append' });
             byFrom.set(from, { from, to: known.to, sha256: sha256(from), length: statSync(from).size });
@@ -897,7 +930,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
           && (!known || known.pending || (typeof known.length === 'number' && sha256Prefix(from, priorLen) === known.sha256));
 
         if (appendOnly) {
-          mkdirSync(dirname(to), { recursive: true });
+          prepareDest(stateDirs, to);
           const tail = readRange(from, priorLen);
           // Write ahead: the intent reaches the signed receipt before the bytes reach the copy.
           byFrom.set(from, { from, to, sha256: known ? known.sha256 : null, length: priorLen, pending: {
@@ -911,7 +944,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
           persistReceipt();
         } else {
           const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
-          mkdirSync(dirname(aside), { recursive: true });
+          prepareDest(stateDirs, aside);
           copyFileSync(from, aside);
           superseded.push({ from, to: aside });
           byFrom.set(from, { from, to: known ? known.to : aside, sha256: sha256(from), length: size });

@@ -23,11 +23,12 @@
  * non-fatal — metrics capture degrades, the session continues.
  */
 
-import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
 import { sep, join } from 'node:path';
 import {  platform } from 'node:os';
-import { operationalMetricsDir } from './log-event.mjs';
+import { operationalMetricsDir, prepareStorageDir, appendLeaf } from './log-event.mjs';
+import { ensureRealFolders } from './store-ignores.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 import { coreHome } from './trusted-home.mjs';
 
@@ -92,11 +93,21 @@ export function initMetrics({ projectDir, home = coreHome(), env = process.env }
     return { ok: false, reason: 'cannot-create-operational-meta-dir', err: err.message };
   }
 
+  // The same preparation every capture write uses: a linked `_metrics` is refused before its ignore file is written.
   try {
-    mkdirSync(storagePath, { recursive: true });
-    if (!existsSync(join(storagePath, '.gitignore'))) writeFileSync(join(storagePath, '.gitignore'), '*\n!.gitignore\n!README.md\n');
+    prepareStorageDir(projectDir);
   } catch (err) {
     return { ok: false, reason: 'cannot-create-storage-dir', err: err.message };
+  }
+
+  // The operational subfolders hooks write to. A missing one is only best-effort (the writer makes it
+  // later), but one that is a link is refused here, before the log line or any marker change.
+  for (const sub of ['classified', 'detectors', 'evaluations', 'rollups/daily', 'rollups/weekly', 'sessions-active']) {
+    try {
+      ensureRealFolders(operationalMetaDir, sub);
+    } catch (err) {
+      if (err.code === 'FOLDER_UNSAFE') return { ok: false, reason: 'operational-folder-unsafe', err: err.message };
+    }
   }
 
   const scaffoldLogLine = formatScaffoldLog({
@@ -108,22 +119,13 @@ export function initMetrics({ projectDir, home = coreHome(), env = process.env }
   });
 
   try {
-    appendFileSync(join(operationalMetaDir, 'scaffold.log'), scaffoldLogLine + '\n');
+    appendLeaf(join(operationalMetaDir, 'scaffold.log'), scaffoldLogLine + '\n');
   } catch {
     // Don't fail scaffold on log-write failure; the directories still get created.
   }
 
   clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
 
-
-  // Also create the operational-meta subdirs that hooks will write to.
-  for (const sub of ['classified', 'detectors', 'evaluations', 'rollups/daily', 'rollups/weekly', 'sessions-active']) {
-    try {
-      mkdirSync(join(operationalMetaDir, sub), { recursive: true });
-    } catch {
-      // Best-effort; the hook will recreate if missing.
-    }
-  }
 
   return {
     ok: true,

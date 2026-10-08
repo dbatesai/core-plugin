@@ -31,11 +31,12 @@
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
 
-import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { ensureRealFolders, assertOrdinaryLeaf } from './store-ignores.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { coreHome } from './trusted-home.mjs';
 
@@ -308,9 +309,10 @@ export function runClassification({ project, harness = 'claude-code', cwd, home:
   let writtenRecords = 0;
   // Write to the operational-meta classified store (derived, regeneratable; §17.6).
   try {
-    const dir = join(operationalMetricsDir(project, { home, env }), 'classified');
-    mkdirSync(dir, { recursive: true });
+    // Every folder down to `classified` is a real folder and the day file an ordinary one (never a link).
+    const dir = ensureRealFolders(operationalMetricsDir(project, { home, env }), 'classified');
     const file = join(dir, `${date}.jsonl`);
+    assertOrdinaryLeaf(file);
     for (const r of records) {
       appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 });
       writtenRecords += 1;

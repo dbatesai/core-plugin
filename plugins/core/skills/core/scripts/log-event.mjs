@@ -21,13 +21,13 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import {  existsSync, mkdirSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
+import {  existsSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { containedPath, coreHome } from './trusted-home.mjs';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
-import { ensureStoreIgnores, folderChain, makeRealDir, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
+import { ensureStoreIgnores, ensureRealFolders, folderChain, makeRealDir, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
 import { STATE_DIRNAME } from './state-dirname.mjs';
 
 /**
@@ -241,9 +241,8 @@ export function operationalMetricsDir(projectDir, { home = coreHome(), env = pro
   const coreDir = join(home, '.core');
   const root = projectRootFor(projectDir, { home, coreDir });
   const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, forWrite: true });
-  const dir = join(s.dir, 'metrics');
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  // stateDir checked `_core/<harness>`; `metrics` below it must be a real folder too (FOLDER_UNSAFE otherwise).
+  return ensureRealFolders(s.dir, 'metrics');
 }
 
 /** The metrics dir when trustworthy state already exists; null otherwise. Never writes.
@@ -414,11 +413,11 @@ export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, m
 // throws, never blocks the host.
 // Appends only to a single-named regular file, or creates it; never through a link. O_NOFOLLOW where the
 // platform has it, and the lstat check everywhere.
-function appendLeaf(file, text) {
+export function appendLeaf(file, text, mode = 0o644) {
   let st = null;
   try { st = lstatSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   if (st && (!st.isFile() || st.nlink !== 1)) throw Object.assign(new Error('log file is a link or not a regular file'), { code: 'LOG_UNSAFE' });
-  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), 0o644);
+  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), mode);
   // writeFileSync on a descriptor keeps writing until every byte is down, or throws.
   try { writeFileSync(fd, text); } finally { closeSync(fd); }
 }
