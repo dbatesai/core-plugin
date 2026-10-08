@@ -1191,6 +1191,67 @@ test('a project with nothing to migrate is recorded too, and its next startup is
   } finally { s.cleanup(); }
 });
 
+// Two old workspaces share a path and name no harness, so neither can be assigned: that is a hold. A person may select a
+// row, in the table, to be kept as history. It is then reported, never copied or marked migrated, and the default hold is unchanged.
+function twoUnlabeledFixture() {
+  const s = sandbox();
+  const p = s.mk('Projects', 'Twin');
+  registerProject(s.coreDir, p);
+  const index = [
+    legacyWorkspace(s, 'old-a', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'old-a' }), 'a.md': 'a\n' } }),
+    legacyWorkspace(s, 'old-b', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'old-b' }), 'b.md': 'b\n' } }),
+  ];
+  writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index, null, 2));
+  const legacyTree = () => treeOf(join(s.coreDir, 'workspaces'));
+  return { s, p, legacyTree };
+}
+const keep = (ids) => ({ entries: Object.fromEntries(ids.map((id) => [id, { disposition: 'retained-history', evidence: 'older workspace of this project, kept for reference' }])) });
+
+test('retained history: with no selection the two unlabeled rows stay held, as before', () => {
+  const { s, p } = twoUnlabeledFixture();
+  try {
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    assert.equal(r.status, 'held');
+    assert.deepEqual(r.held.map((h) => h.workspace_id).sort(), ['old-a', 'old-b']);
+    assert.equal(r.history, undefined);
+  } finally { s.cleanup(); }
+});
+
+test('retained history: selecting both reports them as legacy history retained, not imported; nothing is copied, marked or changed', () => {
+  const { s, p, legacyTree } = twoUnlabeledFixture();
+  try {
+    const registryBefore = readFileSync(join(s.coreDir, 'index.json'), 'utf8');
+    const treeBefore = JSON.stringify(legacyTree());
+    const table = keep(['old-a', 'old-b']);
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    assert.equal(r.status, 'nothing-to-migrate');
+    assert.deepEqual(r.history.map((h) => h.workspace_id).sort(), ['old-a', 'old-b']);
+    assert.match(r.history[0].reason, /^legacy history retained, not imported \(/);
+    assert.equal(readFileSync(join(s.coreDir, 'index.json'), 'utf8'), registryBefore, 'the registry record is untouched, not marked migrated');
+    assert.equal(JSON.stringify(legacyTree()), treeBefore, 'the legacy bytes are untouched');
+    assert.equal(existsSync(join(p, '_core', 'claude-code', 'migrated-from.json')), false, 'no receipt: nothing was imported');
+    assert.equal(existsSync(join(p, '_core', 'claude-code', 'superseded')), false, 'nothing was copied into the project state');
+    const again = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    assert.deepEqual([again.status, again.fast], ['nothing-to-migrate', true]);
+    assert.deepEqual(again.history.map((h) => h.workspace_id).sort(), ['old-a', 'old-b'], 'the recorded result still says so');
+    const changed = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table: keep(['old-a']) });
+    assert.equal(changed.status, 'held', 'changing the selection is not served from the old record');
+  } finally { s.cleanup(); }
+});
+
+test('retained history: selecting one of two leaves the other held, and a selection without evidence or with a harness is held', () => {
+  const { s, p } = twoUnlabeledFixture();
+  try {
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table: keep(['old-a']) });
+    assert.equal(r.status, 'held');
+    assert.deepEqual(r.held.map((h) => h.workspace_id), ['old-b'], 'the unselected row is not claimed by the running harness');
+    assert.deepEqual(r.history.map((h) => h.workspace_id), ['old-a']);
+    const noEvidence = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table: { entries: { 'old-a': { disposition: 'retained-history' }, 'old-b': { disposition: 'retained-history', evidence: 'x', harness: 'codex' } } } });
+    assert.equal(noEvidence.status, 'held');
+    assert.deepEqual(noEvidence.held.map((h) => h.workspace_id).sort(), ['old-a', 'old-b']);
+  } finally { s.cleanup(); }
+});
+
 test('the record is not used when anything that could give the migration new work changed', () => {
   const { s, p, table } = migrationFixture();
   try {

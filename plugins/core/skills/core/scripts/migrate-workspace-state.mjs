@@ -32,6 +32,8 @@
  *   orphan-unregistered  a workspace folder with no registry entry that holds data
  *   empty                a workspace folder with no registry entry and no data
  *   hold                 needs a person: harness unknown, or duplicates with no tie-break
+ *   history              a person selected it in the table (disposition: retained-history, with evidence):
+ *                        reported as legacy history retained, not imported; never copied, never marked migrated
  *
  * The harness comes from an explicit table (--table), never from the id's
  * spelling; a workspace.json `harness` field is the fallback for workspaces the
@@ -65,6 +67,7 @@ import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 // Bookkeeping, not data: a folder holding only these has nothing worth migrating.
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const RETAINED_HISTORY = 'retained-history';
 
 function readTextOrNull(file) {
   try { return readFileSync(file, 'utf8').trim(); } catch { return null; }
@@ -259,6 +262,10 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
       harness = manifest.harness; harnessEvidence = 'workspace.json harness field';
     }
     const unlabeled = harness === 'unknown' && !(tableEntry && tableEntry.harness === 'unknown');
+    // A person may select a registered row, whose path exists, to be kept as history and not imported. It needs
+    // recorded evidence and no harness label; a malformed selection is held, never taken as a guess.
+    const retainedSelection = tableEntry && tableEntry.disposition === RETAINED_HISTORY;
+    const retainedValid = retainedSelection && typeof tableEntry.evidence === 'string' && tableEntry.evidence.trim() && !tableEntry.harness;
 
     const e = {
       workspace_id: id, registered: !!reg, dir_exists: dirExists, path, path_exists: pathExists, manifest_sha256: manifestSha,
@@ -272,6 +279,10 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     } else if (!pathExists) {
       e.class = 'orphan-gone'; e.reason = 'registered path no longer exists';
     }
+    if (!e.class && retainedSelection) {
+      if (retainedValid) { e.class = 'history'; e.reason = `legacy history retained, not imported (${tableEntry.evidence.trim()})`; }
+      else { e.class = 'hold'; e.reason = `a ${RETAINED_HISTORY} selection needs recorded evidence and no harness label`; }
+    }
     const active = lastActive(coreDir, id, reg);
     e._last = active.t;
     if (active.unknown) e.last_active_unknown = active.unknown;
@@ -282,7 +293,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
   // running the apply claims one only when it is the sole registration for its path.
   const perPath = new Map();
   for (const e of entries) {
-    if (e.class || !e.path) continue;
+    if ((e.class && e.class !== 'history') || !e.path) continue;   // a retained-history row still counts: selecting one of two never lets the running harness claim the other
     perPath.set(e.path, (perPath.get(e.path) || 0) + 1);
   }
   for (const e of entries) {
@@ -327,7 +338,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
   for (const e of entries) { delete e._last; delete e._unlabeled; }
   const counts = {};
   for (const e of entries) counts[e.class] = (counts[e.class] || 0) + 1;
-  const flagged = entries.filter((e) => e.class === 'hold' || e.class === 'orphan-unregistered')
+  const flagged = entries.filter((e) => e.class === 'hold' || e.class === 'orphan-unregistered' || e.class === 'history')
     .map((e) => ({ workspace_id: e.workspace_id, class: e.class, reason: e.reason, harness_evidence: e.harness_evidence, sample_files: e.sample_files }));
   return { generated_at: now.toISOString(), core_dir: coreDir, table_version: table.version ?? null, index_sha256: indexSha, counts, flagged, entries };
 }
@@ -506,6 +517,8 @@ const CHECK_RECORD = 'migration-check.json';
 const CHECK_RECORD_VERSION = 1;
 const RECORDABLE = new Set(['migrated', 'already-migrated', 'nothing-to-migrate']);
 
+const historyField = (history) => (history.length ? { history } : {});
+
 const tableSha = (table) => createHash('sha256').update(JSON.stringify(table)).digest('hex');
 
 /** What a pass classified from: the registry bytes, the table, and the legacy manifest of every
@@ -542,7 +555,7 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
     if (!durable || !hot || !verifiedReceipt({ root: real, harness, coreDir, stateDirs: [durable.dir, hot.dir] }).ok) return null;
   }
   return { status: rec.status === 'nothing-to-migrate' ? 'nothing-to-migrate' : 'already-migrated', root: real, harness,
-    live: rec.live ?? null, superseded: rec.superseded || [], files: 0, released: rec.released ?? false, fast: true };
+    live: rec.live ?? null, superseded: rec.superseded || [], files: 0, released: rec.released ?? false, ...historyField(Array.isArray(rec.history) ? rec.history : []), fast: true };
 }
 
 function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
@@ -555,7 +568,7 @@ function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
     writeSignedFile({ dir: durable.dir, name: CHECK_RECORD, coreDir, body: JSON.stringify({
       validation_version: CHECK_RECORD_VERSION,
       status: result.status, root: real, harness, live: result.live ?? null, superseded: result.superseded || [],
-      released: result.released ?? false, checked_at: now.toISOString(), ...inputs,
+      released: result.released ?? false, history: result.history || [], checked_at: now.toISOString(), ...inputs,
     }, null, 2) + '\n' });
   } catch { /* no record just means the next startup takes the full path */ }
 }
@@ -589,12 +602,13 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     seen.inputs = classifiedInputs(manifest, real, table);
     const mine = manifest.entries.filter((e) => e.path === real && e.harness === harness);
     const held = manifest.entries.filter((e) => e.path === real && e.class === 'hold');
+    const history = manifest.entries.filter((e) => e.path === real && e.class === 'history').map((e) => ({ workspace_id: e.workspace_id, reason: e.reason }));
     const live = mine.find((e) => e.class === 'migrate');
     const dups = mine.filter((e) => e.class === 'supersede');
     if (!live && !dups.length) {
       const marker = join(real, STATE_DIRNAME, harness, MIGRATING_MARKER);
       if (existsSync(marker)) return { status: 'migration-incomplete', root: real, harness, reason: 'an earlier migration stopped part-way and there is no legacy state left to finish it from' };
-      return { status: held.length ? 'held' : 'nothing-to-migrate', root: real, harness, held: held.map((e) => ({ workspace_id: e.workspace_id, reason: e.reason })) };
+      return { status: held.length ? 'held' : 'nothing-to-migrate', root: real, harness, held: held.map((e) => ({ workspace_id: e.workspace_id, reason: e.reason })), ...historyField(history) };
     }
 
     const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
@@ -769,7 +783,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     return {
       status: copies === null ? 'already-migrated' : 'migrated',
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-      files: copies ? copies.length : 0, released, ...(pointerKept ? { root_pointer: `kept (${pointerKept})` } : {}), ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
+      files: copies ? copies.length : 0, released, ...historyField(history), ...(pointerKept ? { root_pointer: `kept (${pointerKept})` } : {}), ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
     };
   });
 }

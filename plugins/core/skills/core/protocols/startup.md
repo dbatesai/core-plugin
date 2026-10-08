@@ -153,6 +153,8 @@ If either `CORE-STATE-…-FAILED` marker prints, say so in one plain line in the
 - `migration-incomplete` — an earlier migration stopped part-way and there is no old state left to finish it from. The project's state stays fenced; say so and stop there.
 - `lock-held` — another session holds the project's close lock, often a migration in progress. Say so; the state is fenced until it finishes.
 
+When the result carries `history`, say in one plain sentence which old workspaces a person chose to keep as history: *legacy history retained, not imported: <ids>*. They are not held, not copied and not marked migrated; they stay in the old account folder. Without such a choice, rows that cannot be assigned to a harness stay `held` (exit 3).
+
 While a migration is unfinished, other reads of the project's state see nothing and writes go to this machine's local state, so a session must not treat missing state as a fresh project.
 
 The drift check catches an older build of this harness that kept writing to the old workspace after migration (a rollback, or a second machine). Log lines it appended arrive in the project's copy exactly once; other changed files land in `superseded/legacy-<date>/`. When `status` is `brought-in`, say in one line what arrived. `unchanged`, `not-migrated` and `no-state` need no mention.
