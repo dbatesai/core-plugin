@@ -792,7 +792,9 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
 
     let released = false;
     let pointerKept = null;   // why the project's root workspace.json was left as it was, when it was
-    if (release.allDone) {
+    // A sibling receipt that failed its check holds release even when an older install's account
+    // manifest marks the same workspaces migrated: the project's own record outranks that history.
+    if (release.allDone && unverified.length === 0) {
       // The note that says where each legacy workspace's state went lives in the project, not in the account's folders.
       const movedNote = join(real, STATE_DIRNAME, 'legacy-moved.md');
       if (!existsSync(movedNote)) {

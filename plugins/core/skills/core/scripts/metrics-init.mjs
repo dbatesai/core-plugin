@@ -118,10 +118,12 @@ export function initMetrics({ projectDir, home = coreHome(), env = process.env }
     chosen_reason: detection.reason,
   });
 
+  // The log is best-effort and never fails the scaffold, but whether it landed is reported.
+  let scaffoldLog = 'written';
   try {
     appendLeaf(join(operationalMetaDir, 'scaffold.log'), scaffoldLogLine + '\n');
-  } catch {
-    // Don't fail scaffold on log-write failure; the directories still get created.
+  } catch (err) {
+    scaffoldLog = `not-written (${err.code || err.message})`;
   }
 
   clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
@@ -133,6 +135,7 @@ export function initMetrics({ projectDir, home = coreHome(), env = process.env }
     operationalMetaDir,
     detection,
     scaffold_log_line: scaffoldLogLine,
+    scaffold_log: scaffoldLog,
   };
 }
 

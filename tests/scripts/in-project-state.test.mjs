@@ -2146,3 +2146,47 @@ test('the startup and process-memory instructions name all three nonzero outcome
     assert.doesNotMatch(text, /There is nothing to reconcile by hand here\./, `${name}: no blanket all-clear`);
   }
 });
+
+test('an older account manifest marking a damaged sibling migrated does not release the path', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table }).status, 'migrated');
+    const listed = JSON.parse(readFileSync(join(p, '_core', 'claude-code', RECEIPT_NAME), 'utf8')).files.find((f) => f.to.endsWith('hot-section-draft.md')).to;
+    const kept = readFileSync(listed);
+    rmSync(listed);
+    writeFileSync(join(s.coreDir, 'migration-manifest.json'), JSON.stringify({ entries: ['legacy', 'legacy-old'].map((id) => ({ workspace_id: id, migrated_at: '2026-09-01T00:00:00Z', migrated_by: 'claude-code' })) }));
+    const pointerBefore = readFileSync(join(p, 'workspace.json'), 'utf8');
+    const r = applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table });
+    assert.equal(r.released, false, 'the older mark does not override the failed receipt');
+    assert.equal(r.release_held?.[0]?.harness, 'claude-code');
+    assert.equal(readFileSync(join(p, 'workspace.json'), 'utf8'), pointerBefore, 'pointer kept');
+    assert.equal(existsSync(join(p, '_core', 'legacy-moved.md')), false, 'no moved note');
+    assert.ok(!JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8')).some((e) => e.migrated), 'no index entry marked');
+    writeFileSync(listed, kept);
+    assert.equal(applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table }).released, true, 'positive: the repaired sibling releases');
+  } finally { s.cleanup(); }
+});
+
+test('a scaffold.log that is a link is not written through, and the scaffold says the log did not land', { skip: isWin }, async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const s = sandbox();
+  try {
+    const env = { CORE_HARNESS: H };
+    const p = s.mk('Projects', 'Log');
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+    mkdirSync(join(hot, 'metrics'));
+    const outside = join(s.base, 'outside.log');
+    writeFileSync(outside, 'kept\n');
+    symlinkSync(outside, join(hot, 'metrics', 'scaffold.log'));
+    const r = initMetrics({ projectDir: p, home: s.home, env });
+    assert.equal(r.ok, true, 'the log stays best-effort');
+    assert.match(r.scaffold_log, /^not-written/);
+    assert.equal(readFileSync(outside, 'utf8'), 'kept\n', 'the file the link points to is untouched');
+    const q = s.mk('Projects', 'Plain');
+    registerProject(s.coreDir, q);
+    updateManifest({ root: q, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Finch' } });
+    assert.equal(initMetrics({ projectDir: q, home: s.home, env }).scaffold_log, 'written', 'positive: an ordinary log is written');
+  } finally { s.cleanup(); }
+});
