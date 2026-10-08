@@ -533,9 +533,11 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
 - **Per-project records are single-owner files in the project's state.** `index-registry.mjs
   touch` writes `last-active`, `bootstrap` writes `last-bootstrap.json`, `manifest --set-json`
   merges into the manifest — each under `<project>/_core/<harness>/`, needing no registry lock.
-- **`~/.core/migration-manifest.json`** is shared by every project and harness; the
-  migration writes it only under `~/.core/migration-manifest.lock`, after the project's close
-  lock.
+- **The migration's "already migrated" marks** are the project's signed per-harness receipts
+  (`<project>/_core/<harness>/migrated-from.json`), read under the project's close lock. An older
+  install's `~/.core/migration-manifest.json` is read as history and never written, there is no
+  account-wide manifest lock, and the note saying where the legacy state went is
+  `<project>/_core/legacy-moved.md`; nothing is written into `~/.core/workspaces/`.
 - **Edit-detection state-cache is per-project** (see §Edit detection above): the project-local
   cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
   and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
@@ -763,7 +765,7 @@ Three rings, one read at runtime.
 ├── projects.json                  ← registered project roots (auto-close trust anchor)
 ├── install-secret, install-id     ← sign and identify this install's project state
 ├── local/<key>/                   ← adoption-consent records only; older project state here is read-only history
-├── migration-manifest.json        ← the migration's record of the legacy workspaces/ folders
+├── migration-manifest.json        ← read-only history: an older install's record of the legacy workspaces/ folders
 ├── index.json, workspaces/<id>/   ← legacy layout; read by the migration, never written for new projects
 ├── agent-profile.md, dm-profile.md, topics.md, agents/, task-configs/
 │                                  ← older shared copies; read-only history, copied into a project once by import-agent-notes.mjs

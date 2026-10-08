@@ -170,7 +170,7 @@ test('migration copies every legacy byte, verifies it, and a re-run is a no-op',
   } finally { s.cleanup(); }
 });
 
-test('the old pointer, MOVED.md and the index marks wait until every harness on the path has migrated', () => {
+test('the old pointer, the moved note and the index marks wait until every harness on the path has migrated', () => {
   const { s, p, table } = migrationFixture();
   try {
     const pointerBefore = readFileSync(join(p, 'workspace.json'), 'utf8');
@@ -178,20 +178,24 @@ test('the old pointer, MOVED.md and the index marks wait until every harness on 
     assert.equal(first.released, false, 'codex has not migrated yet');
     assert.equal(readFileSync(join(p, 'workspace.json'), 'utf8'), pointerBefore, 'an older Codex still finds its pointer');
     assert.equal(existsSync(join(s.coreDir, 'workspaces', 'legacy', 'MOVED.md')), false);
+    assert.equal(existsSync(join(p, '_core', 'legacy-moved.md')), false, 'the project note waits too');
     assert.ok(!JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8')).some((e) => e.migrated));
 
     const second = applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table });
     assert.equal(second.status, 'migrated');
     assert.equal(second.released, true);
     assert.equal(readManifest({ root: p, harness: 'codex', coreDir: s.coreDir }).agent_name, 'Finch');
+    const note = readFileSync(join(p, '_core', 'legacy-moved.md'), 'utf8');
     for (const id of ['legacy', 'legacy-old', 'legacy-codex']) {
-      assert.ok(existsSync(join(s.coreDir, 'workspaces', id, 'MOVED.md')), `${id} carries MOVED.md`);
+      assert.ok(note.includes(`workspace ${id}:`), `${id} is named in the project's moved note`);
+      assert.equal(existsSync(join(s.coreDir, 'workspaces', id, 'MOVED.md')), false, `nothing is written into the account's old folder for ${id}`);
       assert.ok(existsSync(join(s.coreDir, 'workspaces', id, 'workspace.json')), `${id} is kept, never deleted`);
     }
     assert.match(readFileSync(join(p, 'workspace.json'), 'utf8'), /"moved"/, 'the pointer becomes a moved note');
     assert.ok(JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8')).every((e) => e.migrated), 'index entries marked migrated');
-    const manifest = JSON.parse(readFileSync(join(s.coreDir, 'migration-manifest.json'), 'utf8'));
-    assert.ok(manifest.entries.filter((e) => e.path === p).every((e) => e.migrated_at));
+    assert.equal(existsSync(join(s.coreDir, 'migration-manifest.json')), false, 'the account-wide manifest is no longer written');
+    assert.equal(existsSync(join(s.coreDir, 'migration-manifest.lock')), false, 'and its lock is never taken');
+    for (const h of ['claude-code', 'codex']) assert.ok(existsSync(join(p, '_core', h, 'migrated-from.json')), `${h}'s signed receipt is the project's mark`);
   } finally { s.cleanup(); }
 });
 
@@ -1141,12 +1145,12 @@ test('registryEntryPath prefers path, falls back to project_path, and answers nu
 
 // A finished migration is recorded in the project; later startups read the record without any
 // lock, so one project's startup never waits behind another's on the shared manifest or registry.
-test('after a full migration, a startup returns from the project record without taking the close, manifest or registry lock', async () => {
+test('after a full migration, a startup returns from the project record without taking the close or registry lock', async () => {
   const { s, p, table } = migrationFixture();
   const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
   try {
     assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table }).status, 'migrated');
-    const held = [join(p, '_memories', '_close.lock'), join(s.coreDir, 'migration-manifest.lock'), join(s.coreDir, 'index.lock')]
+    const held = [join(p, '_memories', '_close.lock'), join(s.coreDir, 'index.lock')]
       .map((f) => ({ f, l: acquireFileLock(f) }));
     try {
       assert.ok(held.every((h) => h.l.ok));
@@ -1158,6 +1162,21 @@ test('after a full migration, a startup returns from the project record without 
   } finally { s.cleanup(); }
 });
 
+test('a full migration takes no account-wide manifest lock and writes no manifest: a held lock of that name delays nothing', async () => {
+  const { s, p, table } = migrationFixture();
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const m = join(s.coreDir, 'migration-manifest.lock'); const l = acquireFileLock(m);
+  try {
+    assert.ok(l.ok);
+    const t0 = Date.now();
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    assert.equal(r.status, 'migrated');
+    assert.ok(Date.now() - t0 < 3000, 'the migration did not wait for the old manifest lock');
+    assert.equal(existsSync(join(s.coreDir, 'migration-manifest.json')), false, 'no account-wide manifest is written');
+    assert.ok(existsSync(join(p, '_core', 'claude-code', 'migrated-from.json')));
+  } finally { releaseFileLock(m, l.nonce); s.cleanup(); }
+});
+
 test('a project with nothing to migrate is recorded too, and its next startup is lock-free', async () => {
   const s = sandbox();
   const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
@@ -1166,7 +1185,7 @@ test('a project with nothing to migrate is recorded too, and its next startup is
     registerProject(s.coreDir,p);
     writeFileSync(join(s.coreDir, 'index.json'), '[]');
     assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir }).status, 'nothing-to-migrate');
-    const m = join(s.coreDir, 'migration-manifest.lock'); const l = acquireFileLock(m);
+    const m = join(s.coreDir, 'index.lock'); const l = acquireFileLock(m);
     try { assert.deepEqual((({ status, fast }) => [status, fast])(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir })), ['nothing-to-migrate', true]); }
     finally { releaseFileLock(m, l.nonce); }
   } finally { s.cleanup(); }
@@ -1516,7 +1535,8 @@ test('a tracked root pointer survives damaged git metadata and an inherited alte
     rmSync(join(a.p, '.git'), { recursive: true }); writeFileSync(join(a.p, '.git'), 'gitdir: missing-git-dir\n');
     const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir });
     assert.equal(readFileSync(join(a.p, 'workspace.json'), 'utf8'), before, 'the pointer bytes are intact');
-    assert.equal(r.root_pointer, 'kept (tracking-unknown)');
+    // The other harness's receipt cannot be vouched for while git's metadata is damaged, so it is not a mark and the release waits.
+    assert.equal(r.root_pointer ?? null, null, 'no "kept" report: nothing was released, so nothing was kept');
   } finally { a.s.cleanup(); }
   // an inherited GIT_INDEX_FILE naming another index does not change the answer about this project
   const b = migrationFixture();

@@ -201,7 +201,7 @@ for (const mode of ['completed-copy', 'primary-error', 'nested-releases']) {
           if(${JSON.stringify(mode)}==='primary-error'&&String(to).endsWith('migrated-from.json'))
             throw Object.assign(new Error('synthetic receipt write failure'),{code:'EIO'});
           if(String(to).endsWith('.done')&&(String(from).includes('_close.lock')||
-            (${JSON.stringify(mode)}==='nested-releases'&&String(from).includes('migration-manifest.lock'))))
+            (${JSON.stringify(mode)}==='nested-releases'&&String(from).includes('index.lock'))))
             throw Object.assign(new Error('synthetic release denial'),{code:'EPERM'});
           return original(from,to);};syncBuiltinESMExports();`;
       const table = join(f.base, 'table.json'); fs.writeFileSync(table, JSON.stringify(f.options.table));
@@ -225,7 +225,7 @@ for (const mode of ['completed-copy', 'primary-error', 'nested-releases']) {
       } else {
         assert.equal(report.status, 'lock-release-failed');
         assert.ok(report.additional_lock_releases.some(x => x.lockPath.endsWith('_close.lock')));
-        assert.ok(report.lock_path.endsWith('migration-manifest.lock'));
+        assert.ok(report.lock_path.endsWith('index.lock'), 'the registry lock is the inner lock; no account-wide manifest lock is taken');
       }
     } finally { f.cleanup(); }
   });

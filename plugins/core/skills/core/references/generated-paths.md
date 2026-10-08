@@ -51,7 +51,7 @@ outside the folder.
 | `install-secret`, `install-id`, the machine lock identity | Kept: the keys that sign project state |
 | `projects.json`, `index.json`, `index.lock` (enrollment only) | Kept: the registry |
 | `local/<key>/declined-adopt`, `pending-adopt-<harness>.json`, `adopted-sibling-stamps` | Kept: adoption consent records |
-| `migration-manifest.json` and its lock, `workspaces/<id>/MOVED.md` | Kept by the one-time migration as its record of the legacy `workspaces/` folders it describes; proposed classification, awaiting the user's decision |
+| `migration-manifest.json`, `migration-manifest.lock`, `workspaces/<id>/MOVED.md` | Read-only history: an older install wrote them. The migration now reads the manifest if present, takes no account-wide manifest lock, writes nothing into the legacy `workspaces/` folders, and records what migrated in the project's signed per-harness receipts and `_core/legacy-moved.md` |
 | `migrate-harness-table.json` | Optional input the user supplies; CORE never writes it |
 | `agent-profile.md`, `dm-profile.md`, `topics.md`, `agents/`, `task-configs/` | Read-only history; copied into a project once by `import-agent-notes.mjs` |
 | `research/`, `state-cache.json`, `local/<key>/<harness>/`, `artifact-receipts/`, `workspaces/<id>/` | Read-only history; copied only on an explicit ask (`--research`, the legacy-cache importer) or by the one-time migration |

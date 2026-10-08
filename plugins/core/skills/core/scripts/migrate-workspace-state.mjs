@@ -7,22 +7,23 @@
  * ~/.core/index.json entry and reports; it writes nothing but --out.
  *
  * --apply migrates ONE project for ONE harness (the one running it). It holds
- * the project's close lock for the whole run, re-classifies under the global
- * manifest lock (so workspaces an older install registered since the last run
+ * the project's close lock for the whole run, re-classifies (so workspaces an older install registered since the last run
  * are seen), copies — never moves — the live workspace into the project's state
  * and duplicates into superseded/<old-id>/, verifies every copy by SHA-256 and
  * writes the migrated-from.json receipt last. A run that finds the receipt does
  * nothing; a run interrupted mid-copy has no receipt and redoes the copy. Only
- * once EVERY harness registered for the path has migrated does it write MOVED.md
- * into the old folders, turn the root workspace.json pointer into a moved note
+ * once EVERY harness registered for the path has migrated does it write legacy-moved.md
+ * into the project's state folder (nothing is written into the account's old folders), turn the root workspace.json pointer into a moved note
  * (left alone when git tracks it), and mark the index.json entries migrated —
  * an older install that still reads them keeps working until then. A finished
  * run is recorded in the project (signed, with fingerprints of the legacy registry and the
  * classification table); while those match and the receipt still verifies, a startup returns
- * from that record without taking the close lock or the shared manifest and registry locks.
+ * from that record without taking the close lock or the shared registry lock.
  *
- * Lock order: the project's close lock, then the global manifest lock, then the
- * registry lock. Nothing is deleted.
+ * Marks that a workspace has migrated are read from the project's own signed per-harness receipts (and
+ * from an older install's migration-manifest.json, read only); nothing is written to the account's
+ * migration-manifest.json and no account-wide manifest lock is taken. Lock order: the project's close
+ * lock, then the registry lock. Nothing is deleted.
  *
  * Classes (exactly one per workspace id):
  *   migrate              registered, path exists, harness known — becomes the live state
@@ -56,7 +57,7 @@ import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
   writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath, markMetricsEverExternal,
 } from './project-state.mjs';
-import { acquireFileLock, withAcquiredFileLock, withFileLock } from './file-lock.mjs';
+import { acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
 import { assertSafeWorkspaceId, isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
@@ -417,20 +418,41 @@ function resolvePendingAppend({ from, known }) {
 function manifestPath(coreDir) { return join(coreDir, 'migration-manifest.json'); }
 
 /**
- * Re-classify and merge the persisted "migrated" marks, under the global manifest
- * lock. `mutate(manifest)` may add marks; the merged manifest is written back.
+ * The "already migrated" marks for the workspaces on one project path: what an older install recorded
+ * in the account's migration-manifest.json (read only, never written now), plus the ids named by this
+ * project's own signed receipts, one per harness. A receipt that is not signed by this install, is
+ * git-tracked, or does not say complete contributes nothing.
  */
-function withManifest(coreDir, table, applyHarness, mutate) {
-  return withFileLock(join(coreDir, 'migration-manifest.lock'), () => {
-    const prior = readJson(manifestPath(coreDir), null);
-    const marks = new Map();
-    for (const e of prior?.entries || []) if (e.migrated_at) marks.set(e.workspace_id, { migrated_at: e.migrated_at, migrated_to: e.migrated_to, migrated_by: e.migrated_by });
-    const m = buildManifest({ coreDir, table, applyHarness });
-    for (const e of m.entries) if (marks.has(e.workspace_id)) Object.assign(e, marks.get(e.workspace_id));
-    const out = mutate ? mutate(m) : undefined;
-    atomicWriteFileSync(manifestPath(coreDir), JSON.stringify(m, null, 2) + '\n');
-    return { manifest: m, out };
-  }, { retries: 80, retryDelayMs: 100 });
+function migratedMarks(coreDir, real) {
+  const marks = new Map();
+  const prior = readJson(manifestPath(coreDir), null);
+  for (const e of prior?.entries || []) if (e.migrated_at) marks.set(e.workspace_id, { migrated_at: e.migrated_at, migrated_to: e.migrated_to, migrated_by: e.migrated_by });
+  let harnesses = [];
+  try { harnesses = readdirSync(join(real, STATE_DIRNAME), { withFileTypes: true }).filter((d) => d.isDirectory() && HARNESS_RE.test(d.name)).map((d) => d.name); } catch { /* no state folder yet */ }
+  for (const h of harnesses) {
+    const raw = readSignedFile({ root: real, harness: h, name: RECEIPT, coreDir });
+    let receipt = null;
+    try { receipt = raw === null ? null : JSON.parse(raw); } catch { /* unreadable: no marks */ }
+    if (!receipt || receipt.complete !== true) continue;
+    for (const id of [receipt.live, ...(Array.isArray(receipt.superseded) ? receipt.superseded : [])]) {
+      if (typeof id === 'string' && id) marks.set(id, { migrated_at: receipt.migrated_at, migrated_to: join(real, STATE_DIRNAME, h), migrated_by: h });
+    }
+  }
+  return marks;
+}
+
+/**
+ * Classify the legacy workspaces (a pure read of the account's older folders) and merge the migrated
+ * marks for `real`. `mutate(manifest)` may add marks in memory. Nothing is written to the account's
+ * folder and no account-wide lock is taken: the project's close lock, held by the caller, is the only
+ * serialization, and a mark persists as the project's signed receipt.
+ */
+function withManifest(coreDir, table, applyHarness, mutate, real) {
+  const marks = migratedMarks(coreDir, real);
+  const m = buildManifest({ coreDir, table, applyHarness });
+  for (const e of m.entries) if (marks.has(e.workspace_id)) Object.assign(e, marks.get(e.workspace_id));
+  const out = mutate ? mutate(m) : undefined;
+  return { manifest: m, out };
 }
 
 /**
@@ -563,7 +585,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
   const lock = acquireFileLock(lockFile, { extra: { session_id: `migrate-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
   return withAcquiredFileLock(lockFile, lock.nonce, () => {
-    const { manifest } = withManifest(coreDir, table, harness);
+    const { manifest } = withManifest(coreDir, table, harness, undefined, real);
     seen.inputs = classifiedInputs(manifest, real, table);
     const mine = manifest.entries.filter((e) => e.path === real && e.harness === harness);
     const held = manifest.entries.filter((e) => e.path === real && e.class === 'hold');
@@ -717,7 +739,7 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
       }
       const onPath = m.entries.filter((e) => e.path === real && e.registered && (e.class === 'migrate' || e.class === 'supersede' || e.class === 'hold'));
       return { allDone: onPath.length > 0 && onPath.every((e) => e.migrated_at), onPath };
-    });
+    }, real);
 
     mutateProjects(coreDir, (entries) => {
       if (entries.some((e) => e && typeof e.path === 'string' && canonical(e.path) === real)) return entries;
@@ -727,12 +749,11 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
     let released = false;
     let pointerKept = null;   // why the project's root workspace.json was left as it was, when it was
     if (release.allDone) {
-      for (const e of release.onPath) {
-        const dir = join(coreDir, 'workspaces', e.workspace_id);
-        // The note is written only into a real legacy folder; a link (or anything else) there is left alone.
-        if (isRealFolder(dir) && !existsSync(join(dir, 'MOVED.md'))) {
-          atomicWriteFileSync(join(dir, 'MOVED.md'), `This workspace's CORE state now lives in ${e.migrated_to} (migrated ${e.migrated_at}). Nothing here was deleted.\n`);
-        }
+      // The note that says where each legacy workspace's state went lives in the project, not in the account's folders.
+      const movedNote = join(real, STATE_DIRNAME, 'legacy-moved.md');
+      if (!existsSync(movedNote)) {
+        const lines = release.onPath.map((e) => `- workspace ${e.workspace_id}: its CORE state now lives in ${e.migrated_to || join(real, STATE_DIRNAME)} (migrated ${e.migrated_at || iso}). Nothing was deleted.`);
+        atomicWriteFileSync(movedNote, `# Where the older CORE workspaces for this project went\n\n${lines.join('\n')}\n`);
       }
       const pointerFile = join(real, 'workspace.json');
       const tracked = existsSync(pointerFile) ? gitTracks(real, 'workspace.json') : false;
