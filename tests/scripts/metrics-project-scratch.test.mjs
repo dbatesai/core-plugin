@@ -34,6 +34,8 @@ function run(f, code, fault='') {
       FS_CONFINE_ROOTS:[source,f.root,f.other,f.home,f.out].join(delimiter),FS_CONFINE_LOG:audit}
   });
   assert.equal(r.status,0,r.stderr);const data=JSON.parse(r.stdout.trim());
+  // On CI, record what the packager returned: the hosted runners' tar differs from a developer's, and an assertion alone hides why.
+  if(process.env.CI)console.log('# packager result: '+JSON.stringify(data).slice(0,1500));
   const calls=fs.readFileSync(audit,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   return {...data,calls,violations:calls.filter(x=>x.verdict.startsWith('refused-'))};
 }
