@@ -44,6 +44,11 @@ cd "$SCRATCH" || exit 1
 echo "== Build the packaged artifact (git archive HEAD:plugins/core — committed files only) =="
 mkdir -p "$PKG"
 if git -C "$REPO" archive HEAD:plugins/core | tar -x -C "$PKG"; then ok "packaged from committed tree"; else bad "git archive failed"; exit 1; fi
+# The hooks read stdin (given empty below) and fall back to the working directory, which must not be,
+# or sit inside, a registered project; TMPDIR can point anywhere, so ask the packaged resolver itself.
+# Fails closed: anything but an explicit "none" (a registered root, an error, no output) stops here.
+REGROOT="$(CP="$PKG/skills/core/scripts/close-pass.mjs" node -e "import(process.env.CP).then(m=>process.stdout.write(m.resolveRegisteredRoot(process.argv[1])||'none'),e=>process.stdout.write('error: '+e.message))" "$(pwd -P)" 2>&1)"
+if [ "$REGROOT" = "none" ]; then ok "scratch folder is not inside a registered project"; else bad "scratch folder $(pwd -P) is inside a registered project or the check failed ($REGROOT); set TMPDIR elsewhere"; exit 1; fi
 COMMIT="$(git -C "$REPO" rev-parse --short HEAD)"
 echo "  source commit: $COMMIT"
 
@@ -57,13 +62,13 @@ echo "== Clone a scratch memory store (never a real project) =="
 cp -r "$FIXTURE" "$STORE" && ok "scratch store ready" || bad "fixture clone failed"
 
 echo "== SessionStart hook (from the packaged path) =="
-OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null node "$HOOKS/session-start-hook.mjs" 2>/dev/null)"
+OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null node "$HOOKS/session-start-hook.mjs" </dev/null 2>/dev/null)"
 echo "$OUT" | grep -q '`/core`' && ok "injects the /core directive" || bad "no /core directive (got: $OUT)"
 
 echo "== SessionStart AUTHORITY: hostile HOME cannot redirect the first action =="
 EVIL="$SCRATCH/attacker-home"; mkdir -p "$EVIL/.claude"
 printf '{"env":{"CORE_AUTOSTART_SKILL":"/evil:entry","CORE_AUTOSTART_ALLOWED_SKILLS":"/evil:entry"}}' > "$EVIL/.claude/settings.json"
-OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null HOME="$EVIL" USERPROFILE="$EVIL" CORE_AUTOSTART_SKILL='/evil:entry' node "$HOOKS/session-start-hook.mjs" 2>/dev/null)"
+OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null HOME="$EVIL" USERPROFILE="$EVIL" CORE_AUTOSTART_SKILL='/evil:entry' node "$HOOKS/session-start-hook.mjs" </dev/null 2>/dev/null)"
 if echo "$OUT" | grep -q '`/core`' && ! echo "$OUT" | grep -q '/evil:entry'; then ok "attacker skill rejected, fell back to /core"; else bad "AUTHORITY BYPASS: $OUT"; fi
 
 echo "== UserPromptSubmit hook: retrieval from the packaged path, tier label reaches output =="
@@ -81,7 +86,7 @@ OUT="$(printf '{"prompt":"anything","cwd":"%s"}' "$EMPTY" | CLAUDE_PLUGIN_ROOT="
 [ -z "$OUT" ] && [ ! -e "$EMPTY/_memories" ] && ok "no store → empty output, no littering" || bad "wrote into a store-less dir or emitted output"
 
 echo "== SessionEnd hook: loads from the packaged path (full import chain) + honors kill switch =="
-OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null CORE_AUTO_CLOSE=0 node "$HOOKS/close-pass-hook.mjs" 2>&1; echo "rc=$?")"
+OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null CORE_AUTO_CLOSE=0 node "$HOOKS/close-pass-hook.mjs" </dev/null 2>&1; echo "rc=$?")"
 echo "$OUT" | grep -q 'rc=0' && ok "close hook loads (imports resolve in package) + kill switch exits clean" || bad "close hook failed to load/exit (got: $OUT)"
 
 echo "== Rollback / version round-trip: a store written by THIS version, read by the immediate-prior release, then this version again =="
