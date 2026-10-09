@@ -317,12 +317,17 @@ export function acquireFileLock(lockPath, {
  * that acquisition makes); a file with a hard link somewhere other than this folder; and a family
  * file, or the count of its names, that can't be examined for any reason other than having gone.
  * A generation is created by linking a temp file in the same folder, so for a moment it has two
- * names, both here: that is the lock's own doing and passes.
+ * names, both here: that is the lock's own doing and passes. A directory listing taken while that
+ * happens can show the generation but not its temp name, so a doubled name that can't be counted
+ * here is looked at again for a short while (about 30 ms, the state cache's own budget) before it
+ * is refused; a second name that stays outside the folder is still refused.
  */
 export function foreignLockArtifact(lockPath) {
   const dir = dirname(lockPath), base = basename(lockPath);
   const gone = (e) => e?.code === 'ENOENT';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const ATTEMPTS = 10;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    if (attempt) sleepSync(3);
     let names;
     try { names = readdirSync(dir); } catch (e) { if (gone(e)) return null; throw e; }
     const stats = new Map();
@@ -344,7 +349,8 @@ export function foreignLockArtifact(lockPath) {
       if (here === st.nlink) continue;                       // every name is in this folder
       let again;
       try { again = lstatSync(join(dir, n)); } catch (e) { if (gone(e)) continue; return n; }
-      if (again.nlink !== st.nlink) { retry = true; break; }  // an acquisition was in flight: look again
+      // An acquisition in flight (the count moved, or the listing may have missed its temp name): look again.
+      if (again.nlink !== st.nlink || attempt < ATTEMPTS - 1) { retry = true; break; }
       return n;                                               // a name outside this folder, or one that couldn't be counted
     }
     if (!retry) return null;
