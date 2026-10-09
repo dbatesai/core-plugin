@@ -142,6 +142,7 @@ test('the runner process reports a failed restore and a failed removal, names th
 // The test that removes a leftover home trusts only a folder the runner itself would have made.
 import { mkdtempSync as mk, mkdirSync as mkd, symlinkSync as sym, writeFileSync as wf } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 
 test('isRunnerHome accepts a runner-shaped folder in the temp root and refuses lookalikes', () => {
   const real = mk(join(tmpdir(), 'core-suite-home-'));
@@ -151,8 +152,10 @@ test('isRunnerHome accepts a runner-shaped folder in the temp root and refuses l
     assert.equal(isRunnerHome(join(tmpdir(), 'core-suite-home-short')), false, 'a missing folder');
     const lookalike = join(elsewhere, 'core-suite-home-abc123'); mkd(lookalike);
     assert.equal(isRunnerHome(lookalike), false, 'right name, wrong parent');
-    const link = join(tmpdir(), `core-suite-home-L${String(process.pid).slice(-5).padStart(5, '0')}`); sym(elsewhere, link);
-    try { assert.equal(isRunnerHome(link), false, 'a link with a matching name'); } finally { rmSync(link, { force: true }); }
+    if (symlinkCapable()) {   // a non-elevated Windows account without Developer Mode cannot make the link
+      const link = join(tmpdir(), `core-suite-home-L${String(process.pid).slice(-5).padStart(5, '0')}`); sym(elsewhere, link);
+      try { assert.equal(isRunnerHome(link), false, 'a link with a matching name'); } finally { rmSync(link, { force: true }); }
+    }
     const file = join(tmpdir(), `core-suite-home-F${String(process.pid).slice(-5).padStart(5, '0')}`); wf(file, 'x');
     try { assert.equal(isRunnerHome(file), false, 'a file with a matching name'); } finally { rmSync(file, { force: true }); }
     assert.equal(isRunnerHome(undefined), false);

@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 
 const GUARD = fileURLToPath(new URL('../../scripts/release/real-home-guard.mjs', import.meta.url));
 const run = (...a) => spawnSync(process.execPath, [GUARD, ...a], { encoding: 'utf8' });
@@ -35,7 +36,8 @@ test('an added file, a changed file, a removed file and a new folder each fail t
     ['changed file', (c) => writeFileSync(join(c, 'projects.json'), '[1,2,3]')],
     ['removed file', (c) => rmSync(join(c, 'projects.json'))],
     ['new folder', (c) => mkdirSync(join(c, 'workspaces'))],
-    ['new link', (c) => symlinkSync(c, join(c, 'loop'))],
+    // Only where this account can make a link (a non-elevated Windows account without Developer Mode cannot).
+    ...(symlinkCapable() ? [['new link', (c) => symlinkSync(c, join(c, 'loop'))]] : []),
   ]) {
     const { home, snap } = fixture();
     try {
