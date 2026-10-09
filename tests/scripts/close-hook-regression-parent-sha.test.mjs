@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
@@ -65,6 +65,12 @@ function registeredStore() {
 // writes close-pass-last.log and a global state-cache lock into the real ~/.core.
 const ACCOUNT = process.env.CORE_TEST_ACCOUNT_HOME;
 const accountEnv = ACCOUNT ? { ...process.env, HOME: ACCOUNT, USERPROFILE: ACCOUNT } : process.env;
+// That old code also writes these into the disposable ~/.core. Where the runner's write deny holds they are
+// refused; where it can't bind (a hosted Windows administrator) they land, so this test removes the ones it made.
+const OLD_CODE_FILES = /^(close-pass-last\.log|\.?state-cache\.lock(\.|$))/;
+const accountCoreNames = () => { try { return readdirSync(join(ACCOUNT, '.core')); } catch { return []; } };
+const preexisting = ACCOUNT ? new Set(accountCoreNames()) : null;
+after(() => { if (ACCOUNT) for (const n of accountCoreNames()) if (!preexisting.has(n) && OLD_CODE_FILES.test(n)) rmSync(join(ACCOUNT, '.core', n), { force: true }); });
 
 function runHook(hookPath, payload, env) {
   const res = spawnSync(process.execPath, [hookPath], {
