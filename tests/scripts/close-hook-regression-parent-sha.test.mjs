@@ -60,9 +60,15 @@ function registeredStore() {
   return { store, idxPath, idxDir };
 }
 
+// The code at the parent SHA resolves ~/.core from os.homedir() (HOME), which the isolated runner
+// leaves pointing at the real account; point it at the runner's disposable one, or that old code
+// writes close-pass-last.log and a global state-cache lock into the real ~/.core.
+const ACCOUNT = process.env.CORE_TEST_ACCOUNT_HOME;
+const accountEnv = ACCOUNT ? { ...process.env, HOME: ACCOUNT, USERPROFILE: ACCOUNT } : process.env;
+
 function runHook(hookPath, payload, env) {
   const res = spawnSync(process.execPath, [hookPath], {
-    input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, ...env },
+    input: JSON.stringify(payload), encoding: 'utf8', env: { ...accountEnv, ...env },
   });
   return res;
 }
@@ -84,9 +90,9 @@ test('[parent-SHA falsifier] a second SessionEnd for an already-closed session r
     // (begin/record/finish — unchanged today) — this is what /finalize did at that SHA.
     const parentClosePass = join(parentTree, 'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
     const ops = 'maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,decorate-graph,reflection-a,reflection-b,metrics,session-summary,memory-refresh';
-    execFileSync(process.execPath, [parentClosePass, 'begin', store, '--session', SESSION_A, '--ops', ops]);
-    for (const op of ops.split(',')) execFileSync(process.execPath, [parentClosePass, 'record', store, '--op', op, '--status', 'done']);
-    execFileSync(process.execPath, [parentClosePass, 'finish', store, '--session', SESSION_A]);
+    execFileSync(process.execPath, [parentClosePass, 'begin', store, '--session', SESSION_A, '--ops', ops], { env: accountEnv });
+    for (const op of ops.split(',')) execFileSync(process.execPath, [parentClosePass, 'record', store, '--op', op, '--status', 'done'], { env: accountEnv });
+    execFileSync(process.execPath, [parentClosePass, 'finish', store, '--session', SESSION_A], { env: accountEnv });
 
     // --- A second SessionEnd fires for the SAME session, moments later, with a real
     // transcript on the payload (didWork=true under e81903f's heuristic).
@@ -100,7 +106,7 @@ test('[parent-SHA falsifier] a second SessionEnd for an already-closed session r
     // --- The exact same scenario against the CURRENT tip, using the NEW mechanism
     // (process-request) to perform the equivalent "already closed" step.
     const currentClosePass = join(REPO_ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
-    execFileSync(process.execPath, [currentClosePass, 'process-request', store, '--session', SESSION_A, '--transcript', transcriptPath]);
+    execFileSync(process.execPath, [currentClosePass, 'process-request', store, '--session', SESSION_A, '--transcript', transcriptPath], { env: accountEnv });
 
     const currentHook = join(REPO_ROOT, 'plugins', 'core', 'skills', 'core', 'hooks', 'close-pass-hook.mjs');
     const currentLog = isolatedLog();
