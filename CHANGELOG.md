@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.0] — 2026-10-09
+
+### Changed
+
+- **A project's CORE state lives in one folder inside the project: `_core`, visible and git-ignored.** An older `.core` folder is renamed to `_core` the first time its state is read, and the signed records in it keep verifying. When both folders exist, `_core` is used and the older one is left in place and reported.
+- **The agent's notes about a project live in that project** (`_core/_agent`). They are copied once from the account folder, with each file's digest recorded; the original copy is left untouched, and a deleted local copy never falls back to it.
+- **The account-wide `~/.core` folder keeps only CORE's trust anchors** (the project list and the install's identity). New session state, close records, hook receipts, metrics scratch and package keys are written inside the project.
+- **Stamping a file writes only the project's own cache, and there is no stamp lock shared between projects.** Two projects working at once no longer wait on each other.
+- **Once a project's migration has finished, its later startups take no lock.**
+- **CORE's telemetry and working files are git-ignored from their first write**, including `_metrics`, session logs, the cache folder and generated self-test rounds. An existing ignore file that leaves CORE's working files visible is reported by name.
+- **Metrics package pseudonyms use a per-project key.** The same project links across its own packages and is unrelated between projects.
+- **Old CORE versions don't know the `_core` folder.** After a project has been opened with 3.20.0, keep it on 3.20.0 or later.
+
+### Added
+
+- **Project-only mode.** `/core project-only` and `/finalize project-only` run CORE from the project folder alone and touch nothing outside it. Automatic retrieval and turn capture are off in this mode, and optional outside evidence (harness memory, transcripts, connector config) is reported as not observed. A later normal session can pick up what a project-only session left. The explicit captured-turn purge and the script half of memory processing also work from the folder alone.
+- **An old registered workspace can be kept as history instead of imported.** Nothing is copied, marked or changed for a workspace kept this way.
+
+### Fixed
+
+- **Two processes writing the first stamp in a fresh project no longer lose one of them.**
+- **Calibration that can't be read is shown as unavailable, with its reason, rather than as a measured zero.**
+- **An opt-out file that can't be read keeps capture off** rather than switching it back on.
+- **Links, extra hard links, pipes and devices are refused before CORE opens its own state files**, across locks, caches, migration, retrieval and the graph walk. A refusal changes nothing on disk.
+
 ## [3.19.2] — 2026-10-04
 
 ### Fixed
