@@ -326,6 +326,7 @@ export function foreignLockArtifact(lockPath) {
   const dir = dirname(lockPath), base = basename(lockPath);
   const gone = (e) => e?.code === 'ENOENT';
   const ATTEMPTS = 10;
+  let unsettled = null;   // a doubled name still in question when the looks run out is refused, never waved through
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     if (attempt) sleepSync(3);
     let names;
@@ -350,12 +351,12 @@ export function foreignLockArtifact(lockPath) {
       let again;
       try { again = lstatSync(join(dir, n)); } catch (e) { if (gone(e)) continue; return n; }
       // An acquisition in flight (the count moved, or the listing may have missed its temp name): look again.
-      if (again.nlink !== st.nlink || attempt < ATTEMPTS - 1) { retry = true; break; }
+      if (again.nlink !== st.nlink || attempt < ATTEMPTS - 1) { unsettled = n; retry = true; break; }
       return n;                                               // a name outside this folder, or one that couldn't be counted
     }
     if (!retry) return null;
   }
-  return null;
+  return unsettled;
 }
 
 /**
