@@ -5,7 +5,9 @@ import { join, delimiter, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { symlinkCapable } from './trusted-test-tmp.mjs';
+import { symlinkCapable, tarWritesZip } from './trusted-test-tmp.mjs';
+// These need a real zip from the local tar; without one the folder fallback is checked by its own test below.
+const NOZIP = 'local tar writes no zip (GNU tar); the folder fallback test covers this machine';
 const norm = p => String(p).split(sep).join('/');
 const source = fileURLToPath(new URL('../../', import.meta.url));
 const scripts = new URL('../../plugins/core/skills/core/scripts/', import.meta.url);
@@ -66,11 +68,20 @@ test('a linked scratch folder is refused without probing its foreign target',t=>
     const r=run(f,gather(f));assert.equal(r.result.mechanics.probe.round_trip,false);assert.deepEqual(r.violations,[]);assert.deepEqual(fs.readdirSync(outside),[]);
   }finally{f.cleanup();}
 });
-test('package staging and actual archive round trip both allocate locally and clean up',()=>{
+test('package staging and actual archive round trip both allocate locally and clean up',t=>{if(!tarWritesZip())return t.skip(NOZIP);
   const f=fixture();try{
     const r=run(f,packageCode(f));assert.equal(r.thrown,undefined);assert.ok(r.result.shipped);assert.notEqual(r.result.shipped.kind,'staging');
     assert.deepEqual(r.violations,[]);localAllocations(r,f.root);cleanScratch(f.root);assert.ok(fs.existsSync(r.result.shipped.path));
     assert.ok(r.calls.some(x=>x.call==='mkdtempSync'&&x.path.includes('verify-')),'real extraction verification ran');
+  }finally{f.cleanup();}
+});
+test('without zip support in the local tar, the package ships as a verified folder and says why',t=>{
+  if(tarWritesZip())return t.skip('local tar writes a real zip; the archive tests cover this machine');
+  const f=fixture();try{
+    const r=run(f,packageCode(f));assert.equal(r.thrown,undefined);
+    assert.equal(r.result.shipped?.kind,'folder',JSON.stringify(r.result).slice(0,600));assert.match(r.result.shipped.reason,/not a real zip/);
+    assert.ok(fs.existsSync(join(r.result.shipped.path,'manifest.json')));assert.ok(!fs.existsSync(r.result.shipped.path+'.zip'),'the refused archive does not ship');
+    assert.deepEqual(r.violations,[]);cleanScratch(f.root);
   }finally{f.cleanup();}
 });
 test('leakage abort leaves no staged scratch or shipped package',()=>{
@@ -146,13 +157,13 @@ test('cleanup denial after a verified ship reports both the existing output and 
   }finally{f.cleanup();}
 });
 
-test('verification cleanup failure remains nonzero through the package consumer and keeps verified output',()=>{
+test('verification cleanup failure remains nonzero through the package consumer and keeps verified output',t=>{if(!tarWritesZip())return t.skip(NOZIP);
   const f=fixture();try{
     const fault=`const remove=fs.rmSync;fs.rmSync=(p,...args)=>{if(norm(p).includes('/_scratch/verify-'))throw Object.assign(new Error('verification cleanup denied'),{code:'EPERM'});return remove(p,...args);}`;
     const r=run(f,packageCode(f),fault);assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.equal(r.result.scratch_cleanup.error_code,'EPERM');assert.ok(norm(r.result.scratch_cleanup.path).includes('/verify-'));assert.ok(fs.existsSync(r.result.shipped.path));assert.ok(fs.existsSync(r.result.scratch_cleanup.path));assert.equal(r.result.shipped.kind,'zip');assert.deepEqual(r.violations,[]);
   }finally{f.cleanup();}
 });
-test('both retained verification and staging scratch are reported without losing either failure',()=>{
+test('both retained verification and staging scratch are reported without losing either failure',t=>{if(!tarWritesZip())return t.skip(NOZIP);
   const f=fixture();try{
     const r=run(f,packageCode(f),cleanupFault);assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.equal(r.result.scratch_cleanup_failures.length,2);assert.ok(r.result.scratch_cleanup_failures.some(x=>norm(x.path).includes('/verify-')));assert.ok(r.result.scratch_cleanup_failures.some(x=>norm(x.path).includes('/package-')));assert.ok(fs.existsSync(r.result.shipped.path));assert.deepEqual(r.violations,[]);
   }finally{f.cleanup();}
@@ -167,32 +178,32 @@ test('an unrelated linked registry entry cannot veto the explicitly selected phy
 });
 
 const extractionFailure=`const spawn=cp.spawnSync;cp.spawnSync=(command,args,...rest)=>args?.includes('-x')?{status:2,stdout:'',stderr:'synthetic extraction failure'}:spawn(command,args,...rest);`;
-test('verified fallback folder survives source-cleanup denial with its material receipt',()=>{
+test('verified fallback folder survives source-cleanup denial with its material receipt',t=>{if(!tarWritesZip())return t.skip(NOZIP);
  const f=fixture();try{
   const fault=extractionFailure+`const remove=fs.rmSync;fs.rmSync=(p,...args)=>{if(norm(p).includes('/_scratch/package-'))throw Object.assign(new Error('staging cleanup denied'),{code:'EPERM'});return remove(p,...args);}`;
   const r=run(f,packageCode(f),fault);assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.equal(r.result.shipped?.kind,'folder');assert.ok(fs.existsSync(join(r.result.shipped.path,'manifest.json')));assert.match(r.result.archive_verification.reason,/did not extract/);assert.ok(fs.existsSync(r.result.scratch_cleanup.path));assert.deepEqual(r.violations,[]);
  }finally{f.cleanup();}
 });
-test('rejected-archive deletion denial preserves staging, archive and verification cleanup evidence',()=>{
+test('rejected-archive deletion denial preserves staging, archive and verification cleanup evidence',t=>{if(!tarWritesZip())return t.skip(NOZIP);
  const f=fixture();try{
   const fault=extractionFailure+`const remove=fs.rmSync;fs.rmSync=(p,...args)=>{if(norm(p).includes('/_scratch/verify-')||norm(p).endsWith('.zip'))throw Object.assign(new Error('cleanup denied'),{code:'EPERM'});return remove(p,...args);}`;
   const r=run(f,packageCode(f),fault);assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.equal(r.result.shipped,undefined);assert.match(r.result.archive_verification.reason,/did not extract/);assert.ok(fs.existsSync(r.result.scratch_cleanup.path));assert.ok(fs.existsSync(r.result.staging_retained));assert.ok(fs.existsSync(r.result.retained_archive.path));assert.equal(r.result.retained_archive.verified,false);assert.deepEqual(fs.existsSync(join(f.home,'.core','metrics-package-history'))?fs.readdirSync(join(f.home,'.core','metrics-package-history')):[],[]);assert.deepEqual(r.violations,[]);
  }finally{f.cleanup();}
 });
-test('unverified fallback copy keeps recoverable staging and does not advance delivery history',()=>{
+test('unverified fallback copy keeps recoverable staging and does not advance delivery history',t=>{if(!tarWritesZip())return t.skip(NOZIP);
  const f=fixture();try{
   const fault=extractionFailure+`fs.cpSync=()=>{throw Object.assign(new Error('destination copy denied'),{code:'EIO'});};`;
   const r=run(f,packageCode(f),fault);assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.equal(r.result.shipped,undefined);assert.ok(fs.existsSync(r.result.staging_retained));assert.match(r.result.archive_verification.reason,/did not extract/);assert.match(r.result.error,/copy failed/);assert.deepEqual(fs.existsSync(join(f.home,'.core','metrics-package-history'))?fs.readdirSync(join(f.home,'.core','metrics-package-history')):[],[]);assert.deepEqual(r.violations,[]);
  }finally{f.cleanup();}
 });
-test('later hardening failure preserves the already verified fallback output and verification evidence',()=>{
+test('later hardening failure preserves the already verified fallback output and verification evidence',t=>{if(!tarWritesZip())return t.skip(NOZIP);
  const f=fixture();try{
   const fault=extractionFailure+`let topReads=0;const read=fs.readdirSync;fs.readdirSync=(p,...args)=>{if(norm(p).startsWith(${JSON.stringify(norm(f.out)+'/core-metrics-package-')})&&!norm(p).slice(${norm(f.out).length+1}).includes('/')&&++topReads>1)throw Object.assign(new Error('hardening read denied'),{code:'EACCES'});return read(p,...args);};`;
   const r=run(f,packageCode(f),fault);assert.equal(r.thrown,undefined);assert.equal(r.result.exit,2);assert.equal(r.result.shipped?.kind,'folder');assert.ok(fs.existsSync(join(r.result.shipped.path,'manifest.json')));assert.match(r.result.archive_verification.reason,/did not extract/);assert.equal(r.result.error_code,'EACCES');assert.deepEqual(r.violations,[]);
  }finally{f.cleanup();}
 });
 
-test('cleanup-error CLI preserves coverage and project warnings beside verified output',()=>{
+test('cleanup-error CLI preserves coverage and project warnings beside verified output',t=>{if(!tarWritesZip())return t.skip(NOZIP);
  const f=fixture();try{
   fs.writeFileSync(join(f.root,'PROJECT.md'),'# Synthetic fixture\n'+'x'.repeat(80000));
   const fault=`const remove=fs.rmSync;fs.rmSync=(p,...args)=>{if(norm(p).includes('/_scratch/package-'))throw Object.assign(new Error('cleanup denied'),{code:'EPERM'});return remove(p,...args);}`;

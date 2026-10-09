@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Node syntax check on all scripts
         run: |
@@ -287,7 +287,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Record the real account ~/.core before the suite
         shell: bash
@@ -324,7 +324,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Source-package smoke — committed artifact, packaged-path hooks, hostile env, rollback round-trip
         shell: bash

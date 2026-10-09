@@ -9,7 +9,8 @@
  * that create paths here MUST register an after() cleanup (see
  * isolatedHooksLog() call sites for the pattern).
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { localStateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { tmpdir } from 'node:os';
@@ -25,6 +26,24 @@ import { randomUUID } from 'node:crypto';
  * GitHub's windows-latest runners have the privilege, so CI still exercises
  * the real assertions everywhere they can run.
  */
+let _tarWritesZip = null;
+/** Whether the local `tar` writes a real zip for `-a -c -f x.zip` (bsdtar does; GNU tar writes a plain tar under that name). */
+export function tarWritesZip() {
+  if (_tarWritesZip !== null) return _tarWritesZip;
+  const dir = mkdtempSync(join(tmpdir(), 'tar-zip-probe-'));
+  try {
+    mkdirSync(join(dir, 'in'));
+    writeFileSync(join(dir, 'in', 'f.txt'), 'x');
+    const r = spawnSync('tar', ['-a', '-c', '-f', 'p.zip', '-C', 'in', '.'], { cwd: dir, encoding: 'utf8', timeout: 30000 });
+    _tarWritesZip = r.status === 0 && readFileSync(join(dir, 'p.zip')).subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  } catch {
+    _tarWritesZip = false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return _tarWritesZip;
+}
+
 let _symlinkCapable = null;
 export function symlinkCapable() {
   if (_symlinkCapable !== null) return _symlinkCapable;
