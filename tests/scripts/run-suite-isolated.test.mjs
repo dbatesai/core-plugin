@@ -152,13 +152,20 @@ test('isRunnerHome accepts a runner-shaped folder in the temp root and refuses l
     assert.equal(isRunnerHome(join(tmpdir(), 'core-suite-home-short')), false, 'a missing folder');
     const lookalike = join(elsewhere, 'core-suite-home-abc123'); mkd(lookalike);
     assert.equal(isRunnerHome(lookalike), false, 'right name, wrong parent');
-    if (symlinkCapable()) {   // a non-elevated Windows account without Developer Mode cannot make the link
-      const link = join(tmpdir(), `core-suite-home-L${String(process.pid).slice(-5).padStart(5, '0')}`); sym(elsewhere, link);
-      try { assert.equal(isRunnerHome(link), false, 'a link with a matching name'); } finally { rmSync(link, { force: true }); }
-    }
     const file = join(tmpdir(), `core-suite-home-F${String(process.pid).slice(-5).padStart(5, '0')}`); wf(file, 'x');
     try { assert.equal(isRunnerHome(file), false, 'a file with a matching name'); } finally { rmSync(file, { force: true }); }
     assert.equal(isRunnerHome(undefined), false);
     assert.equal(isRunnerHome('/'), false);
   } finally { rmSync(real, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
+});
+
+// A non-elevated Windows account without Developer Mode cannot make a link; the skip shows in the run's skip count.
+test('isRunnerHome refuses a link with a runner-shaped name', (t) => {
+  if (!symlinkCapable()) return t.skip('symlink fixture privilege unavailable');
+  const elsewhere = mk(join(tmpdir(), 'elsewhere-'));
+  const link = join(tmpdir(), `core-suite-home-L${String(process.pid).slice(-5).padStart(5, '0')}`);
+  try {
+    sym(elsewhere, link);
+    assert.equal(isRunnerHome(link), false);
+  } finally { rmSync(link, { force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
 });

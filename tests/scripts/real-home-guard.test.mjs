@@ -36,8 +36,6 @@ test('an added file, a changed file, a removed file and a new folder each fail t
     ['changed file', (c) => writeFileSync(join(c, 'projects.json'), '[1,2,3]')],
     ['removed file', (c) => rmSync(join(c, 'projects.json'))],
     ['new folder', (c) => mkdirSync(join(c, 'workspaces'))],
-    // Only where this account can make a link (a non-elevated Windows account without Developer Mode cannot).
-    ...(symlinkCapable() ? [['new link', (c) => symlinkSync(c, join(c, 'loop'))]] : []),
   ]) {
     const { home, snap } = fixture();
     try {
@@ -48,6 +46,19 @@ test('an added file, a changed file, a removed file and a new folder each fail t
       assert.match(r.stderr, /changed the real account/, name);
     } finally { rmSync(home, { recursive: true, force: true }); }
   }
+});
+
+// A non-elevated Windows account without Developer Mode cannot make a link; the skip shows in the run's skip count.
+test('a new link fails the check', (t) => {
+  if (!symlinkCapable()) return t.skip('symlink fixture privilege unavailable');
+  const { home, snap } = fixture();
+  try {
+    run('snapshot', snap, '--home', home);
+    symlinkSync(join(home, '.core'), join(home, '.core', 'loop'));
+    const r = run('check', snap, '--home', home);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /changed the real account/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test('the global stamp lock an older installed version takes is allowed; a new top-level name is not', () => {
