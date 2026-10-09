@@ -20,7 +20,7 @@
 #
 # Usage: bash tests/smoke/source-package-smoke.sh [<core-plugin-repo>]
 set -u
-REPO="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
+REPO="$(cd "${1:-$(dirname "$0")/../..}" && pwd)"
 FIXTURE="$REPO/tests/fixtures/nested-store"
 if command -v sha256sum >/dev/null 2>&1; then SELF_SHA="$(sha256sum "$0" | cut -d' ' -f1)"; else SELF_SHA="$(shasum -a 256 "$0" | cut -d' ' -f1)"; fi
 echo "procedure sha256: $SELF_SHA"
@@ -33,6 +33,13 @@ ok()   { echo "  PASS  $1"; pass=$((pass+1)); }
 bad()  { echo "  FAIL  $1"; fail=$((fail+1)); }
 cleanup() { rm -rf "$SCRATCH" ${REGDIR:+"$REGDIR"}; }
 trap cleanup EXIT
+
+# Hooks given no cwd use the process's own. Run from the scratch folder, so a caller standing in a
+# real project never has that project's state read, renamed or written by the packaged code.
+CALLER="$PWD"
+state_sig() { for d in .core _core; do [ -e "$CALLER/$d" ] && ls -lAd "$CALLER/$d"; done 2>/dev/null; }
+CALLER_BEFORE="$(state_sig)"
+cd "$SCRATCH" || exit 1
 
 echo "== Build the packaged artifact (git archive HEAD:plugins/core — committed files only) =="
 mkdir -p "$PKG"
@@ -124,6 +131,9 @@ else
   OUT="$(node -e "import('$NEWGEN').then(async m=>{const {retrieveContext}=await import('$PKG/skills/core/scripts/retrieve-context.mjs');const r=retrieveContext('quokka incident','$ROLLSTORE');console.log('up:'+JSON.stringify(r.map(x=>x.id)))})" 2>&1)"
   echo "$OUT" | grep -q 'obs-nested-note' && ok "re-upgrade regenerates cleanly, nested unit findable again (no round-trip corruption)" || bad "re-upgrade did not recover: $OUT"
 fi
+
+echo "== The caller's folder: no .core or _core created, renamed or removed =="
+[ "$(state_sig)" = "$CALLER_BEFORE" ] && ok "caller's project state untouched" || bad "caller's state folders changed: before [$CALLER_BEFORE] after [$(state_sig)]"
 
 echo
 echo "== source-package smoke @ $COMMIT: $pass passed, $fail failed =="
