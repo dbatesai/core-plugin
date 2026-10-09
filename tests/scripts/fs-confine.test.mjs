@@ -50,7 +50,7 @@ test('realpathSync.native outside is refused and recorded too; inside it still w
   const r = run(`import { realpathSync } from 'node:fs';
     const out = [];
     try { realpathSync.native(${S}); out.push('ok'); } catch (e) { out.push(e.code); }
-    out.push(realpathSync.native(${JSON.stringify(inside)}) === ${JSON.stringify(inside)} ? 'inside-ok' : 'inside-bad');
+    out.push(realpathSync.native(${JSON.stringify(inside)}) === ${JSON.stringify(realpathSync.native(inside))} ? 'inside-ok' : 'inside-bad');   // native expands Windows 8.3 names; compare like with like
     process.stdout.write(out.join(','));`);
   assert.equal(r.stdout, 'EACCES,inside-ok');
   assert.deepEqual(r.violations.map(v => v.call), ['realpathSync.native']);

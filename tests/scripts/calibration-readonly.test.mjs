@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
-import {join,delimiter} from 'node:path';
+import {join,delimiter,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -92,7 +92,7 @@ for(const [mode,local] of [['project-metrics-link',false],['local-metrics-link',
  if(!symlinkCapable())return t.skip('symlink fixture privilege unavailable');const f=enrolledFixture(t,{local});
  const foreign=join(f.base,'foreign');fs.mkdirSync(foreign);let linked=f.meta;
  if(mode==='local-harness-link')linked=f.meta.slice(0,-'/metrics'.length);
- if(mode==='local-key-link')linked=f.meta.split('/').slice(0,-2).join('/');
+ if(mode==='local-key-link')linked=dirname(dirname(f.meta));
  if(mode==='local-root-link')linked=join(f.home,'.core','local');
  fs.renameSync(linked,join(foreign,'retained'));fs.symlinkSync(join(foreign,'retained'),linked,'dir');
  const beforeForeign=snap(foreign),beforeRoot=snap(f.root),beforeHome=snap(f.home);const r=run(f,readBody(f));
