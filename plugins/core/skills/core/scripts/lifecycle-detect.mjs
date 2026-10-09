@@ -86,9 +86,11 @@
  *   node lifecycle-detect.mjs <project> --import-legacy-cache [--apply] [--recover] [--json]
  *     --record-session-start <id>  Snapshot which user-sensitive files exist NOW
  *                                  (diagnostic hint only — see above).
- *     --stamp-created <path>       Establish the first CORE-authored baseline for
- *                                  a file CORE just created (graduation, PROJECT.md
- *                                  render). --kind selects the domain block hasher
+ *     --stamp-created <path>       Adopt the file's current bytes as its first
+ *                                  baseline, run as the next step after CORE writes
+ *                                  it (graduation, PROJECT.md render). It cannot
+ *                                  prove the bytes are the writer's; in-process
+ *                                  writers pass their text through createFile. --kind selects the domain block hasher
  *                                  (default 'unit'); --by sets last_written_by.
  *
  * Ships with the plugin as prescriptive code; .mjs only.

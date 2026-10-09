@@ -298,7 +298,7 @@ The graduation step is where the LLM's value lives — noticing connections acro
    node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" <project> --stamp-created "_memories/<new-unit>.md" --kind unit
    ```
 
-   This is the ONLY safe first-write: creating a new file establishes its first baseline, which is a different, safe operation from overwriting an existing file that might carry unreconciled user content. If you skip it, the unit is not lost — it is held and surfaced at the next lifecycle pass, and you re-stamp then. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
+   The command adopts the file's bytes as they are when it runs; it cannot prove they are the bytes you wrote. Run it as the very next step after your own write, before anything else can touch the file. If you skipped it, or anything may have changed the file since your write, do not stamp it later: the unit is not lost, it is held and surfaced at the next lifecycle pass, and it stays held until you have read it and confirmed the content is what you wrote. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
 9. Source observations stay in place — the raw record is preserved.
 
 ### Dispatch gate — Sonnet vs Opus
