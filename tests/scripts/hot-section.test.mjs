@@ -147,22 +147,17 @@ test('clearHotSection stamps recordProjectMdWrite so edit-detection state stays 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('recordProjectMdWrite prunes the file entry from the GLOBAL cache (one-release migration), preserving others', () => {
+test('recordProjectMdWrite stamps only the per-project cache and leaves a global cache byte-identical', () => {
   const { root, project, home, globalCachePath, projectCachePath } = setup();
   try {
     const pmPath = join(project, 'PROJECT.md');
-    writeFileSync(globalCachePath, JSON.stringify({
-      files: {
-        [pmPath]: { last_hash: 'stale00000000000', last_written: 'x', last_written_by: 'hot-section' },
-        '/another/project/PROJECT.md': { last_hash: 'aaaaaaaaaaaaaaaa', last_written: 'y', last_written_by: 'hot-section' },
-      },
-    }, null, 2));
+    const global = JSON.stringify({ files: { [pmPath]: { last_hash: 'stale00000000000', last_written: '2026-01-01T00:00:00Z', last_written_by: 'hot-section' } } }, null, 2);
+    writeFileSync(globalCachePath, global);
     recordProjectMdWrite(pmPath, { now: '2026-06-06T00:00:00Z', home });
-    const globalCache = JSON.parse(readFileSync(globalCachePath, 'utf8'));
-    assert.ok(!(pmPath in globalCache.files), 'this file\'s stale global entry pruned');
-    assert.ok(globalCache.files['/another/project/PROJECT.md'], 'other projects\' global entries preserved');
+    assert.equal(readFileSync(globalCachePath, 'utf8'), global);
     const projectCache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     assert.equal(projectCache.files[pmPath].last_written_by, 'hot-section', 'per-project stamp is the write of record');
+    assert.ok(projectCache.files[pmPath].last_written > '2026-01-01T00:00:00Z', 'the fresher per-project stamp wins the union read');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

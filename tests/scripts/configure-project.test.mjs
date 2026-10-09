@@ -163,7 +163,7 @@ test('detectIdentity: an unregistered folder reports new and writes nothing', as
     const id = detectIdentity(projectPath, coreDir, 'claude-code');
     assert.equal(id.status, 'new');
     assert.equal(existsSync(join(coreDir, 'projects.json')), false, 'identity detection must not register');
-    assert.equal(existsSync(join(projectPath, '.core')), false, 'identity detection must not create state');
+    assert.equal(existsSync(join(projectPath, '_core')), false, 'identity detection must not create state');
   });
 });
 

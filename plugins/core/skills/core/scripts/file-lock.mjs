@@ -44,7 +44,7 @@
  */
 
 import {
-  readFileSync, writeFileSync, statSync, readdirSync,
+  readFileSync, writeFileSync, statSync, lstatSync, readdirSync,
   openSync, writeSync, closeSync, linkSync,
   renameSync, rmSync, mkdirSync,
 } from 'node:fs';
@@ -65,6 +65,17 @@ export const DEFAULT_STALE_MS = 10 * 60 * 1000;
 export const DEFAULT_HARD_STALE_MS = 30 * 60 * 1000;
 
 let cachedMachineId;
+
+/**
+ * A process that must not read anything outside its project (project-only mode) declares it has
+ * no install identity before taking any lock, so every lock it takes, directly or through a
+ * shared helper, records `machine: null` and never reads ~/.core/install-id, including a lock
+ * whose caller passes an identity explicitly. It can only remove an identity, never supply one.
+ */
+let noIdentity = false;
+export function useNoMachineIdentity() { cachedMachineId = null; noIdentity = true; }
+// After the declaration an identity passed explicitly is dropped too: it can only be removed.
+const lockMachine = (machine) => (noIdentity ? null : machine);
 
 /** This install's id (~/.core/install-id under the trusted home), or null when absent. Never creates it. */
 export function localMachineId() {
@@ -169,7 +180,10 @@ export function inspectFileLock(lockPath, {
   hardStaleMs = DEFAULT_HARD_STALE_MS,
   machine = localMachineId(),
 } = {}) {
-  return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs, machine });
+  // A lock file that is a link, a pipe or has a name elsewhere is never read: it reads as held.
+  const unsafe = foreignLockArtifact(lockPath);
+  if (unsafe) return { held: true, lock: null, stale: false, unsafe };
+  return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs, machine: lockMachine(machine) });
 }
 
 /**
@@ -210,7 +224,11 @@ export function acquireFileLock(lockPath, {
   hardStaleMs = DEFAULT_HARD_STALE_MS,
   machine = localMachineId(),
 } = {}) {
+  machine = lockMachine(machine);
   mkdirSync(dirname(lockPath), { recursive: true });
+  // Checked before any lock file is opened: a pipe would block the read, a link would read elsewhere.
+  const unsafe = foreignLockArtifact(lockPath);
+  if (unsafe) return { ok: false, reason: 'unsafe-lock-file', unsafe };
   const nonce = newNonce();
 
   // maxN and the held-check MUST derive from the SAME listGenerations()
@@ -294,6 +312,54 @@ export function acquireFileLock(lockPath, {
 }
 
 /**
+ * The name of a file in this lock's family that can't be shown to be physically the lock's own, or
+ * null. Refused: a symbolic link; anything that is not a regular file (a FIFO would block the read
+ * that acquisition makes); a file with a hard link somewhere other than this folder; and a family
+ * file, or the count of its names, that can't be examined for any reason other than having gone.
+ * A generation is created by linking a temp file in the same folder, so for a moment it has two
+ * names, both here: that is the lock's own doing and passes. A directory listing taken while that
+ * happens can show the generation but not its temp name, so a doubled name that can't be counted
+ * here is looked at again for a short while (about 30 ms, the state cache's own budget) before it
+ * is refused; a second name that stays outside the folder is still refused.
+ */
+export function foreignLockArtifact(lockPath) {
+  const dir = dirname(lockPath), base = basename(lockPath);
+  const gone = (e) => e?.code === 'ENOENT';
+  const ATTEMPTS = 10;
+  let unsettled = null;   // a doubled name still in question when the looks run out is refused, never waved through
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    if (attempt) sleepSync(3);
+    let names;
+    try { names = readdirSync(dir); } catch (e) { if (gone(e)) return null; throw e; }
+    const stats = new Map();
+    for (const n of names) {
+      try { stats.set(n, lstatSync(join(dir, n))); }
+      catch (e) {
+        if (gone(e)) continue;                    // released or cleaned up mid-scan
+        if (n.startsWith(base)) return n;         // a family file that can't be examined is unknown
+        // an unexaminable sibling just can't be counted as one of the names: the count below comes up short and refuses
+      }
+    }
+    let retry = false;
+    for (const [n, st] of stats) {
+      if (!n.startsWith(base)) continue;
+      if (st.isSymbolicLink() || !st.isFile()) return n;
+      if (st.nlink === 1) continue;
+      let here = 0;
+      for (const other of stats.values()) if (other.ino === st.ino && other.dev === st.dev) here++;
+      if (here === st.nlink) continue;                       // every name is in this folder
+      let again;
+      try { again = lstatSync(join(dir, n)); } catch (e) { if (gone(e)) continue; return n; }
+      // An acquisition in flight (the count moved, or the listing may have missed its temp name): look again.
+      if (again.nlink !== st.nlink || attempt < ATTEMPTS - 1) { unsettled = n; retry = true; break; }
+      return n;                                               // a name outside this folder, or one that couldn't be counted
+    }
+    if (!retry) return null;
+  }
+  return unsettled;
+}
+
+/**
  * Release the lock ONLY if a generation file is ours (nonce match, or `verify` —
  * a {field, value} pair for cross-process releases, e.g. close-pass's session_id).
  * Releasing = renaming OUR OWN generation file to its `.done` tombstone — we
@@ -316,6 +382,12 @@ export function releaseFileLock(lockPath, nonce, { verify = null, force = false 
     return { released: true };
   }
   if (!gens.some(g => !g.done)) return { released: false, reason: 'absent' };
+  // A generation replaced by a pipe or a link is never read (a pipe would block): the release
+  // fails by name and the artifact is left for the operator.
+  let unsafe;
+  try { unsafe = foreignLockArtifact(lockPath); }
+  catch (e) { return { released: false, reason: 'release-failed', error: `lock folder could not be checked (${e.code || e})` }; }
+  if (unsafe) return { released: false, reason: 'unsafe-lock-file', error: `${unsafe} is a link, a pipe or has a name outside its folder`, unsafe };
   for (const g of gens) {
     if (g.done) continue;
     const lock = readJson(g.path);
@@ -351,11 +423,16 @@ export function withFileLock(lockPath, fn, {
   extra = {},
   staleMs = DEFAULT_STALE_MS,
   hardStaleMs = DEFAULT_HARD_STALE_MS,
+  machine,
 } = {}) {
   let got = null;
   for (let attempt = 0; ; attempt++) {
-    got = acquireFileLock(lockPath, { extra, staleMs, hardStaleMs });
+    // A caller's lock identity is passed through; left undefined, acquisition uses this install's.
+    got = acquireFileLock(lockPath, { extra, staleMs, hardStaleMs, ...(machine !== undefined ? { machine } : {}) });
     if (got.ok) break;
+    if (got.reason === 'unsafe-lock-file') {
+      throw Object.assign(new Error(`lock refused: ${join(dirname(lockPath), got.unsafe)} is a link, a pipe or has a name outside its folder`), { code: 'LOCK_UNSAFE', path: join(dirname(lockPath), got.unsafe) });
+    }
     if (attempt >= retries) {
       const err = new Error(`lock held: ${lockPath} (owner pid ${got.lock?.pid ?? '?'}, reason ${got.reason})`);
       err.code = 'LOCK_HELD';
@@ -364,6 +441,12 @@ export function withFileLock(lockPath, fn, {
     }
     sleepSync(retryDelayMs);
   }
+  return withAcquiredFileLock(lockPath, got.nonce, fn);
+}
+
+/** Complete an operation under an already acquired lock. A failed release preserves
+ * the operation's return value; callers must inspect/recover the lock, not replay work. */
+export function withAcquiredFileLock(lockPath, nonce, fn) {
   // releaseFileLock's return value must be read, never discarded — it
   // honestly reports a real failure ({released:false, reason, error} —
   // EPERM/EACCES/a generation another process claimed), and a bare
@@ -383,17 +466,30 @@ export function withFileLock(lockPath, fn, {
     threw = true;
     caught = e;
   }
-  const rel = releaseFileLock(lockPath, got.nonce);
+  const rel = releaseFileLock(lockPath, nonce);
   if (!rel.released) {
     const detail = `${lockPath} (reason: ${rel.reason}${rel.error ? `, error: ${rel.error}` : ''}) — lock may still be live on disk`;
+    const recovery = { retry_operation: false,
+      instruction: 'The project operator must inspect the named lock and operation outcome; recover only this owned generation after confirming its owner. Do not repeat the material operation.' };
     if (threw) {
-      try { if (caught && typeof caught === 'object') caught.lockReleaseFailure = rel; } catch { /* caught may be frozen/non-object */ }
-      process.stderr.write(`withFileLock: lock release failed for ${detail} (masked by an in-flight error from fn(): ${caught && caught.message ? caught.message : caught})\n`);
+      try {
+        if (caught && typeof caught === 'object') {
+          caught.lockReleaseFailure = rel;
+          // An inner lock may already have named itself; preserve its evidence too.
+          caught.lockReleaseFailures = [...(caught.lockReleaseFailures || []), { lockPath, releaseResult: rel }];
+          caught.lockPath ??= lockPath;
+          caught.recovery ??= recovery;
+        }
+      } catch { /* caught may be frozen/non-object; stderr still reports the failed release */ }
+      try { process.stderr.write(`withFileLock: lock release failed for ${detail} (masked by an in-flight error from fn(): ${caught && caught.message ? caught.message : caught})\n`); }
+      catch { /* a closed diagnostic stream must not mask the primary error */ }
     } else {
       const err = new Error(`withFileLock: lock release failed for ${detail}`);
       err.code = 'LOCK_RELEASE_FAILED';
       err.lockPath = lockPath;
       err.releaseResult = rel;
+      err.operationResult = result;
+      err.recovery = recovery;
       throw err;
     }
   }

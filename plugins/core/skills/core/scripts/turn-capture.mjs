@@ -19,7 +19,7 @@
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
  *   2. `CORE_TURN_CAPTURE` env false → OFF (its own hard switch).
- *   3. the project's trusted manifest (`.core/<harness>/workspace.json`) `"turn_capture": false` → OFF. Unlike
+ *   3. the project's trusted manifest (`_core/<harness>/workspace.json`) `"turn_capture": false` → OFF. Unlike
  *      rich-context's opt-IN (machine-local only, so a sensitive enable could
  *      never travel with a copied project), an opt-OUT travelling with a copied
  *      project is privacy-safe — the flag lives with the project on purpose.
@@ -44,14 +44,13 @@
  */
 
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { homedir } from 'node:os';
-import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
+import { resolveStoragePath, prepareStorageDir, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, coreHome } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -99,33 +98,42 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  * Precedence (first match wins):
  *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
- *   3. the project's trusted manifest (`.core/<harness>/workspace.json`), or the project-root
+ *   3. the project's trusted manifest (`_core/<harness>/workspace.json`), or the project-root
  *      `workspace.json`, says `"turn_capture": false` → OFF.
  *   4. default → ON.
  */
-export function turnCaptureEnabled({ project, env = process.env, home = homedir() } = {}) {
+export let turnCaptureGateFailure = null;
+let gateFailureSaid = false;
+
+export function turnCaptureEnabled({ project, env = process.env, home: homeIn } = {}) {
+  turnCaptureGateFailure = null;
+  let home;
+  try { home = homeIn ?? coreHome(); }
+  catch (e) { turnCaptureGateFailure = String(e?.code || 'error'); return false; }   // no account home: OFF
   if (!metricsEnabled({ project, env, home })) return false;
   const flag = (env.CORE_TURN_CAPTURE || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false;
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
-    let m = null;
     try {
       const coreDir = join(home, '.core');
-      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
-    } catch { m = null; }
-    if (m && m.turn_capture === false) return false;
-    try {
+      const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
+        harness: detectStateHarness(env), coreDir, throwReadErrors: true });
+      if (m && m.turn_capture === false) return false;
       const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
-      if (!m && manifestTurnCaptureOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
-    } catch { /* unresolvable project: no unverified opt-out to honor */ }
-    // A project-root workspace.json can still say "off" (an older or copied project). Like
-    // metrics_enabled, it only ever switches capture off, and it keeps doing so until the
-    // signed manifest carries the value.
-    try {
-      const rootManifest = JSON.parse(readFileSync(join(projectRootFor(project, { home, coreDir: join(home, '.core') }), 'workspace.json'), 'utf8'));
-      if (rootManifest && rootManifest.turn_capture === false) return false;
-    } catch { /* absent or unreadable: no opt-out */ }
+      // Read even beside a trusted manifest: an older `.core` left in the project may still say off.
+      if (manifestTurnCaptureOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
+      // An older or copied project's root manifest may only switch capture off,
+      // and has the same read-failure rule until the signed manifest carries it.
+      if (readCaptureOptOuts(join(root, 'workspace.json')).turn_capture === false) return false;
+    } catch (e) {
+      turnCaptureGateFailure = String(e?.code || e?.name || 'error');
+      if (!gateFailureSaid) {
+        gateFailureSaid = true;
+        try { process.stderr.write(`CORE turn-capture gate: could not read project state (${turnCaptureGateFailure}); capture is off for this run\n`); } catch { /* stderr closed */ }
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -260,10 +268,52 @@ export function computeStoreSignature(storeDir) {
 // read-modify-write: two simultaneous processes can lose one increment.
 // ponytail: benign race on a health counter; move under its own lock if
 // tripwire precision ever needs exact counts.
+/**
+ * Why capture must not write here, or null. Everything capture writes is CORE's own and belongs
+ * physically in the project: the metrics folder and the stream folder must be real directories under
+ * the project root, and the dated row, the stream's ignore file, the health file and the lock's files
+ * must be regular files with a single name (a link, or a second hard link, is the same bytes living
+ * somewhere else). Checked with lstat, before anything is created, read or appended. A path inside the
+ * project is not proof of this; that is what the check is for.
+ */
+export function captureCustodyProblem(projectDir, { rowFile = null, healthOnly = false } = {}) {
+  let root;
+  // The project may itself be reached through a link; custody is judged against where it really is.
+  try { root = realpathSync(resolve(projectDir)); if (!statSync(root).isDirectory()) throw new Error('not a directory'); } catch { return 'project root is not a real directory'; }
+  const base = resolveStoragePath(projectDir);
+  const dir = turnCaptureDir(projectDir);
+  const rel = (p) => relative(resolve(projectDir), p) || '.';   // named as the caller sees it
+  const kind = (p) => { try { return lstatSync(p); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  try {
+    for (const d of healthOnly ? [base] : [base, dir]) {
+      const st = kind(d);
+      if (!st) continue;
+      if (st.isSymbolicLink() || !st.isDirectory()) return `${rel(d)} is a link or not a folder`;
+      const real = realpathSync(d);
+      if (real !== root && !real.startsWith(root + sep)) return `${rel(d)} is outside the project`;
+    }
+    if (!kind(base)) { let parent; try { parent = realpathSync(dirname(resolve(base))); } catch { parent = null; } if (parent !== root && !(parent || '').startsWith(root + sep)) return 'the metrics folder would be created outside the project'; }
+    const leaves = healthOnly ? [join(base, HEALTH_FILENAME)] : [join(base, HEALTH_FILENAME), join(dir, '.gitignore'), ...(rowFile ? [rowFile] : [])];
+    for (const f of leaves) {
+      const st = kind(f);
+      if (st && (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1)) return `${rel(f)} is a link, has a second name, or is not a regular file`;
+    }
+    if (!healthOnly && kind(base)) {
+      // Every generation and tombstone of the lock is read during acquisition. A link, or a hard
+      // link from outside this folder, is refused; the lock's own momentary second name (it creates
+      // a generation by linking a temp file beside it) is not.
+      const lock = foreignLockArtifact(turnCaptureLockPath(projectDir));
+      if (lock) return `${rel(join(base, lock))} is a link or has a name outside this folder`;
+    }
+  } catch (e) { return `capture location could not be checked (${e.code || e.message})`; }
+  return null;
+}
+
 function bumpHealth(projectDir, { failed, reason, ts }) {
   try {
-    const base = resolveStoragePath(projectDir);
-    mkdirSync(base, { recursive: true });
+    // Health is best-effort, but never somewhere else: an unsafe location means no health write.
+    if (captureCustodyProblem(projectDir, { healthOnly: true })) return;
+    const base = prepareStorageDir(projectDir);
     const file = join(base, HEALTH_FILENAME);
     let health = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
     try { health = { ...health, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { /* fresh */ }
@@ -284,11 +334,27 @@ function bumpHealth(projectDir, { failed, reason, ts }) {
   } catch { /* best-effort — health must never fail the capture path */ }
 }
 
-/** Read the capture-health counters. Missing → zeros. */
+/**
+ * Read the capture-health counters. Missing → zeros. A file that is there but can't be trusted
+ * (unsafe location, unreadable, not a JSON object) → zeros plus `unreadable: <why>`, so no reader
+ * mistakes a broken instrument for a quiet one.
+ */
 export function readCaptureHealth(projectDir) {
   const file = join(resolveStoragePath(projectDir), HEALTH_FILENAME);
   const zero = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
-  try { return { ...zero, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { return zero; }
+  const custody = captureCustodyProblem(projectDir, { healthOnly: true });
+  if (custody) return { ...zero, unreadable: custody };
+  let parsed;
+  try { parsed = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (e) { return e.code === 'ENOENT' ? zero : { ...zero, unreadable: e.code || 'not valid JSON' }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ...zero, unreadable: 'not a JSON object' };
+  // Counters earn numeric credit only as whole numbers from zero up. One a file predates is zero;
+  // a file with none of them is not a health record.
+  const counters = ['attempts', 'failures', 'consecutive_failures'];
+  if (!counters.some((k) => k in parsed)) return { ...zero, unreadable: 'no counters' };
+  const bad = counters.find((k) => k in parsed && !(Number.isSafeInteger(parsed[k]) && parsed[k] >= 0));
+  if (bad) return { ...zero, unreadable: `${bad} is not a whole number from zero up` };
+  return { ...zero, ...parsed };
 }
 
 /**
@@ -300,6 +366,11 @@ export function readCaptureHealth(projectDir) {
 export function captureTurnEvidence(projectDir, input, { now, env = process.env } = {}) {
   try {
     if (!existsSync(projectDir)) return { written: false, reason: 'project-dir-missing' };
+    // The enabled check itself looks inside the metrics folder (the capture-disabled marker), so the
+    // folder's custody comes first. Not counted in health: health lives in that same folder, and
+    // whether this project opted out is not yet known.
+    const early = captureCustodyProblem(projectDir, { healthOnly: true });
+    if (early) return { written: false, reason: `capture-refused: ${early}`, refused: true };
     if (!turnCaptureEnabled({ project: projectDir, env })) {
       return { written: false, reason: 'disabled' };
     }
@@ -316,8 +387,15 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
     const record = { ts: now || new Date().toISOString(), ...row };
     const dir = turnCaptureDir(projectDir);
     const file = join(dir, `${todayUTC(now)}.jsonl`);
+    // Refused before the lock is taken or anything is created: nothing is read or written elsewhere.
+    const unsafe = captureCustodyProblem(projectDir, { rowFile: file });
+    if (unsafe) {
+      bumpHealth(projectDir, { failed: true, reason: `capture-refused: ${unsafe}`, ts: record.ts });
+      return { written: false, reason: `capture-refused: ${unsafe}`, refused: true };
+    }
     let appendError = null;
     try {
+      prepareStorageDir(projectDir);
       withFileLock(turnCaptureLockPath(projectDir), () => {
         // mkdir + append + hardening inside the shared lock: a concurrent
         // purge can't race between mkdir and append, and owner-only modes are
@@ -334,6 +412,9 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
             writeFileSync(gitignore, '*\n');
             hardenPath(gitignore, TURN_CAPTURE_FILE_MODE);
           }
+          // Checked again under the lock, immediately before the append.
+          const late = captureCustodyProblem(projectDir, { rowFile: file });
+          if (late) throw Object.assign(new Error(`capture-refused: ${late}`), { code: 'CAPTURE_REFUSED' });
           appendFileSync(file, JSON.stringify(record) + '\n');
           hardenPath(file, TURN_CAPTURE_FILE_MODE);
         } catch (e) {
@@ -389,10 +470,12 @@ function countRows(files) {
  * Cheap census for the /metrics mechanics line: whether the stream is on and
  * how much is captured. Row count is a line count (no per-row parse).
  */
-export function turnCaptureStats(projectDir, { env = process.env } = {}) {
-  const enabled = turnCaptureEnabled({ project: projectDir, env });
+export function turnCaptureStats(projectDir, { env = process.env, home } = {}) {
+  // The selected home reaches the gate and the history lookup, so one report consults one account root.
+  const homeOpt = home ? { home } : {};
+  const enabled = turnCaptureEnabled({ project: projectDir, env, ...homeOpt });
   const files = listTurnCaptureFiles(projectDir);
-  const history = metricsHistoryFolders(projectDir, { env }).map(({ folder }) => {
+  const history = metricsHistoryFolders(projectDir, { env, ...homeOpt }).map(({ folder }) => {
     const found = dateFilesIn(join(folder, TURN_CAPTURE_DIRNAME));
     return { dir: join(folder, TURN_CAPTURE_DIRNAME), days: found.length, rows: countRows(found) };
   });

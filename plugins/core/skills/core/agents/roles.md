@@ -152,7 +152,7 @@ When researchers cite each other as corroborating, verify the original sources a
 
 # Saved compositions
 
-When a composition proves particularly effective in a real swarm, save it to `~/.core/agents/<name>.md` so a future session can start from it. Saved compositions are starting points, not fixed identities — adapt them to the task rather than apply verbatim.
+When a composition proves particularly effective in a real swarm, save it to `<project>/_core/_agent/agents/<name>.md` so a future session can start from it. Saved compositions are starting points, not fixed identities — adapt them to the task rather than apply verbatim.
 
 The frontmatter:
 
@@ -167,7 +167,7 @@ effectiveness_notes: when this configuration has worked well, why
 ```
 
 `proven` and `effectiveness_notes` are **manually maintained**. No shipped hygiene step reads
-the `~/.core/swarm-effectiveness/` reports back into composition frontmatter, so `proven: true`
+the `<project>/_outputs/swarm-effectiveness/` reports back into composition frontmatter, so `proven: true`
 records a human judgment at save time — don't treat it as machine-verified. Reopen condition:
 when the effectiveness corpus is large enough to be worth mining, a hygiene pass that proposes
 `proven` flips (the natural wiring: 3+ swarms with positive notes) replaces this note.
@@ -185,4 +185,4 @@ The methods, frameworks, instincts they bring. Specific.
 Precise about what this lens can't see. "Over-indexes on X at the expense of Y" beats "may have blind spots."
 ```
 
-The lead agent reads `~/.core/agents/` during team composition and uses saved configurations as seed material. A saved configuration is a validated pattern, not a persistent identity — every session is composed fresh.
+The lead agent reads `<project>/_core/_agent/agents/` during team composition and uses saved configurations as seed material. A saved configuration is a validated pattern, not a persistent identity — every session is composed fresh.

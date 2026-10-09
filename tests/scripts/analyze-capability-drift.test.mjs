@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -207,6 +208,7 @@ test('loadCapabilityHistory dedups the same observation present in both stores',
   const home = mkdtempSync(join(tmpdir(), 'capdrift-home-'));
   const project = mkdtempSync(join(tmpdir(), 'capdrift-project-'));
   try {
+    registerFixtureProject(home, project);
     // Same observation (same session + pinned timestamp + capability + content) written to
     // BOTH the project state store and the project _metrics fallback store. Pre-fix, loadCapabilityHistory concatenated
     // them and double-counted; it must now collapse to one.

@@ -30,8 +30,8 @@
  *   node generate-summary-index.mjs --store <storePath>
  */
 
-import { readdirSync, statSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readdirSync, statSync, lstatSync, realpathSync,  readFileSync, existsSync } from 'node:fs';
+import { resolve, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -39,6 +39,7 @@ import { loadValidEnrichments } from './enrichment-sidecar.mjs';
 import { truncate as sharedTruncate } from './text-truncate.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureLibDir } from './store-ignores.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -60,6 +61,65 @@ function isCandidateName(name) {
 // for archived units; status filtering is what does the job for retired ones.
 function isCandidateDir(name) {
   return !name.startsWith('_') && name !== 'archive';
+}
+
+/**
+ * The store and its derived-cache folder must be real directories inside the project. A project can
+ * arrive with `_memories` or `_memories/_lib` (or a file in `_lib`) as a link to somewhere else,
+ * which would bring outside content into retrieval and send cache writes out of the project. Links
+ * are judged with lstat, before anything follows them. Only a path that is plainly absent (ENOENT)
+ * passes unchecked. When a check fails while the content could still be reached (the path can't be
+ * resolved, or `_lib` can be entered but not listed) the boundary is unproven, and that is a refusal
+ * too, never a pass.
+ * @returns {null | { code: 'STORE_OUTSIDE_ROOT' | 'STORE_BOUNDARY_UNVERIFIED', path: string, reason?: string }}
+ */
+export function storeBoundaryProblem(storePath) {
+  const root = resolve(storePath);
+  const mem = join(root, '_memories');
+  const bad = (path) => ({ code: 'STORE_OUTSIDE_ROOT', path });
+  const unproven = (path, e) => ({ code: 'STORE_BOUNDARY_UNVERIFIED', path, reason: String(e?.code || e?.message || e) });
+  let st;
+  try { st = lstatSync(mem); } catch (e) { return e?.code === 'ENOENT' ? null : unproven(mem, e); }
+  if (st.isSymbolicLink()) return bad(mem);
+  if (!st.isDirectory()) return null;   // a plain file is no store; the capture reports it
+  try { if (!realpathSync.native(mem).startsWith(realpathSync.native(root) + sep)) return bad(mem); } catch (e) { return unproven(mem, e); }
+  const lib = join(mem, '_lib');
+  // `_memories` is proven real and inside. If it can't be searched, nothing beneath it can be reached
+  // either, so nothing can cross the boundary: the capture reports that store as incomplete.
+  try { st = lstatSync(lib); } catch (e) { return e?.code === 'ENOENT' || e?.code === 'EACCES' ? null : unproven(lib, e); }
+  if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
+  let entries;
+  try { entries = readdirSync(lib, { withFileTypes: true }); } catch (e) { return unproven(lib, e); }
+  // Every cache file is CORE's own: an ordinary file with one name, or a folder. A link, a second
+  // name elsewhere, or a pipe/device is refused before any reader opens it. Lock files are checked
+  // by the lock itself, whose acquisition briefly gives a lock file a second name in this folder.
+  for (const e of entries) {
+    const path = join(lib, e.name);
+    if (e.isSymbolicLink()) return bad(path);
+    if (e.isDirectory() || e.name.includes('.lock')) continue;
+    let leaf;
+    try { leaf = lstatSync(path); } catch (err) { if (err?.code === 'ENOENT') continue; return unproven(path, err); }
+    if (!leaf.isFile() || leaf.nlink !== 1) return bad(path);
+  }
+  return null;
+}
+
+/** The first link found anywhere under `dir` (never followed), or null. An unlistable folder throws. */
+export function firstLinkUnder(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isSymbolicLink()) return p;
+    if (e.isDirectory()) { const inner = firstLinkUnder(p); if (inner) return inner; }
+  }
+  return null;
+}
+
+/** Throws when the store or its cache folder leaves the project, or when that can't be established. */
+export function assertStoreBoundary(storePath) {
+  const problem = storeBoundaryProblem(storePath);
+  if (!problem) return;
+  const why = problem.code === 'STORE_OUTSIDE_ROOT' ? 'is a link or leaves the project folder' : `could not be checked (${problem.reason}), so it is not known to be inside the project folder`;
+  throw Object.assign(new Error(`store refused: ${problem.path} ${why}`), problem);
 }
 
 /**
@@ -115,6 +175,7 @@ function walkCandidateFiles(memoriesDir, onIoError = null) {
  * @returns {string}
  */
 export function computeSourceSignature(storePath) {
+  assertStoreBoundary(storePath);
   const memoriesDir = join(resolve(storePath), '_memories');
   const parts = [];
   for (const f of walkCandidateFiles(memoriesDir)) {
@@ -155,6 +216,7 @@ export function validateIndexRecords(idx) {
  * enforced here, at the loader, not per-caller.
  */
 export function loadFreshIndex(storePath) {
+  assertStoreBoundary(storePath);
   const root = resolve(storePath);
   const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
   // Validate from one honest capture: a signature-only walk drops I/O errors.
@@ -180,7 +242,8 @@ export function loadFreshIndex(storePath) {
       }
     } catch { /* fall through to regenerate */ }
   }
-  mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
+  // A cache folder git would track, or whose rules are unsafe, gets no cache; the answer still stands.
+  try { ensureLibDir(root); } catch { return current; }
   atomicWriteFileSync(indexPath, JSON.stringify(current, null, 2) + '\n');
   return current;
 }
@@ -317,6 +380,7 @@ function authorityTier(fm, rel) {
  * not even the derived cache — so its reads must be side-effect free.
  */
 export function captureStore(storePath, { retainRaw = false, refreshCache = true } = {}) {
+  assertStoreBoundary(storePath);
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
   let nextInvalidationAt = null; // earliest still-future t_invalid among included candidates
@@ -467,7 +531,7 @@ export function captureStore(storePath, { retainRaw = false, refreshCache = true
       let cached = null;
       try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
       if (!cached || cached.incomplete || (cached.read_errors || []).length || cached.source_sig !== source_sig) {
-        mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
+        ensureLibDir(resolve(storePath));
         atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
       }
     } catch { /* cache refresh is a convenience; the capture itself is complete */ }
@@ -482,13 +546,14 @@ function basenameNoMd(rel) {
 }
 
 export function generateSummaryIndex(storePath) {
+  assertStoreBoundary(storePath);
   // One capture — the written index's source_sig describes the exact bytes its
   // records were derived from (never signature-walk the store a second time;
   // that reopens the multi-walk gap captureStore exists to close).
   const out = captureStore(storePath, { refreshCache: false }).index;
   if (out.incomplete) return out;
   const libDir = join(resolve(storePath), '_memories', '_lib');
-  try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }
+  ensureLibDir(resolve(storePath));
   atomicWriteFileSync(join(libDir, 'unit-summaries.json'), JSON.stringify(out, null, 2) + '\n');
   return out;
 }

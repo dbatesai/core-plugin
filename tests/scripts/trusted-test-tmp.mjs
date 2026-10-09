@@ -9,9 +9,12 @@
  * that create paths here MUST register an after() cleanup (see
  * isolatedHooksLog() call sites for the pattern).
  */
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { localStateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { tmpdir } from 'node:os';
+import { trustedHome } from '../../plugins/core/skills/core/scripts/trusted-home.mjs';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -23,6 +26,24 @@ import { randomUUID } from 'node:crypto';
  * GitHub's windows-latest runners have the privilege, so CI still exercises
  * the real assertions everywhere they can run.
  */
+let _tarWritesZip = null;
+/** Whether the local `tar` writes a real zip for `-a -c -f x.zip` (bsdtar does; GNU tar writes a plain tar under that name). */
+export function tarWritesZip() {
+  if (_tarWritesZip !== null) return _tarWritesZip;
+  const dir = mkdtempSync(join(tmpdir(), 'tar-zip-probe-'));
+  try {
+    mkdirSync(join(dir, 'in'));
+    writeFileSync(join(dir, 'in', 'f.txt'), 'x');
+    const r = spawnSync('tar', ['-a', '-c', '-f', 'p.zip', '-C', 'in', '.'], { cwd: dir, encoding: 'utf8', timeout: 30000 });
+    _tarWritesZip = r.status === 0 && readFileSync(join(dir, 'p.zip')).subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  } catch {
+    _tarWritesZip = false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return _tarWritesZip;
+}
+
 let _symlinkCapable = null;
 export function symlinkCapable() {
   if (_symlinkCapable !== null) return _symlinkCapable;
@@ -38,8 +59,22 @@ export function symlinkCapable() {
   return _symlinkCapable;
 }
 
+/**
+ * CORE keeps an unregistered project's state under the real ~/.core/local/<key>/ (the state home
+ * reads the OS account, never $HOME), so every temp test project that reaches state leaves a
+ * folder there. Call when the project is created; its local folder is removed when the process exits.
+ */
+const localLeftovers = new Set();
+export function removeLocalStateOnExit(project) {
+  if (!localLeftovers.size) process.on('exit', () => { for (const d of localLeftovers) try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } });
+  localLeftovers.add(dirname(localStateDir({ root: realpathSync(project), harness: 'claude-code' })));
+  return project;
+}
+
 export function trustedTestTmpRoot() {
-  const dir = join(homedir(), '.core', '.test-tmp');
+  // Under the isolated runner, its disposable account (CORE_TEST_ACCOUNT_HOME) even in a child that dropped the
+  // preload: such a child would otherwise read the real account record and create .test-tmp in the real ~/.core.
+  const dir = join(process.env.CORE_TEST_ACCOUNT_HOME || trustedHome(), '.core', '.test-tmp');
   mkdirSync(dir, { recursive: true });
   return dir;
 }

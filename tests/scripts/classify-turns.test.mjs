@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { test } from 'node:test';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import assert from 'node:assert/strict';
@@ -142,6 +143,7 @@ test('runClassification classifies the session passed in, not the newest transcr
   const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
   try {
+    registerFixtureProject(home, project);
     const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(project));
     mkdirSync(dir, { recursive: true });
     const turn = (u, a) => [
@@ -188,6 +190,7 @@ test('each classified record is stamped with proxy_version', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-pv-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-pvp-'));
   try {
+    registerFixtureProject(home, project);
     const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(project));
     mkdirSync(dir, { recursive: true });
     const turn = (u, a) => [
@@ -256,15 +259,17 @@ test('classified-store retention: date files older than the window are deleted, 
   const { runClassifiedRetention } = await import('../../plugins/core/skills/core/scripts/classify-turns.mjs');
   const home = mkdtempSync(join(tmpdir(), 'classified-retention-'));
   try {
-    const dir = join(operationalMetricsDir('.', { home }), 'classified');
+    const project = join(home, 'project');
+    registerFixtureProject(home, project);
+    const dir = join(operationalMetricsDir(project, { home }), 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-01-01.jsonl'), '{"state":"ok"}\n');
     writeFileSync(join(dir, '2026-07-27.jsonl'), '{"state":"ok"}\n');
 
-    const bad = runClassifiedRetention('.', { home, windowDays: -5, now: new Date('2026-07-28T00:00:00Z') });
+    const bad = runClassifiedRetention(project, { home, windowDays: -5, now: new Date('2026-07-28T00:00:00Z') });
     assert.equal(bad.ran, false, 'a non-positive window must refuse before naming candidates');
 
-    const r = runClassifiedRetention('.', { home, windowDays: 30, now: new Date('2026-07-28T00:00:00Z') });
+    const r = runClassifiedRetention(project, { home, windowDays: 30, now: new Date('2026-07-28T00:00:00Z') });
     assert.ok(r.ran);
     assert.ok(!existsSync(join(dir, '2026-01-01.jsonl')), 'the stale file is deleted');
     assert.ok(existsSync(join(dir, '2026-07-27.jsonl')), 'the in-window file stays');

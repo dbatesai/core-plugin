@@ -21,11 +21,12 @@ import { realpathSync, symlinkSync } from 'node:fs';
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, unlinkSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 // A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
 const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';
 
@@ -137,7 +138,7 @@ function chromeOf(html) {
 }
 
 function fixtureProject({ workspace = true } = {}) {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-artifact-')));
+  const root = realpathSync.native(removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'metrics-artifact-'))));
   const home = join(root, 'home');
   mkdirSync(join(home, '.core'), { recursive: true });
   // A registered project keeps its receipts in its own .core/<harness>/.
@@ -385,7 +386,7 @@ test('CLI --json-in: renders from a pre-captured canonical object; manifest is a
     assert.equal(manifest.total_bytes, onDisk.length, 'total_bytes == real file size');
     assert.match(onDisk.toString('utf8'), /1 &middot; Does the machinery work\?/);
     // Generation receipt written in the project's own state, content == manifest.
-    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '.core')));
+    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '_core')));
     assert.deepEqual(JSON.parse(readFileSync(manifest.receipt_path, 'utf8')), manifest);
     // Truthful renderer identity, distinct from the data producer.
     assert.equal(manifest.producer.script, 'render-metrics-artifact.mjs');
@@ -708,19 +709,21 @@ test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be mar
 
 // ---------- refused-state fallback ----------
 
-test('refused project state (a symlinked .core): receipt lands in the flagged fallback location', async () => {
+test('refused project state (a symlinked .core): no publication or receipt fallback', async () => {
   if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-elsewhere-')));
   try {
-    symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
+    symlinkSync(elsewhere, join(root, '_core'), DIR_LINK);
     const dataPath = join(root, 'metrics.json');
     writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
-    const { manifest, receiptWritten } = await renderMetricsArtifact(root, { outPath: join(root, 'out', 'v.html'), jsonIn: dataPath, home });
-    assert.equal(receiptWritten, true);
-    assert.equal(manifest.receipt_fallback, true);
-    assert.equal(manifest.project_id, null);
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'artifact-receipts')));
+    const before = readFileSync(join(home, '.core', 'projects.json'));
+    await assert.rejects(renderMetricsArtifact(root, {outPath:join(root,'out','v.html'), jsonIn:dataPath, home}), /refusing .*_core: symlink/);
+    assert.equal(existsSync(join(root,'out','v.html')), false);
+    assert.equal(existsSync(join(home,'.core','artifact-receipts')), false);
+    assert.equal(existsSync(join(home,'.core','local')), false);
+    assert.deepEqual(readFileSync(join(home,'.core','projects.json')), before);
+    assert.deepEqual(readdirSync(elsewhere), []);
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
 });
 

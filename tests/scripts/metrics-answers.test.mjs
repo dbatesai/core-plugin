@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // The answer-shaped /metrics default view (v3.14.0 Component 6): three
 // outcome questions in sentences, sourced from PINNED scorecards + tripwire
@@ -13,7 +14,7 @@ import { gatherAnswers, renderAnswerView } from '../../plugins/core/skills/core/
 import { appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
-process.env.CORE_HARNESS ||= 'claude-code';
+process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
 
 // Opt-outs live in the project's trusted per-harness manifest. The manifest for an
 // unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
@@ -23,6 +24,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
 function writeManifestFlags(project, fields) {
+  registerFixtureProject(TEST_HOME, project);
   updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
 }
 
@@ -191,4 +193,42 @@ test('capture state is stated when capture is ON, not only when it is off', () =
       `the default door must disclose that prompts and delivered context are stored:\n${out}`);
     assert.match(out, /CORE_TURN_CAPTURE=0/, 'the off-switch must be stated where the disclosure is');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a current capture-health file that cannot be trusted is reported UNREADABLE, never all-clear; the pinned answers still show', async () => {
+  const { HEALTH_FILENAME } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { resolveStoragePath } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { chmodSync, linkSync } = await import('node:fs');
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  const shapes = ['valid', 'valid older file without consecutive_failures', 'malformed', 'a JSON array', 'a second hard link', 'a text counter', 'a negative counter', 'a fractional counter', 'no counters'];
+  if (process.platform !== 'win32' && !isRoot) shapes.push('unreadable');
+  for (const shape of shapes) {
+    const root = mkdtempSync(join(tmpdir(), 'ans-health-'));
+    try {
+      const project = makeProject(root);
+      const day = 24 * 3600 * 1000;
+      appendScorecard(project, card(new Date(Date.now() - day).toISOString()));
+      const dir = resolveStoragePath(project); mkdirSync(dir, { recursive: true });
+      const file = join(dir, HEALTH_FILENAME);
+      const bodies = {
+        malformed: '{"attempts": 3,', 'a JSON array': '[]',
+        'a text counter': '{"attempts":100,"failures":"unknown","consecutive_failures":0}',
+        'a negative counter': '{"attempts":100,"failures":-1,"consecutive_failures":0}',
+        'a fractional counter': '{"attempts":100,"failures":0.5,"consecutive_failures":0}',
+        'no counters': '{"note":"x"}',
+        'valid older file without consecutive_failures': '{"attempts":3,"failures":0}',
+      };
+      writeFileSync(file, bodies[shape] ?? '{"attempts":3,"failures":0,"consecutive_failures":0}');
+      if (shape === 'a second hard link') linkSync(file, join(root, 'elsewhere.json'));
+      if (shape === 'unreadable') chmodSync(file, 0o000);
+      const view = renderAnswerView(gatherAnswers(project));
+      assert.match(view, /82%/, `${shape}: the pinned self-test answer still renders`);
+      if (shape.startsWith('valid')) {
+        assert.match(view, /Nothing needs your attention right now\./, 'control: a readable file is quiet');
+      } else {
+        assert.match(view, /Needs your attention: health evidence is UNREADABLE — current capture health is unreadable/, shape);
+        assert.doesNotMatch(view, /Nothing needs your attention right now\./, shape);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });

@@ -29,7 +29,7 @@ import { resolve, join, basename, dirname } from 'node:path';
 import { iterUnits, score, isInvalidated } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { hashText, stampFile, readProjectCache } from './state-cache.mjs';
+import { hashText, stampFile, readProjectCache, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   writeGuardDecision, withProjectMdWriterLock,
@@ -178,13 +178,11 @@ function assertReconciled(projectDir, path, currentText) {
 // and keeps `last_written_by` honest about who actually touched PROJECT.md.)
 //
 // Shared-write concurrency: the stamp lands in the PER-PROJECT cache
-// at <project>/_memories/_lib/state-cache.json — a single-owner file, so two
-// projects closing at once can't clobber each other's hashes (a shared global
-// cache write would be an unlocked read-modify-write). For one
-// release, readers take the UNION of per-project + the global
-// ~/.core/state-cache.json (newer last_written
-// wins); each stamp also prunes its file's entry from the global cache under the
-// lock, so the union converges to per-project.
+// at <project>/_memories/_lib/state-cache.json. Different projects use separate
+// files; writers within one project share the cache mutex. Ordinary readers
+// and stamps use only the project cache, with no global fallback. Explicit
+// legacy import is a separate old-evidence transfer, not current-byte adoption.
+// This stamp never touches the global cache or its lock.
 // Content outside the marker-delimited hot block is hashed on its own. `last_written_by:
 // hot-section` alone is NOT trustworthy evidence for a later hash mismatch —
 // it only says who wrote the PREVIOUS cached bytes, not the current ones. A
@@ -230,7 +228,7 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = null } 
     try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
   })();
   const projectDir = dirname(resolve(projectMdPath));
-  // Shared stamp-and-prune plumbing lives in state-cache.mjs (shared with
+  // Shared locked-stamp plumbing lives in state-cache.mjs (shared with
   // decorate-graph.mjs so there is one copy of the
   // lock/prune logic). The domain-specific piece — hashing OUTSIDE the hot
   // block so a later mismatch can be classified correctly — stays here,
@@ -328,16 +326,14 @@ function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, h
     budget: HOT_SECTION_TOKEN_BUDGET,
     over_budget: tokens > HOT_SECTION_TOKEN_BUDGET,
     applied,
-    attribution: stampOutcome && stampOutcome.stamped === false ? stampOutcome.outcome : 'ok',
+    attribution: stampNeedsRecovery(stampOutcome) ? (stampOutcome.outcome || 'lock-cleanup-failed') : 'ok',
   });
-  // Truthful stamp-failure surfacing: the hot section landed
-  // on disk but its authorship stamp did not, so next lifecycle pass will read
-  // it as an unreconciled edit. Say so loudly rather than report clean success.
-  if (applied && stampOutcome && stampOutcome.stamped === false) {
+  // Content, attribution and lock cleanup have separate outcomes. Retain
+  // completed stamps while warning about a held lock; never request a replay
+  // merely because cleanup failed.
+  if (applied && stampNeedsRecovery(stampOutcome)) {
     process.stderr.write(
-      `hot-section: WROTE PROJECT.md but the authorship stamp failed ` +
-      `(${stampOutcome.outcome}: ${stampOutcome.reason}) — attribution unknown, ` +
-      `recovery-required: a reconcile/re-stamp is owed before the next render.\n`
+      `hot-section: WROTE PROJECT.md; ${stampRecoveryMessage(stampOutcome)}.\n`
     );
   }
   return { updated, applied, stampOutcome };
@@ -542,20 +538,16 @@ function cmdApply(args) {
     throw e;
   }
   const lines = text.trim().split('\n').length;
-  // Content-write success and attribution-stamp success are TWO different
-  // facts: the stderr warning above already told a human
-  // the stamp failed, but a hook/caller reading exit code + stdout alone used
-  // to see plain success either way. Do NOT roll back the content write —
-  // it already happened and stays — but the machine-readable contract must
-  // stop calling this a clean success.
-  if (result.applied && result.stampOutcome && result.stampOutcome.stamped === false) {
+  // Content and stamping may both land while lock cleanup fails. Preserve
+  // all three outcomes in the receipt and return nonzero for recovery.
+  if (result.applied && stampNeedsRecovery(result.stampOutcome)) {
     process.stdout.write(
-      `PROJECT.md: hot section applied (${lines} lines), but the attribution stamp FAILED — ` +
-      `partial success, recovery required.\n`
+      `PROJECT.md: hot section applied (${lines} lines); ${stampRecoveryMessage(result.stampOutcome)}.\n`
     );
     process.stdout.write(JSON.stringify({
       content_write: 'ok',
-      attribution_stamp: 'failed',
+      attribution_stamp: result.stampOutcome.stamped ? 'ok' : 'failed',
+      stampOutcome: result.stampOutcome,
       outcome: result.stampOutcome.outcome,
       reason: result.stampOutcome.reason,
       recovery: result.stampOutcome.recovery || 'recovery-required',
@@ -591,21 +583,18 @@ function cmdClear(args) {
     process.stdout.write('No hot section present; nothing to clear.\n');
     return 0;
   }
-  // Same content-write-vs-attribution-stamp distinction as
-  // cmdApply: the clear already happened and stays — never rolled back —
-  // but a failed stamp must not read as clean success on exit code + stdout.
-  if (result.cleared && result.stampOutcome && result.stampOutcome.stamped === false) {
+  // Clearing has the same content/stamp/cleanup distinction as apply.
+  if (result.cleared && stampNeedsRecovery(result.stampOutcome)) {
     process.stderr.write(
-      `hot-section: WROTE PROJECT.md (cleared) but the authorship stamp failed ` +
-      `(${result.stampOutcome.outcome}: ${result.stampOutcome.reason}) — attribution unknown, ` +
-      `recovery-required: a reconcile/re-stamp is owed before the next render.\n`
+      `hot-section: WROTE PROJECT.md (cleared); ${stampRecoveryMessage(result.stampOutcome)}.\n`
     );
     process.stdout.write(
-      'PROJECT.md: hot section cleared, but the attribution stamp FAILED — partial success, recovery required.\n'
+      `PROJECT.md: hot section cleared; ${stampRecoveryMessage(result.stampOutcome)}.\n`
     );
     process.stdout.write(JSON.stringify({
       content_write: 'ok',
-      attribution_stamp: 'failed',
+      attribution_stamp: result.stampOutcome.stamped ? 'ok' : 'failed',
+      stampOutcome: result.stampOutcome,
       outcome: result.stampOutcome.outcome,
       reason: result.stampOutcome.reason,
       recovery: result.stampOutcome.recovery || 'recovery-required',

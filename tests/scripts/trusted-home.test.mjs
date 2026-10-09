@@ -87,11 +87,9 @@ test('trusted-tree consumers fail closed when the account home is unavailable', 
   const noHome = { resolve: () => null };
   const { defaultCoreDir } = await import('../../plugins/core/skills/core/scripts/index-registry.mjs');
   const { defaultCoreDir: projectStateCoreDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
-  const { globalCacheDir } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
   for (const [name, fn] of [
     ['index-registry.defaultCoreDir', defaultCoreDir],
     ['project-state.defaultCoreDir', projectStateCoreDir],
-    ['state-cache.globalCacheDir', globalCacheDir],
   ]) {
     assert.throws(() => fn(noHome), (e) => e.code === 'NO_TRUSTED_HOME', `${name} must fail closed`);
   }

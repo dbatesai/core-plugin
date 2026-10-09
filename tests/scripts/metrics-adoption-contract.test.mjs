@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +19,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
 function writeManifestFlags(project, fields) {
+  registerFixtureProject(TEST_HOME, project);
   updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
 }
 
@@ -75,7 +77,7 @@ test('explicit CORE_METRICS_ENABLED=1 forces ON over a workspace opt-out', () =>
 function readLegacyEvents(dir) {
   const root = join(dir, '_sessions');
   const out = [];
-  for (const d of readdirSync(root)) {
+  for (const d of readdirSync(root).filter((n) => n !== ".gitignore")) {
     for (const f of readdirSync(join(root, d))) {
       if (!f.endsWith('.jsonl')) continue;
       for (const line of readFileSync(join(root, d, f), 'utf8').split('\n')) {

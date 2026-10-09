@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -12,6 +12,8 @@ import {
 function projectIn(home) {
   const dir = join(home, 'proj');
   mkdirSync(dir, { recursive: true });
+  mkdirSync(join(home,'.core'),{recursive:true});
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:dir}]));
   return dir;
 }
 
@@ -47,7 +49,7 @@ test('recordSnapshot appends to the project history rather than clobbering it', 
     assert.equal(r1.storage, 'state');
     assert.ok(r1.appended > 0, 'startup probes produced rows');
     assert.ok(existsSync(r1.path), 'history file created under the temp home');
-    assert.ok(r1.path.startsWith(home), 'writes stay inside the temp home');
+    assert.ok(r1.path.startsWith(realpathSync.native(home)), 'writes stay inside the temp home');
     const lines1 = readFileSync(r1.path, 'utf8').trim().split('\n');
     assert.equal(lines1.length, r1.appended);
 

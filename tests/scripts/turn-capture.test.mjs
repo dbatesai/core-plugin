@@ -1,9 +1,12 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
+import { installAccountHome } from '../helpers/account-home.mjs';
 import {
   captureTurnEvidence,
   turnCaptureEnabled,
@@ -23,16 +26,16 @@ import {
 } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
-process.env.CORE_HARNESS ||= 'claude-code';
+process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
 
 // Opt-outs live in the project's trusted per-harness manifest. The manifest for an
 // unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
 // redirected for this file's process.
 const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
-process.env.HOME = TEST_HOME;
-process.env.USERPROFILE = TEST_HOME;
+installAccountHome(TEST_HOME);   // CORE resolves the account home from the OS record, not HOME
 process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
 function writeManifestFlags(project, fields) {
+  registerFixtureProject(TEST_HOME, project);
   updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
 }
 
@@ -256,7 +259,8 @@ test('write failure is fail-open and lands in the health counter', () => {
     writeFileSync(turnCaptureDir(project), 'squatter');
     const res = captureTurnEvidence(project, goodRow({ retrieval_id: 'rid-fail' }), { env, now: '2026-07-24T21:00:01Z' });
     assert.equal(res.written, false);
-    assert.match(res.reason, /capture-failed/);
+    // A path capture can't use as its own folder is refused before any write, and still counted.
+    assert.match(res.reason, /^capture-refused: _metrics[\\/]turn-capture is a link or not a folder$/);
     const health = readCaptureHealth(project);
     assert.equal(health.attempts, 2);
     assert.equal(health.failures, 1);
@@ -337,7 +341,7 @@ test('purge removes the stream dir and refuses anything else', () => {
 test('purge covers the whole declared scope — nested files, interrupted writes, derived judgments, health counters, AND the classified turn log', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-purge-scope-'));
   try {
-    const project = makeProject(root);
+    const project = removeLocalStateOnExit(makeProject(root));
     captureTurnEvidence(project, goodRow(), { env: cleanEnv() });
     const dir = turnCaptureDir(project);
     const base = join(project, '_metrics');

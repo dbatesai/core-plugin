@@ -31,7 +31,7 @@
  * Ships with the plugin as prescriptive code; .mjs only. Claude Code SessionStart; Codex has a
  * different session model (harnesses/codex.md) and bootstraps via its own startup mandate.
  *
- * I/O: ignores stdin; prints the directive to stdout. Always exits 0 — a startup hook must
+ * I/O: reads stdin for the project working directory; prints the directive to stdout. Always exits 0 — a startup hook must
  * never block the session opening.
  */
 
@@ -41,6 +41,9 @@ import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
 import { trustedHome } from '../scripts/trusted-home.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
+import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
+import { projectOnlyHint } from '../scripts/project-only.mjs';
+import { settleStateFolderName } from '../scripts/state-dirname.mjs';
 
 // trustedHome() (shared anchor in scripts/trusted-home.mjs): the OS-account home,
 // unspoofable by $HOME/$USERPROFILE. Unresolvable → null → nothing is authorized.
@@ -72,13 +75,13 @@ export function userAuthorizedSkills(readFile = readFileSync, home = trustedHome
   } catch { return new Set(); }
 }
 
-export function autostartSkill(env = process.env, authorized = null) {
+export function autostartSkill(env = process.env, authorized = null, logContext = {}) {
   const v = env.CORE_AUTOSTART_SKILL;
   if (!v || v === '/core') return '/core';
   if (!SKILL_SHAPE.test(v)) return '/core';                       // not a skill reference
   const allow = authorized ?? userAuthorizedSkills();
   if (!allow.has(v)) {
-    logHookEvent({ hook: 'session-start', action: 'reject-autostart-skill', reason: 'not-user-authorized:' + v });
+    logHookEvent({ hook: 'session-start', action: 'reject-autostart-skill', reason: 'not-user-authorized:' + v, ...logContext });
     return '/core';                                               // shape ≠ authority
   }
   return v;
@@ -88,21 +91,47 @@ export function buildDirective(skill) {
   return `CORE session protocol: this environment has the CORE project-intelligence plugin installed. Before anything else this session — before answering the user, before any other tool call — invoke the \`${skill}\` skill. It runs startup routing, loads cross-session project memory, and composes a readiness summary, and it self-deduplicates (it won't re-run if it already ran this session). Run \`${skill}\` first, then address the user's request.`;
 }
 
+// The harness hands the hook its own session id; it is the only source an agent may use for --session.
+const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+export function sessionIdLine(payload) {
+  const id = payload && payload.session_id;
+  return typeof id === 'string' && SESSION_ID_RE.test(id) ? `CORE session id for this session (from the harness): ${id}` : '';
+}
+
+/** One line for the readiness summary when the older `.core` state folder is still in the project. */
+export function folderNameLine(settled) {
+  if (settled === 'both') return 'CORE state folder: this project has both `_core` and an older `.core`; CORE uses `_core`. Tell the user the older `.core` folder is still there for them to look at or remove.';
+  if (settled === 'legacy-not-a-folder') return 'CORE state folder: the older `.core` here is a link or not a folder, so CORE left it alone and keeps its state in `_core`. Tell the user.';
+  if (settled?.startsWith('not-renamed')) return `CORE state folder: the older \`.core\` could not be renamed to \`_core\` (${settled}); CORE stores nothing new for this project until it is. Tell the user.`;
+  return '';
+}
+
+export const PROJECT_ONLY_NOTICE = 'CORE project-only mode: this folder runs CORE from the folder alone. Automatic retrieval, end-of-session close and collab sync are off here. Run `/core project-only` to start, and `/finalize project-only` to close.';
+
 function main() {
+  let payload = {};
+  try { const raw = readFileSync(0, 'utf8'); if (raw.trim()) payload = JSON.parse(raw); } catch { payload = {}; }
+  // A project-only folder gets the notice and nothing else: no settings read, no log write.
+  const idLine = sessionIdLine(payload);
+  if (projectOnlyHint(payload.cwd || process.cwd())) { process.stdout.write(PROJECT_ONLY_NOTICE + '\n' + (idLine ? idLine + '\n' : '')); return 0; }
+  const cwd = payload.cwd || process.cwd();
+  const logContext = { cwd, projectRoot: resolveRegisteredRoot(cwd) };
+  // Before any hook this session reads the project's state: give an older `.core` folder its visible name.
+  const folderLine = folderNameLine(logContext.projectRoot ? settleStateFolderName(logContext.projectRoot) : null);
   // A session running under CORE_CLOSE_PASS_ACTIVE=1 is discharging a close and must NOT be
   // told to run /core first — it has one job. Without this, such a session takes the /core
   // directive and never cleanly closes.
   if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
-    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'close-pass-child' });
+    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'close-pass-child', ...logContext });
     return 0;
   }
   if (process.env.CORE_AUTOSTART === '0') {
-    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out' });
+    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out', ...logContext });
     return 0;
   }
-  const skill = autostartSkill();
-  process.stdout.write(buildDirective(skill) + '\n');
-  logHookEvent({ hook: 'session-start', action: 'inject', reason: skill === '/core' ? undefined : 'skill=' + skill });
+  const skill = autostartSkill(process.env, null, logContext);
+  process.stdout.write(buildDirective(skill) + '\n' + (idLine ? idLine + '\n' : '') + (folderLine ? folderLine + '\n' : ''));
+  logHookEvent({ hook: 'session-start', action: 'inject', reason: skill === '/core' ? undefined : 'skill=' + skill, ...logContext });
   return 0;
 }
 

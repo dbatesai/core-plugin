@@ -1,6 +1,6 @@
 ---
 name: metrics
-description: Report CORE memory health with trust-labeled evidence for storage, retrieval, and blind self-tests. Default answers come from pinned scorecards; "/metrics full" gives the instrument readout and live round-trip proof on a throwaway store; "/metrics export" writes an anonymized metrics zip to the Desktop; "/metrics self-test" authors, verifies, and runs a blind test round. Use whenever the user runs /metrics (any mode), asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", "test the memory on this project", "run a blind retrieval self-test", "export a metrics package", "make an anonymized report I can share", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or full hygiene passes (/process-memory).
+description: Report CORE memory health with trust-labeled evidence for storage, retrieval, and blind self-tests. Default answers come from pinned scorecards; "/metrics full" gives the instrument readout and live round-trip proof on a throwaway store; "/metrics export" writes an anonymized metrics zip to the project's _outputs/metrics-package/; "/metrics self-test" authors, verifies, and runs a blind test round. Use whenever the user runs /metrics (any mode), asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", "test the memory on this project", "run a blind retrieval self-test", "export a metrics package", "make an anonymized report I can share", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or full hygiene passes (/process-memory).
 user-invocable: true
 allowed-tools:
   - Read
@@ -62,7 +62,7 @@ The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEA
 **Artifact display (harnesses with an artifact surface):** the full report displays artifact-first — a self-contained plain-language HTML page from the SAME canonical object:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <scratch-path>/core-metrics.html
+node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <project-dir>/_core/_scratch/core-metrics.html
 ```
 
 Narrate the printed manifest (content class `aggregates-only`, byte count, producer identity), publish **private** via the Artifact tool, keep a stable URL by republishing the same path, and record the outcome with `--record-publish` (the script refuses `published-private` without evidence + authorization fields). Consent: ask-first by default; narrate-and-proceed only under this user's own durably-recorded standing authorization. On Codex (no artifact surface on that harness): say so by name, give the `--out` path, never fake a publish.
@@ -71,9 +71,11 @@ Narrate the printed manifest (content class `aggregates-only`, byte count, produ
 
 1. **Scope from the user's words:** "this project"/unspecified → current project; "all my projects"/"everything" → `--all`. Ambiguous → current project, said in one line.
 2. ```bash
-   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" <project-dir | --all>
+   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" "<project-dir>"
+   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" --all --scratch-project "<exported-project-dir>"
    ```
-3. **Verify before claiming:** the script prints `package: <path>` — confirm the file exists, then relay the landing path, the coverage line, and every `flag[...]` line (the flags are the point, not noise). Exit codes: **0** complete; **1** partial — the package shipped but some sources were unavailable; name exactly which and what that costs, never round up to complete; **2** aborted — the fail-closed leakage scan hit or the run failed; NOTHING shipped; never retry with the boundary loosened, never hand-build a package. **The script is the only writer** — a hand-patched package voids the anonymization boundary. If the user asks to de-anonymize "just this once": decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't. Turn-capture evidence content NEVER enters the package by construction (canary-tested).
+   With `--all`, use the current exported project as the explicit scratch host; if it is not in the exported set, resolve the host before running. Do not silently select the first registry entry.
+3. **Verify before claiming:** the script prints `package: <path>` — confirm the file exists, then relay the landing path, the coverage line, and every `flag[...]` line (the flags are the point, not noise). Exit codes: **0** complete; **1** partial — the package shipped but some sources were unavailable; name exactly which and what that costs, never round up to complete; **2** failed — inspect the result: a leakage abort ships nothing, but cleanup failure can leave verified output and retained scratch. Name both when reported; a retained staging folder is recoverable material, not proof of delivery. Never retry with the boundary loosened or hand-build a package. **The script is the only writer** — a hand-patched package voids the anonymization boundary. If the user asks to de-anonymize "just this once": decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't. Turn-capture evidence content NEVER enters the package by construction (canary-tested).
 
 ## `self-test` mode — a deliberate blind round now (was `/self-test`)
 

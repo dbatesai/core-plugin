@@ -41,6 +41,8 @@ import { classifyRegistration, classifyStamp } from './project-state.mjs';
 import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-units.mjs';
 import { generate as generateHarnessMd } from './generate-harness-md.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { outsideObservationOff } from './restrictive-mode.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 // ── CORE_ROOT (the plugin root) ──────────────────────────────────────────────
 // This script lives at <CORE_ROOT>/skills/core/scripts/configure-project.mjs, so
@@ -132,6 +134,8 @@ export function detectIdentity(projectPath, coreDir, harness = 'claude-code') {
 // found N" — never assert absence as "no connectors". Whether a configured server
 // is reachable+authed this session is session-live (agent-reported), not here.
 export function readConfiguredMcp(projectPath, harness, home = homedir()) {
+  const off = outsideObservationOff(projectPath);
+  if (off) return { harness, source: null, checked: false, servers: null, note: `not read: ${off} mode looks at nothing outside the project` };
   if (harness === 'codex') {
     // Codex configures MCP in ~/.codex/config.toml (TOML). We don't bundle a TOML
     // parser (dependency-free by design), so we DON'T claim to have read the
@@ -214,21 +218,24 @@ export async function planAgentsMd(projectPath, { apply = false } = {}) {
 // ── Assemble the structured report ───────────────────────────────────────────
 export async function configureProject({
   projectPath, coreRoot, harness, apply = false,
-  home = homedir(), today = new Date(), probe = null,
+  home: homeIn, nativeHome, today = new Date(), probe = null,
 } = {}) {
+  // CORE identity from the account home; the harness's connector config from its own root.
+  const home = homeIn ?? coreHome();
+  const nativeRoot = nativeHome ?? homeIn ?? homedir();
   const proj = resolve(projectPath);
   const coreDir = join(home, '.core');
 
   const manifests = checkManifests(coreRoot);
   const store = validateStore(proj, today);
   const identity = detectIdentity(proj, coreDir, harness || detectHarness());
-  const mcp = readConfiguredMcp(proj, harness, home);
+  const mcp = readConfiguredMcp(proj, harness, nativeRoot);
   const connectorMap = readConnectorMap(proj);
   const agentsMd = await planAgentsMd(proj, { apply });
 
   let probeRows = null;
   if (probe) {
-    try { probeRows = await probe({ coreRoot, harness }); }
+    try { probeRows = await probe({ coreRoot, harness, cwd: proj, env: process.env, home: homeIn, nativeHome }); }
     catch (e) { probeRows = { error: e.message }; }
   }
 
@@ -334,10 +341,10 @@ export async function main(argv) {
  * lazily so a probe-side failure can't stop the rest of the report. `runStartup` reads
  * `opts.harness`, so that is the key the harness travels under.
  */
-export async function probeForHarness({ harness: h }, { load = () => import('./capability-probe.mjs') } = {}) {
+export async function probeForHarness({ harness: h, cwd, env, home, nativeHome }, { load = () => import('./capability-probe.mjs') } = {}) {
   try {
     const { runStartup } = await load();
-    return await runStartup({ harness: h });
+    return await runStartup({ harness: h, cwd, env, home, nativeHome });
   } catch (e) { return { error: e.message }; }
 }
 

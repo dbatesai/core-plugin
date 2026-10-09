@@ -13,7 +13,7 @@
  *     warning — for the agent to show the user BEFORE any publish.
  *   - Condition 4 (audit trail): TWO receipts, distinct in kind. The
  *     preflight-GENERATION receipt (this manifest, written before consent)
- *     lands under `<project>/.core/<harness>/artifact-receipts/` and
+ *     lands under `<project>/_core/<harness>/artifact-receipts/` and
  *     records what was generated and offered — never what went up. The
  *     POST-PUBLISH receipt (`--record-publish`) is written after the consent/
  *     publish step resolves and records the actual outcome — declined,
@@ -89,16 +89,17 @@
  * --metrics-cache, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
-import { join, resolve, basename, dirname, sep } from 'node:path';
+import { lstatSync, readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { join, resolve, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureScratchFor } from './project-artifacts.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
 import { gatherMetrics } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import {
   PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor,
   recordPublishOutcome, recordRevocation, runRecordCli, generationReceiptLocation,
@@ -1424,6 +1425,19 @@ export async function resolveMetricsForRender(root, {
   if (metricsProvider === null) {
     return { available: false, reason: 'skipped by --no-metrics for this generation' };
   }
+  // The cache is this project's working state: it is read or written only where it really lies inside
+  // the project, judged on the real target, and never in the memory store.
+  if (metricsCachePath && (!containedPath(root, metricsCachePath) || containedPath(join(root, '_memories'), metricsCachePath))) {
+    throw Object.assign(new Error(`--metrics-cache must really lie inside the project and outside _memories/ (${metricsCachePath})`), { code: 'CACHE_OUTSIDE_PROJECT' });
+  }
+  // A second name for the cache file (a hard link) could be a file outside the project: only a
+  // single-named regular file, or none, is read or replaced. A leaf that can't be examined is refused.
+  if (metricsCachePath) {
+    let leaf = null;
+    try { leaf = lstatSync(metricsCachePath); }
+    catch (e) { if (e.code !== 'ENOENT') throw Object.assign(new Error(`--metrics-cache could not be examined (${e.code})`), { code: 'CACHE_OUTSIDE_PROJECT' }); }
+    if (leaf && (!leaf.isFile() || leaf.nlink !== 1)) throw Object.assign(new Error(`--metrics-cache must be a single-named regular file (${metricsCachePath})`), { code: 'CACHE_OUTSIDE_PROJECT' });
+  }
   if (metricsCachePath && existsSync(metricsCachePath)) {
     try {
       const cache = JSON.parse(readFileSync(metricsCachePath, 'utf8'));
@@ -1446,7 +1460,7 @@ export async function resolveMetricsForRender(root, {
           generated_at: generatedAt,
           report: m.report,
           mechanics_status: m.mechanics?.status ?? null,
-        }, null, 2) + '\n');
+        }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
       } catch (e) {
         process.stderr.write(`render-browse-artifact: metrics cache write failed (${e && e.message}) — the page still carries the live metrics\n`);
       }
@@ -1481,18 +1495,19 @@ export async function renderBrowseArtifact(projectDir, {
   const memoriesRoot = join(root, '_memories');
   // Canonical containment, and the destination is claimed before the store is
   // read: a linked --out is rejected on its real target, not its spelling.
+  ensureScratchFor(root, outPath, metricsCachePath);
   const outAbs = resolveArtifactDestination(outPath, { forbiddenRoot: memoriesRoot });
   if (scope !== 'active' && scope !== 'all-including-archive') {
     throw Object.assign(new Error(`unknown --scope '${scope}' (valid: active, all-including-archive)`), { code: 'BAD_SCOPE' });
   }
   let metricsCacheAbs = null;
   if (metricsCachePath) {
-    metricsCacheAbs = resolve(metricsCachePath);
-    // Same read-only-store discipline as --out: the cache is operational
-    // state, never store content.
-    if (metricsCacheAbs === memoriesRoot || metricsCacheAbs.startsWith(memoriesRoot + sep)) {
-      throw Object.assign(new Error(
-        '--metrics-cache must not resolve inside _memories/ — the store is read-only to this generator'), { code: 'CACHE_IN_STORE' });
+    // Same read-only-store discipline as --out, judged on the real target: the cache is
+    // operational state, never store content, and a link into _memories/ is refused.
+    try { metricsCacheAbs = resolveArtifactDestination(metricsCachePath, { forbiddenRoot: memoriesRoot }); }
+    catch (e) {
+      throw Object.assign(new Error(e.message.replace('--out', '--metrics-cache')),
+        { code: e.code === 'OUT_IN_STORE' ? 'CACHE_IN_STORE' : e.code });
     }
   }
 
@@ -1527,8 +1542,8 @@ export async function renderBrowseArtifact(projectDir, {
     },
   });
 
-  // Unwritable project state → the flagged fallback location; the audit trail is kept anyway.
-  const { projectId, receiptDir, receiptPath } = generationReceiptLocation({
+  // A receipt needs project state; a refused destination stops publication visibly.
+  const { projectId, receiptDir, receiptPath, receiptLocation } = generationReceiptLocation({
     // The receipt is the audit trail; its root comes from the OS-account home
     // unless a caller names one explicitly (test isolation, --home).
     home: home || requireTrustedHome(), projectDir: root, generatedAt,
@@ -1564,7 +1579,7 @@ export async function renderBrowseArtifact(projectDir, {
     metrics_as_of: metrics.available ? metrics.as_of : null,
     out_path: outAbs,
     receipt_path: receiptPath,
-    receipt_fallback: projectId === null,
+    receipt_fallback: receiptLocation !== 'project',
     sensitivity_warning: SENSITIVITY_WARNING,
   };
 
@@ -1645,7 +1660,7 @@ async function main(argv) {
     }
     return 0;
   } catch (e) {
-    if (e.code === 'OUT_REQUIRED' || e.code === 'BAD_SCOPE' || e.code === 'OUT_IN_STORE' || e.code === 'CACHE_IN_STORE') {
+    if (e.code === 'OUT_REQUIRED' || e.code === 'BAD_SCOPE' || e.code === 'OUT_IN_STORE' || e.code === 'CACHE_IN_STORE' || e.code === 'CACHE_OUTSIDE_PROJECT') {
       process.stderr.write(`render-browse-artifact: ${e.message}\n`);
       return 2;
     }

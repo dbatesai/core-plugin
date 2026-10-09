@@ -23,7 +23,7 @@ export function buildReportMd({ manifest, projects }) {
   lines.push('');
   lines.push(`Generated ${manifest.generated_at} · mode: ${manifest.mode} · generator ${manifest.generator ? manifest.generator.ran_from + (manifest.generator.source_sha ? ' @ ' + manifest.generator.source_sha : '') : 'unknown'} (manifest claims ${manifest.plugin ? 'v' + manifest.plugin.manifest_version : 'unknown'}) · schema ${manifest.schema_version}`);
   lines.push('');
-  lines.push('This package exists for one purpose: feedback for refining CORE. Every value is a number, date, fixed CORE vocabulary, or a salted pseudonym — free text is dropped at generation, never copied. Residual risk is minimized, not zero: stable pseudonyms link the same anonymous project across packages from one install (delete `~/.core/metrics-package-salt` to sever); small cells are suppressed at k=3; per-unit rankings gate on store population. Trust labels use the committed vocabulary — `proven-live` / `direct` / `proxy` / `provisional` — with a basis note per block: retrieval stats are `proxy` until the corpus is fully product-emitted; recognition stays `provisional` until the classifier clears calibration (read trends, not levels).');
+  lines.push('This package exists for one purpose: feedback for refining CORE. Every value is a number, date, fixed CORE vocabulary, or a salted pseudonym — free text is dropped at generation, never copied. Residual risk is minimized, not zero: stable pseudonyms link the same anonymous project across its own packages, and are unrelated between projects (delete `_core/_package/salt` in the project to sever); small cells are suppressed at k=3; per-unit rankings gate on store population. Trust labels use the committed vocabulary — `proven-live` / `direct` / `proxy` / `provisional` — with a basis note per block: retrieval stats are `proxy` until the corpus is fully product-emitted; recognition stays `provisional` until the classifier clears calibration (read trends, not levels).');
   lines.push('');
   for (const proj of projects) {
     lines.push(`## ${proj.pseudonym}`);
@@ -47,7 +47,7 @@ export function buildReportMd({ manifest, projects }) {
       const changes = Object.entries(proj.deltas.changes || {}).filter(([, v]) => v !== 0);
       lines.push(`**Since ${proj.deltas.since}:** ${changes.length ? changes.map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(' · ') : 'no headline movement'}`);
     } else {
-      lines.push('**Deltas:** first package from this install for this project — trend lines start here.');
+      lines.push(/^first package/.test(proj.deltas?.reason || 'first package') ? `**Deltas:** ${proj.deltas?.reason || 'first package for this project'} — trend lines start here.` : `**Deltas:** unavailable — ${proj.deltas.reason}.`);
     }
     lines.push('');
     if (proj.flags.length) {
@@ -226,7 +226,7 @@ export function buildReportHtml({ manifest, projects }) {
 
     const deltas = proj.deltas?.available
       ? `<div class="note">Since ${esc(proj.deltas.since)}: ${Object.entries(proj.deltas.changes || {}).filter(([, x]) => x !== 0).map(([k, x]) => `${esc(k)} ${x > 0 ? '+' : ''}${esc(x)}`).join(' · ') || 'no headline movement'}</div>`
-      : '<div class="note">First package from this install for this project — trend lines start here.</div>';
+      : /^first package/.test(proj.deltas?.reason || 'first package') ? `<div class="note">${esc(proj.deltas?.reason || 'first package for this project')} — trend lines start here.</div>` : `<div class="note">Deltas unavailable — ${esc(proj.deltas.reason)}.</div>`;
 
     return `<h2>${esc(proj.pseudonym)}</h2><div class="tiles">${tiles}</div>${flags}${deltas}${tierChart}${eventsLine}${warnChart}${recLine}${selfTestChart}`;
   }).join('');

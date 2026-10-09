@@ -15,10 +15,10 @@
  * discloses how many fields were dropped. By design this boundary lives in
  * prescriptive code, not skill prose; and the script carries zero dependencies.
  *
- * Pseudonyms: HMAC-SHA256 over a per-install secret salt (~/.core/metrics-package-salt,
- * 0600, NEVER shipped). Stable across packages from the same install so trend
- * lines are comparable; meaningless elsewhere.
- * Deleting the salt rotates every pseudonym.
+ * Pseudonyms: HMAC-SHA256 over a per-project secret key (<project>/_core/_package/salt,
+ * 0600, NEVER shipped). Stable across packages of the same project so trend lines
+ * are comparable; meaningless elsewhere, and unrelated between projects.
+ * Deleting the key rotates that project's pseudonyms and restarts its deltas.
  *
  * Self-healing: every source is optional — absent/unparseable sources emit
  * `{available:false, reason}` blocks and land in manifest.coverage; one broken
@@ -29,35 +29,39 @@
  * CLI: node metrics-package.mjs <project-dir> [--all] [--out <dir>] [--json] [--home <dir>]
  *   --all   package every workspace registered in ~/.core/index.json whose path
  *           exists and contains _memories/
- *   --out   destination dir (default: the platform Desktop, else home)
+ *   --out   destination dir (default: <project>/_outputs/metrics-package/ of the --scratch-project)
+ *   --scratch-project  project hosting local scratch (required with --all)
  *   --home  test seam: treat <dir> as the user home (tests must never touch ~)
  * Exit: 0 complete · 1 partial (sources or projects unavailable, package produced)
- *       · 2 aborted (leakage hit or fatal; nothing shipped)
+ *       · 2 failure (may include a verified output or retained scratch; inspect the result)
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
-  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync,
-} from 'node:fs';
+  mkdtempSync, rmSync, chmodSync,  cpSync, openSync, writeSync, closeSync, realpathSync,
+  constants as fsConstants } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
-import { trustedHome } from './trusted-home.mjs';
+import { coreHome } from './trusted-home.mjs';
 import { VALID_TYPES, VALID_STATUSES, VALID_EDGE_TYPES, isActiveStatus } from './unit-vocab.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './outcome-vocab.mjs';
 import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
+import { ensureProjectArtifactDir, projectArtifactRoot, assertArtifactFile } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
+import { aggregateCalibration } from './calibrate-classifier.mjs';
+import { folderChain } from './store-ignores.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
-const SALT_FILE = 'metrics-package-salt';
-const HISTORY_DIR = 'metrics-package-history';
+const SALT_FILE = 'salt';
+const HISTORY_FILE = 'history.jsonl';
+const SALT_RE = /^[0-9a-f]{64}$/;
 
 // Closed CORE vocabulary — the only strings (besides pseudonyms, dates, and
 // numbers) allowed into the package. Anything outside a whitelist folds to 'other'.
@@ -223,14 +227,27 @@ export function projectForShare(blocks) {
 
 // ---------- pseudonymization ----------
 
-export function loadOrCreateSalt(coreDir) {
-  const p = join(coreDir, SALT_FILE);
-  if (existsSync(p)) return { salt: readFileSync(p, 'utf8').trim(), created: false };
-  mkdirSync(coreDir, { recursive: true });
+/** The project's packaging key from its package state folder. A key that is there but unreadable or
+ *  malformed is refused, never replaced: replacing it would silently rotate every pseudonym. */
+export function loadOrCreateSalt(stateDir) {
+  const p = join(stateDir, SALT_FILE);
+  // A link, a second name or a non-file is never read or written through.
+  try { assertArtifactFile(stateDir, p); } catch { throw Object.assign(new Error('package key is not an ordinary file'), { code: 'package-key-unsafe' }); }
+  let text = null;
+  try { text = readFileSync(p, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw Object.assign(new Error('package key unreadable'), { code: 'package-key-unreadable' }); }
+  if (text !== null) {
+    if (!SALT_RE.test(text.trim())) throw Object.assign(new Error('package key malformed'), { code: 'package-key-malformed' });
+    return { salt: text.trim(), created: false };
+  }
   const salt = randomBytes(32).toString('hex');
-  writeFileSync(p, salt + '\n', { mode: 0o600 });
+  writeFileSync(p, salt + '\n', { mode: 0o600, flag: 'wx' });
   try { chmodSync(p, 0o600); } catch { /* windows: mode is advisory */ }
   return { salt, created: true };
+}
+
+/** A short, non-secret id for a key, so history rows say which key's pseudonyms they belong to. */
+export function keyIdOf(salt) {
+  return createHash('sha256').update(`key-id:${salt}`).digest('hex').slice(0, 16);
 }
 
 export function makeSeal(salt) {
@@ -719,6 +736,26 @@ export function workspaceMetrics(home, projectDir) {
       };
     } catch { calibration = { available: false, reason: 'calibration-state.json unparseable' }; }
   }
+  if (calibration.available) {
+    // Per-harness states are each the authority for their own harness; the conclusion spans them all.
+    const gate = aggregateCalibration(projectDir, { home });
+    calibration.is_calibrated = gate.is_calibrated;
+    calibration.provisional = gate.provisional;
+    // Each harness's row comes only from its own state; a harness with none gets no inherited claim.
+    calibration.by_harness = Object.fromEntries(['claude-code', 'codex'].map((harness) => {
+      const row = gate.by_harness[harness];
+      return [harness, row ? {
+        is_calibrated: row.is_calibrated === true,
+        labeled_count: num(row.labeled_count),
+        min_labeled: num(row.min_labeled),
+        overall_precision: num(row.overall_precision),
+        coverage_complete: row.coverage_complete === true,
+        per_class_pass: row.per_class_pass === true,
+        blinded: row.blinded === true,
+        provenance_complete: row.provenance_complete === true,
+      } : { is_calibrated: false }];
+    }));
+  }
 
   let capability = { available: false, reason: 'no capability-history.jsonl' };
   const capPath = join(dirname(metricsDir), 'capability-history.jsonl');
@@ -784,16 +821,30 @@ export function headline(blocks) {
   return h;
 }
 
-export function computeDeltas(home, projectPseudonym, current) {
-  const dir = join(home, '.core', HISTORY_DIR);
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${projectPseudonym}.jsonl`);
+/** Read-only: creates nothing. An absent history is a first package; an unreadable or damaged one is
+ *  unavailable, never treated as a first package or a zero baseline. */
+export function computeDeltas(stateDir, current, keyId = null) {
+  const file = join(stateDir, HISTORY_FILE);
+  try { assertArtifactFile(stateDir, file); } catch { return { available: false, reason: 'history unsafe' }; }
   let previous = null;
-  if (existsSync(file)) {
-    const { rows } = readJsonlSafe(file);
-    if (rows.length) previous = rows[rows.length - 1];
+  let text = null;
+  try { text = readFileSync(file, 'utf8'); } catch (e) {
+    if (e.code !== 'ENOENT') return { available: false, reason: 'history unreadable' };
   }
-  const deltas = { available: !!previous, reason: previous ? undefined : 'first package from this install for this project' };
+  let earlier = false;
+  if (text !== null) {
+    // Parsed from the one read above: a second read could fail and look like an empty history.
+    const rows = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { rows.push(JSON.parse(line)); } catch { return { available: false, reason: 'history damaged' }; }
+    }
+    earlier = rows.length > 0;
+    // Only rows made under the current key: after a rotation the old baseline belongs to old pseudonyms.
+    const mine = rows.filter((r) => r && r.key === keyId);
+    if (mine.length) previous = mine[mine.length - 1];
+  }
+  const deltas = { available: !!previous, reason: previous ? undefined : earlier ? 'first package since the key changed' : 'first package for this project' };
   if (previous) {
     deltas.since = previous.generated_at || null;
     deltas.changes = {};
@@ -807,10 +858,19 @@ export function computeDeltas(home, projectPseudonym, current) {
 
 // Called ONLY after the leak scan passed and the artifact shipped — an aborted
 // package never advances the delta baseline.
-export function appendHistory(home, projectPseudonym, current) {
-  const dir = join(home, '.core', HISTORY_DIR);
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(join(dir, `${projectPseudonym}.jsonl`), JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n');
+export function appendHistory(stateDir, current, keyId = null) {
+  const file = join(stateDir, HISTORY_FILE);
+  assertArtifactFile(stateDir, file);
+  // No-follow where the platform has it, so a link swapped in after the check is not written through.
+  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), 0o600);
+  try {
+    const bytes = Buffer.from(JSON.stringify({ generated_at: new Date().toISOString(), key: keyId, ...current }) + '\n');
+    for (let off = 0; off < bytes.length;) {
+      const n = writeSync(fd, bytes, off, bytes.length - off);
+      if (n <= 0) throw Object.assign(new Error('history write made no progress'), { code: 'short-write' });
+      off += n;
+    }
+  } finally { closeSync(fd); }
 }
 
 export function computeFlags(blocks, hl) {
@@ -914,7 +974,7 @@ const RE_INT_KEY = /^-?\d+$/;
 // Emitted by metrics-dedupe's cohort gate; every component is already folded there.
 const RE_COHORT_LABEL = /^schema=\S+ classifier=\S+ proxy=\S+$/;
 // Node error codes plus this module's own fallback — never a raw message.
-const RE_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$|^collection-error$/;
+const RE_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$|^collection-error$|^package-key-(unsafe|unreadable|malformed)$|^project-artifact-unsafe-target$/;
 
 const NUM = { leaf: isNum };
 const BOOL = { leaf: (v) => typeof v === 'boolean' };
@@ -1299,7 +1359,10 @@ export function moveStagingToFolder(staging, folder) {
       source_retained: staging,
     };
   }
-  rmSync(staging, { recursive: true, force: true });
+  try { rmSync(staging, { recursive: true, force: true }); } catch (e) {
+    return { ok: true, path: folder, source_retained: staging,
+      scratch_cleanup: { error_code: e.code || 'cleanup-error', path: staging } };
+  }
   return { ok: true, path: folder };
 }
 
@@ -1307,19 +1370,29 @@ export function moveStagingToFolder(staging, folder) {
  * Byte receipt for an archive: extract it and hash-compare against the staged
  * tree. `tar -t` proves names were listed; this proves the contents match.
  */
-export function verifyArchiveRoundTrip(zipPath, stagingDir) {
-  const scratch = mkdtempSync(join(tmpdir(), 'core-metrics-verify-'));
+export function verifyArchiveRoundTrip(zipPath, stagingDir, { projectRoot } = {}) {
+  let scratch = null, outcome;
   try {
+    scratch = mkdtempSync(join(ensureProjectArtifactDir(projectRoot, '_scratch'), 'verify-'));
     const res = spawnSync('tar', ['-x', '-f', basename(zipPath), '-C', scratch], { cwd: dirname(zipPath), encoding: 'utf8', timeout: 120_000 });
-    if (res.error || res.status !== 0) return { ok: false, reason: `archive did not extract (tar exit ${res.status})` };
-    const verified = verifyCopiedTree(stagingDir, scratch);
-    if (!verified.ok) {
-      return { ok: false, reason: verified.reason || `archive contents differ (${verified.missing.length} missing, ${verified.mismatched.length} changed)` };
+    if (res.error || res.status !== 0) outcome = { ok: false, reason: `archive did not extract (tar exit ${res.status})` };
+    else {
+      const verified = verifyCopiedTree(stagingDir, scratch);
+      outcome = verified.ok ? { ok: true } : { ok: false,
+        reason: verified.reason || `archive contents differ (${verified.missing.length} missing, ${verified.mismatched.length} changed)` };
     }
-    return { ok: true };
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
+  } catch (e) {
+    outcome = { ok: false, reason: `archive verification failed (${e.code || 'verification-error'})` };
   }
+  if (scratch) {
+    try { rmSync(scratch, { recursive: true, force: true }); } catch (e) {
+      outcome.content_verified = outcome.ok;
+      outcome.ok = false;
+      outcome.reason ||= 'archive verification scratch cleanup failed';
+      outcome.scratch_cleanup = { error_code: e.code || 'cleanup-error', path: scratch };
+    }
+  }
+  return outcome;
 }
 
 export function zipStaging(stagingDir, destZip) {
@@ -1332,28 +1405,24 @@ export function zipStaging(stagingDir, destZip) {
   return verifyZipMagic(destZip);
 }
 
-function desktopDir(home) {
-  const d = join(home, 'Desktop');
-  return existsSync(d) ? d : home;
-}
-
 // ---------- main ----------
 
 export function runPackage(argv, { homeOverride } = {}) {
   const args = [...argv];
-  const flagsIn = { all: false, out: null, json: false, home: homeOverride || null };
+  const flagsIn = { all: false, out: null, json: false, home: homeOverride || null, scratchProject: null };
   const positional = [];
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--all') flagsIn.all = true;
+    else if (args[i] === '--scratch-project') { flagsIn.scratchProject = args[i + 1]; i += 1; }
     else if (args[i] === '--json') flagsIn.json = true;
     else if (args[i] === '--out') { flagsIn.out = args[i + 1]; i += 1; }
     else if (args[i] === '--home') { flagsIn.home = args[i + 1]; i += 1; }
     else positional.push(args[i]);
   }
-  const home = flagsIn.home || trustedHome() || homedir();
+  // --home is a test/owner seam; without it the OS account home decides, never $HOME.
+  const home = flagsIn.home || coreHome();
   const coreDir = join(home, '.core');
-  const { salt, created: saltCreated } = loadOrCreateSalt(coreDir);
-  const seal = makeSeal(salt);
+  if (flagsIn.all && !flagsIn.scratchProject) return { exit: 2, error: '--all requires --scratch-project naming one exported project' };
 
   // Every registered project's name and path feed the leak scan, legacy registrations included.
   const indexEntries = [];
@@ -1379,19 +1448,42 @@ export function runPackage(argv, { homeOverride } = {}) {
     projectDirs = [p];
   }
 
+  // Scratch has one explicit owner, never the first registry entry or an inferred staging parent.
+  let scratchProject, scratchDir;
+  try {
+    scratchProject = projectArtifactRoot(flagsIn.scratchProject || projectDirs[0]);
+    // Compare the true on-disk spelling, so one folder named two ways (case, 8.3) still counts as the same project.
+    if (!projectDirs.some(p => realpathSync.native(projectArtifactRoot(p)) === realpathSync.native(scratchProject))) {
+      return { exit: 2, error: '--scratch-project must name an exported project' };
+    }
+    scratchDir = ensureProjectArtifactDir(scratchProject, '_scratch');
+  } catch (e) {
+    return { exit: 2, error: 'project scratch is unavailable', error_code: e.code || 'scratch-error' };
+  }
+  // Each project's key and delta history live in its own package state folder. A project whose key
+  // can't be used is reported under a pseudonym from a key that exists only for this run.
+  const runSeal = makeSeal(randomBytes(32).toString('hex'));
+  let saltCreated = false;
+
   // collect
   const coverage = [];
   const projects = [];
   for (const dir of projectDirs) {
     try {
-      const collected = collectProject(dir, { home, seal });
+      const stateDir = ensureProjectArtifactDir(projectArtifactRoot(dir), '_package');
+      const { salt, created } = loadOrCreateSalt(stateDir);
+      saltCreated ||= created;
+      const collected = collectProject(dir, { home, seal: makeSeal(salt) });
+      collected.stateDir = stateDir;
+      collected.keyId = keyIdOf(salt);
       projects.push(collected);
       coverage.push({ project: collected.pseudonym, available: true });
     } catch (err) {
       // The reason is an error CODE, never err.message — raw messages embed real
       // filesystem paths, which the leak scan rejects.
       const code = (err && typeof err.code === 'string') ? err.code : 'collection-error';
-      coverage.push({ project: seal('project', basename(dir)), available: false, reason: code });
+      // The full path, under a key that exists only for this run: distinct per project, linkable to nothing.
+      coverage.push({ project: runSeal('project', resolve(dir)), available: false, reason: code });
     }
   }
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
@@ -1399,7 +1491,7 @@ export function runPackage(argv, { homeOverride } = {}) {
   // Deltas are computed READ-ONLY here; the history append happens only after
   // the package actually ships — an aborted run must not consume a history slot.
   for (const proj of projects) {
-    proj.deltas = computeDeltas(home, proj.pseudonym, proj.headline);
+    proj.deltas = computeDeltas(proj.stateDir, proj.headline, proj.keyId);
   }
 
   // Generator identity — honest provenance: a source-tree run must not
@@ -1446,99 +1538,141 @@ export function runPackage(argv, { homeOverride } = {}) {
   }
 
   // stage
-  const staging = mkdtempSync(join(tmpdir(), 'core-metrics-package-'));
-  const generatedAt = new Date().toISOString();
-  const manifestDraft = {
-    schema_version: SCHEMA_VERSION,
-    generated_at: generatedAt,
-    mode: flagsIn.all ? 'all-projects' : 'single-project',
-    plugin,
-    generator,
-    pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
-    residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
-    salt_rotated_this_run: saltCreated,
-    field_policy: {
-      enforcement: 'allowlist',
-      dropped_fields: droppedFields,
-      note: 'Every value in this package passed a declared field schema. Fields the schema does not name are dropped at every depth before staging; this count is how many were removed from this package.',
-    },
-    coverage,
+  let staging = null, retainStaging = false;
+  const result = { exit: 2, coverage,
+    projects: projects.map(p => ({ project: p.pseudonym, flags: p.flags, headline: p.headline })) };
+  const noteCleanup = (failure) => {
+    if (result.scratch_cleanup) result.scratch_cleanup_failures = [...(result.scratch_cleanup_failures || [result.scratch_cleanup]), failure];
+    else result.scratch_cleanup = failure;
   };
-  const manifestFiltered = enforceExportAllowlist(manifestDraft, EXPORT_SCHEMAS.manifest);
-  const manifestOut = manifestFiltered.value;
-  manifestOut.field_policy.dropped_fields += manifestFiltered.dropped;
-  writeFileSync(join(staging, 'manifest.json'), JSON.stringify(manifestOut, null, 2));
-  for (const proj of projects) {
-    const pdir = join(staging, 'projects', proj.pseudonym);
-    mkdirSync(pdir, { recursive: true });
-    for (const [name, block] of Object.entries(proj.blocks)) {
-      writeFileSync(join(pdir, `${name}.json`), JSON.stringify(block, null, 2));
+  try {
+    staging = mkdtempSync(join(scratchDir, 'package-'));
+    const generatedAt = new Date().toISOString();
+    const manifestDraft = {
+      schema_version: SCHEMA_VERSION,
+      generated_at: generatedAt,
+      mode: flagsIn.all ? 'all-projects' : 'single-project',
+      plugin,
+      generator,
+      pseudonym_note: "Ids are HMAC pseudonyms from a per-project key that never ships; stable across one project's packages and unrelated between projects. Deleting the project's _core/_package/salt rotates them and restarts its deltas.",
+      residual_risk: "Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across that project's packages (delete its key to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.",
+      salt_rotated_this_run: saltCreated,
+      field_policy: {
+        enforcement: 'allowlist',
+        dropped_fields: droppedFields,
+        note: 'Every value in this package passed a declared field schema. Fields the schema does not name are dropped at every depth before staging; this count is how many were removed from this package.',
+      },
+      coverage,
+    };
+    const manifestFiltered = enforceExportAllowlist(manifestDraft, EXPORT_SCHEMAS.manifest);
+    const manifestOut = manifestFiltered.value;
+    manifestOut.field_policy.dropped_fields += manifestFiltered.dropped;
+    writeFileSync(join(staging, 'manifest.json'), JSON.stringify(manifestOut, null, 2));
+    for (const proj of projects) {
+      const pdir = join(staging, 'projects', proj.pseudonym);
+      mkdirSync(pdir, { recursive: true });
+      for (const [name, block] of Object.entries(proj.blocks)) {
+        writeFileSync(join(pdir, `${name}.json`), JSON.stringify(block, null, 2));
+      }
+      writeFileSync(join(pdir, 'headline.json'), JSON.stringify({ ...proj.headline, flags: proj.flags, deltas: proj.deltas }, null, 2));
     }
-    writeFileSync(join(pdir, 'headline.json'), JSON.stringify({ ...proj.headline, flags: proj.flags, deltas: proj.deltas }, null, 2));
-  }
-  writeFileSync(join(staging, 'REPORT.md'), buildReportMd({ manifest: manifestOut, projects }));
-  writeFileSync(join(staging, 'report.html'), buildReportHtml({ manifest: manifestOut, projects }));
+    writeFileSync(join(staging, 'REPORT.md'), buildReportMd({ manifest: manifestOut, projects }));
+    writeFileSync(join(staging, 'report.html'), buildReportHtml({ manifest: manifestOut, projects }));
 
-  // fail-closed leakage scan
-  const patterns = buildLeakPatterns({ home, projectDirs, indexEntries });
-  const hits = leakScanDir(staging, patterns);
-  if (hits.length) {
-    rmSync(staging, { recursive: true, force: true });
-    return { exit: 2, error: 'LEAKAGE SCAN HIT — package aborted, nothing shipped', hits: hits.slice(0, 10) };
-  }
-
-  // ship
-  const outDir = flagsIn.out ? resolve(flagsIn.out) : desktopDir(home);
-  mkdirSync(outDir, { recursive: true });
-  const stamp = generatedAt.replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
-  let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
-  let suffix = 2;
-  while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
-  // Owner-only while the package sits where it landed: it is de-identified, not
-  // public, and the user decides where it goes next. Best-effort by platform.
-  const harden = (path, mode) => { try { chmodSync(path, mode); } catch { /* mode is advisory here */ } };
-  const hardenTree = (dir) => {
-    harden(dir, 0o700);
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) hardenTree(p);
-      else harden(p, 0o600);
+    // fail-closed leakage scan
+    const patterns = buildLeakPatterns({ home, projectDirs, indexEntries });
+    const hits = leakScanDir(staging, patterns);
+    if (hits.length) {
+      return Object.assign(result, { exit: 2, error: 'LEAKAGE SCAN HIT — package aborted, nothing shipped', hits: hits.slice(0, 10) });
     }
-  };
-  const zip = zipStaging(staging, zipPath);
-  const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging) : zip;
-  let shipped;
-  if (receipt.ok) {
-    harden(zipPath, 0o600);
-    rmSync(staging, { recursive: true, force: true });
-    shipped = { kind: 'zip', path: zipPath };
-  } else {
-    // An archive that cannot be proven to hold the staged bytes does not ship.
-    rmSync(zipPath, { force: true });
-    // self-healing fallback: leave a folder instead of failing the run
-    const folder = zipPath.replace(/\.zip$/, '');
-    const moved = moveStagingToFolder(staging, folder);
-    if (moved.ok) hardenTree(folder);
-    shipped = moved.ok
-      ? { kind: 'folder', path: folder, reason: receipt.reason }
-      : { kind: 'staging', path: staging, reason: `${receipt.reason}; ${moved.reason}` };
-  }
-  // Ship succeeded — NOW the delta baseline may advance (never on abort).
-  for (const proj of projects) {
-    try { appendHistory(home, proj.pseudonym, proj.headline); } catch { /* history is best-effort */ }
-  }
 
-  // Partial detection descends one level: a workspace-metrics block whose
-  // recognition/calibration/capability sub-blocks are unavailable is partial
-  // coverage too (review rule: nested missing sources must force partial status).
-  const blockPartial = (b) => b && (b.available === false
-    || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
-  const partial = coverage.some(c => !c.available)
-    || projects.some(p => Object.values(p.blocks).some(blockPartial));
-  return {
-    exit: partial ? 1 : 0, shipped, coverage, desktop_fallback: !flagsIn.out && !existsSync(join(home, 'Desktop')),
-    projects: projects.map(p => ({ project: p.pseudonym, flags: p.flags, headline: p.headline })),
-  };
+    // ship
+    // Once leakage checks pass, retain recoverable staging until delivery is verified.
+    retainStaging = true;
+    // The default lands in the project only when every folder on the way is a real folder in it.
+    const chain = flagsIn.out ? 'explicit' : folderChain(scratchProject, '_outputs/metrics-package');
+    if (chain !== 'explicit' && chain !== 'real' && chain !== 'absent') {
+      return Object.assign(result, { exit: 2, error: `default destination _outputs/metrics-package is not a real folder in the project (${chain}); pass --out` });
+    }
+    const outDir = flagsIn.out ? resolve(flagsIn.out) : join(scratchProject, '_outputs', 'metrics-package');
+    mkdirSync(outDir, { recursive: true });
+    if (chain === 'absent' && folderChain(scratchProject, '_outputs/metrics-package') !== 'real') {
+      return Object.assign(result, { exit: 2, error: 'default destination changed while it was being made; pass --out' });
+    }
+    const stamp = generatedAt.replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+    let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
+    let suffix = 2;
+    while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
+    // Owner-only while the package sits where it landed: it is de-identified, not
+    // public, and the user decides where it goes next. Best-effort by platform.
+    const harden = (path, mode) => { try { chmodSync(path, mode); } catch { /* mode is advisory here */ } };
+    const hardenTree = (dir) => {
+      harden(dir, 0o700);
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) hardenTree(p);
+        else harden(p, 0o600);
+      }
+    };
+    const zip = zipStaging(staging, zipPath);
+    const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging, { projectRoot: scratchProject }) : zip;
+    if (!receipt.ok) result.archive_verification = receipt;
+    if (receipt.scratch_cleanup) noteCleanup(receipt.scratch_cleanup);
+    if (receipt.ok || receipt.content_verified) {
+      result.shipped = { kind: 'zip', path: zipPath };
+      retainStaging = false;
+      harden(zipPath, 0o600);
+    } else {
+      // An archive that cannot be proven to hold the staged bytes does not ship.
+      result.retained_archive = { path: zipPath, verified: false };
+      rmSync(zipPath, { force: true });
+      delete result.retained_archive;
+      // self-healing fallback: leave a folder instead of failing the run
+      const folder = zipPath.replace(/\.zip$/, '');
+      const moved = moveStagingToFolder(staging, folder);
+      if (!moved.ok) {
+        result.staging_retained = staging;
+        result.unverified_destination = { path: folder, verified: false };
+        return Object.assign(result, { exit: 2, error: `${receipt.reason}; ${moved.reason}` });
+      }
+      result.shipped = { kind: 'folder', path: folder, reason: receipt.reason };
+      retainStaging = Boolean(moved.source_retained);
+      if (moved.scratch_cleanup) noteCleanup(moved.scratch_cleanup);
+      if (!retainStaging) staging = null; // The verified move already removed its source.
+      hardenTree(folder);
+    }
+    // Ship succeeded — NOW the delta baseline may advance (never on abort).
+    // A failed save keeps the delivered package and says the next comparison has no baseline.
+    const notSaved = [];
+    for (const proj of projects) {
+      try { appendHistory(proj.stateDir, proj.headline, proj.keyId); } catch (e) { notSaved.push({ project: proj.pseudonym, reason: e.code || 'write-failed' }); }
+    }
+    if (notSaved.length) result.history_not_saved = notSaved;
+
+    // Partial detection descends one level: a workspace-metrics block whose
+    // recognition/calibration/capability sub-blocks are unavailable is partial
+    // coverage too (review rule: nested missing sources must force partial status).
+    const blockPartial = (b) => b && (b.available === false
+      || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
+    const partial = coverage.some(c => !c.available)
+      || projects.some(p => Object.values(p.blocks).some(blockPartial));
+    return Object.assign(result, {
+      exit: result.scratch_cleanup ? 2 : (partial || result.history_not_saved) ? 1 : 0,
+      ...(result.scratch_cleanup ? { error: 'metrics package scratch cleanup failed' } : {}),
+    });
+  } catch (e) {
+    return Object.assign(result, { exit: 2, error: 'metrics package failed', error_code: e.code || 'package-error' });
+  } finally {
+    if (staging && retainStaging) result.staging_retained = staging;
+    if (staging && !retainStaging) {
+      try { rmSync(staging, { recursive: true, force: true }); } catch (e) {
+        result.exit = 2;
+        result.error ||= 'metrics package scratch cleanup failed';
+        const failure = { error_code: e.code || 'cleanup-error', path: staging };
+        noteCleanup(failure);
+      }
+    }
+  }
 }
 
 // ---------- CLI entry ----------
@@ -1547,16 +1681,27 @@ if (isCliEntry(import.meta.url)) {
   const result = runPackage(process.argv.slice(2));
   if (result.error) {
     process.stderr.write(`error: ${result.error}\n`);
+    for (const failure of result.scratch_cleanup_failures || (result.scratch_cleanup ? [result.scratch_cleanup] : [])) process.stderr.write(`scratch retained: ${failure.path} (${failure.error_code})\n`);
+    if (result.staging_retained) process.stderr.write(`staging retained: ${result.staging_retained}\n`);
+    if (result.retained_archive) process.stderr.write(`unverified archive retained: ${result.retained_archive.path}\n`);
+    if (result.unverified_destination) process.stderr.write(`unverified destination: ${result.unverified_destination.path}\n`);
+    if (result.archive_verification && !result.archive_verification.ok) process.stderr.write(`archive verification: ${result.archive_verification.reason}\n`);
+    if (result.shipped) process.stdout.write(`package: ${result.shipped.path}\n`);
     if (result.hits) for (const h of result.hits) process.stderr.write(`  leak-hit: ${h.kind} pattern in ${h.file}\n`);
   } else {
     process.stdout.write(`package: ${result.shipped.path}\n`);
     if (result.shipped.kind === 'folder') process.stdout.write(`note: zip unavailable (${result.shipped.reason}) — staged folder shipped instead\n`);
+  }
+  for (const h of result.history_not_saved || []) process.stderr.write(`warning: the package was delivered, but this package's baseline was not saved for ${h.project} (${h.reason}); the next comparison will use an older baseline if one exists\n`);
+  if (result.coverage) {
     const covered = result.coverage.filter(c => c.available).length;
     process.stdout.write(`coverage: ${covered}/${result.coverage.length} project(s)\n`);
+  }
+  if (result.projects) {
     for (const p of result.projects) {
       for (const f of p.flags) process.stdout.write(`flag[${p.project}] ${f.level}: ${f.text}\n`);
     }
-    if (process.argv.includes('--json')) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   }
+  if (process.argv.includes('--json')) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   process.exit(result.exit);
 }

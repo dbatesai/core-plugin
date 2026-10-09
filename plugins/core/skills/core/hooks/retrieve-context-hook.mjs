@@ -44,11 +44,13 @@ import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled } from '../scripts/log-event.mjs';
+import { projectMigrationFence } from '../scripts/project-state.mjs';
 import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { thinSignal, shouldEscalate, buildReasoningShards, renderEscalationPack, escalationByteCap, packAllowed } from '../scripts/reasoning-shortlist.mjs';
 import { logHookEvent, PRODUCER_VERSION, PRODUCER_SHA } from './hook-log.mjs';
+import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -80,7 +82,7 @@ export function truncateUtf8(str, maxBytes) {
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
-export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
+export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed', 'migration-in-progress', 'state-untrusted', 'state-uninspectable'];
 
 export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
@@ -107,18 +109,25 @@ export function receipt(action, reason, extra = {}) {
 }
 
 export async function main() {
-  // Default-ON, opt-out gate. Runs unless explicitly
-  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
-  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
-
   let payload = {};
   // Read stdin synchronously via fd 0 (works under execFileSync's input pipe).
   let raw = '';
   try { raw = readFileSync(0, 'utf8'); } catch { raw = ''; }
   if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
 
+  // A project-only folder runs automatic retrieval (and the capture inside it) not at all: exit
+  // before the registry gate and the logger, which live outside the folder.
+  if (projectOnlyHint(payload.cwd || process.cwd())) return 0;
+
+  const receiptCwd = payload.cwd || process.cwd();
+  const logContext = { cwd: receiptCwd, projectRoot: resolveRegisteredRoot(receiptCwd) };
+
+  // Default-ON, opt-out gate. Runs unless explicitly
+  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
+  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out', logContext);
+
   const prompt = String(payload.prompt || '');
-  if (!prompt.trim()) return receipt('skip', 'empty-prompt');
+  if (!prompt.trim()) return receipt('skip', 'empty-prompt', logContext);
 
   // Trust: a folder's own `_memories/` authorizes nothing, because a cloned repo can carry
   // one. Only a project registered in ~/.core is injected (the same anchor the SessionEnd
@@ -127,11 +136,13 @@ export async function main() {
   let cwd = resolve(payload.cwd || process.cwd());
   try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
   const store = resolveRegisteredRoot(cwd);
-  if (!store) return receipt('skip', 'not-registered-workspace', { cwd });
-  if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
+  if (!store) return receipt('skip', 'not-registered-workspace', { cwd, projectRoot: null });
+  const fence = projectMigrationFence({ root: store, harness: process.env.CORE_HOOK_HARNESS || 'claude-code' });
+  if (fence) return receipt('skip', fence, { cwd, projectRoot: store });
+  if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { projectRoot: store, cwd: store });
   try {
-    if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
-  } catch { return receipt('skip', 'store-unavailable', { cwd: store }); }
+    if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store });
+  } catch { return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store }); }
 
   // ONE pipeline run serves both jobs: buildRetrievalTrace runs the same staged pipeline as
   // retrieveContext and carries the delivered pack — the hook injects pack.text
@@ -148,8 +159,8 @@ export async function main() {
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
-  } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
-  if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
+  } catch { return receipt('failed', 'pipeline-error', { projectRoot: store, cwd: store }); }
+  if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
   const zeroHit = final.length === 0;
@@ -372,7 +383,7 @@ export async function main() {
     reason = 'delivery-failed';
   }
   return receipt(action, reason, {
-    cwd: store,
+    projectRoot: store, cwd: store,
     ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
     ...(retrievalId ? { retrieval_id: retrievalId } : {}),
     // Evidence-capture outcome: a closed status code — never raw prompt/pack

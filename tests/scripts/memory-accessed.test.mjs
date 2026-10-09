@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import { classifyAccess, probe } from '../../plugins/core/skills/core/scripts/ca
 import { runStartup } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
-process.env.CORE_HARNESS ||= 'claude-code';
+process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
 
 const toolEv = (text) => ({ idx: 0, kind: 'tool', name: 'Bash', text });
 
@@ -165,6 +166,7 @@ test('probe reads workspace_id from the project manifest project_id', async () =
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   const home = mkdtempSync(join(tmpdir(), 'ma-home-'));
   try {
+    registerFixtureProject(home, dir);
     updateManifest({ root: dir, harness: 'claude-code', coreDir: join(home, '.core'), fields: { project_id: 'core-framework' } });
     const tpath = join(dir, 'session.jsonl');
     writeFileSync(tpath, JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }));

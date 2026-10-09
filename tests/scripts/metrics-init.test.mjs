@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, metricsHistoryFolders } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, writeHeldSigned, markMetricsEverExternal, projectRootFor, canonical as canonicalPath } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, writeHeldSigned, markMetricsEverExternal, projectRootFor, localStateDir, canonical as canonicalPath } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -17,9 +17,10 @@ import {
   initMetrics,
   detectStoragePath,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
-process.env.CORE_HARNESS ||= 'claude-code';
+process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
 
 // HOME is redirected per test; restore it afterwards.
 function withCleanEnv(fn) {
@@ -41,10 +42,11 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
   withCleanEnv(() => {
     const fakeHome = mkdtempSync(join(tmpdir(), 'metrics-home-'));
     const projectDir = mkdtempSync(join(tmpdir(), 'metrics-proj-'));
+    mkdirSync(join(fakeHome,'.core'));writeFileSync(join(fakeHome,'.core','projects.json'),JSON.stringify([{path:projectDir}]));
     process.env.HOME = fakeHome;
     process.env.USERPROFILE = fakeHome; // os.homedir() source on Windows
     try {
-      const result = initMetrics({ projectDir, env: {} });
+      const result = initMetrics({ projectDir, home: fakeHome, env: {} });
 
       assert.equal(result.ok, true);
       assert.equal(result.storagePath, join(projectDir, '_metrics'));
@@ -64,7 +66,7 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
       assert.match(readFileSync(join(result.storagePath, '.gitignore'), 'utf8'), /^\*$/m, 'generated captures stay out of git');
 
       // Idempotent: a re-run still reports ok against existing structure
-      assert.equal(initMetrics({ projectDir, env: {} }).ok, true);
+      assert.equal(initMetrics({ projectDir, home: fakeHome, env: {} }).ok, true);
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
@@ -136,12 +138,14 @@ function withProject(fn, { projects = 1 } = {}) {
   withCleanEnv(() => {
     const home = mkdtempSync(join(tmpdir(), 'metrics-hist-home-'));
     const dirs = Array.from({ length: projects }, () => mkdtempSync(join(tmpdir(), 'metrics-hist-proj-')));
+    mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify(dirs.map(path=>({path}))));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     try { fn({ home, projectDir: dirs[0], dirs }); }
     finally { for (const d of [home, ...dirs]) rmSync(d, { recursive: true, force: true }); }
   });
 }
+function seedLocalMetrics(projectDir,home,harness='claude-code'){const dir=join(localStateDir({root:projectDir,harness,coreDir:join(home,'.core')}),'metrics');mkdirSync(dir,{recursive:true});return dir;}
 const E = { CORE_HARNESS: 'claude-code' };
 const appData = (home, name) => join(home, 'AppData', 'Local', 'core-metrics', name);
 
@@ -153,7 +157,7 @@ test('a signed pin naming an AppData folder routes nothing: the scaffold and eve
     writeFileSync(join(old, 'evidence.jsonl'), '{"row":1}\n');
     signedPin(meta, home, old, projectDir);
 
-    const r = initMetrics({ projectDir, env: E });
+    const r = initMetrics({ projectDir, home, env: E });
     assert.equal(r.storagePath, join(projectDir, '_metrics'));
     assert.equal(resolveStoragePath(projectDir), join(projectDir, '_metrics'));
     assert.equal(readFileSync(join(old, 'evidence.jsonl'), 'utf8'), '{"row":1}\n', 'history untouched');
@@ -217,7 +221,7 @@ test('two projects whose records name the same folder both see it as history, an
     signedPin(operationalMetricsDir(B, { home, env: E }), home, shared, B);
     for (const p of [A, B]) {
       assert.deepEqual(metricsHistoryFolders(p, { home, env: E }), [{ folder: shared }]);
-      assert.equal(initMetrics({ projectDir: p, env: E }).storagePath, join(p, '_metrics'));
+      assert.equal(initMetrics({ projectDir: p, home, env: E }).storagePath, join(p, '_metrics'));
       assert.equal(purgeTurnCapture(p, { apply: true, home, env: E }).purged, false);
     }
     assert.equal(readFileSync(join(shared, 'evidence.jsonl'), 'utf8'), '{"who":"unknown"}\n');
@@ -248,7 +252,7 @@ test('a capture-disabled marker an earlier scaffold left is cleared by the next 
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     writeFileSync(join(meta, 'capture-disabled.json'), '{"marker":"core-capture-disabled"}\n');
     assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), false);
-    assert.equal(initMetrics({ projectDir, env: E }).ok, true);
+    assert.equal(initMetrics({ projectDir, home, env: E }).ok, true);
     assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), true);
   });
 });
@@ -272,7 +276,7 @@ test('stats report project and history rows separately; purge empties the projec
     const newRows = join(projectDir, '_metrics', 'turn-capture', '2026-10-03.jsonl');
     writeFileSync(newRows, '{"row":3}\n');
 
-    const stats = turnCaptureStats(projectDir, { env: E });
+    const stats = turnCaptureStats(projectDir, { env: E, home });
     assert.equal(stats.rows, 1, 'project rows only');
     assert.deepEqual(stats.history.map((h) => [h.dir, h.days, h.rows]), [[join(old, 'turn-capture'), 1, 2]]);
 
@@ -320,7 +324,7 @@ test('the status command reports project rows and history rows separately', asyn
     mkdirSync(join(old, 'turn-capture'), { recursive: true });
     writeFileSync(join(old, 'turn-capture', '2026-09-28.jsonl'), '{"row":1}\n{"row":2}\n');
     signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-    const out = spawnSync(process.execPath, [script, projectDir, '--status'], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' } });
+    const out = spawnSync(process.execPath, [...accountHomeArgs(home), script, projectDir, '--status'], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' } });
     const status = JSON.parse(out.stdout);
     assert.equal(status.rows, 0);
     assert.deepEqual(status.history.map((h) => h.rows), [2]);
@@ -406,7 +410,7 @@ for (const apply of [false, true]) {
       const meta = operationalMetricsDir(projectDir, { home, env: E });
       signedPin(meta, home, old, projectDir);
       const pinFile = join(meta, 'storage-path.txt');
-      const stamp = join(projectDir, '.core', 'claude-code', 'stamp');
+      const stamp = join(projectDir, '_core', 'claude-code', 'stamp');
       assert.ok(existsSync(stamp), 'fixture has a stamp');
       if (!denyRead(stamp)) { skipped = true; restoreRead(stamp); return; }
       try {
@@ -455,7 +459,7 @@ for (const [label, fence] of [
       writeFileSync(row, '{"synthetic":1}\n');
       writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
       signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-      const harnessDir = join(projectDir, '.core', 'claude-code');
+      const harnessDir = join(projectDir, '_core', 'claude-code');
       const stampFile = join(harnessDir, 'stamp');
       await fence({ stampFile, home, harnessDir });
       const before = readFileSync(stampFile, 'utf8');
@@ -525,7 +529,7 @@ test('a harness state folder that is a link is reported, not skipped as absent',
     operationalMetricsDir(projectDir, { home, env: E });
     const elsewhere = mkdtempSync(join(tmpdir(), 'metrics-linked-harness-'));
     try {
-      symlinkSync(elsewhere, join(projectDir, '.core', 'codex'), process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(elsewhere, join(projectDir, '_core', 'codex'), process.platform === 'win32' ? 'junction' : 'dir');
       const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
       assert.equal(r.purged, false);
       assert.match(r.held_history.map((h) => h.reason).join(' '), /codex state cannot be read as its own \(refused\)/);
@@ -540,7 +544,7 @@ test('a state folder that cannot be listed is reported as unknown, in the helper
   withProject(({ home, projectDir }) => {
     registerProject(join(home, '.core'), projectDir);
     operationalMetricsDir(projectDir, { home, env: E });
-    const core = join(projectDir, '.core');
+    const core = join(projectDir, '_core');
     try {
       if (!denyList(core)) { skipped = true; return; }
       assert.match(metricsHistoryHeld(projectDir, { home, env: E }).map((h) => h.reason).join(' '), /could not be listed/);
@@ -573,7 +577,7 @@ for (const [label, registry] of [
 for (const swap of ['project root', 'local fallback folder']) {
   test(`purge does not follow a ${swap} replaced with a link to another project after planning`, { skip: (process.platform !== 'win32' && !symlinkCapable()) || (swap === 'local fallback folder' && process.platform === 'win32') ? 'needs symlinks, and a read-only root that POSIX can express' : false }, async () => {
     const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-    const { classifyTurnsDirFor } = { classifyTurnsDirFor: (p, home) => join(operationalMetricsDir(p, { home, env: E }), 'classified') };
+    const { classifyTurnsDirFor } = { classifyTurnsDirFor: (p, home) => join(swap==='local fallback folder'?seedLocalMetrics(p,home):operationalMetricsDir(p, { home, env: E }), 'classified') };
     withProject(({ home, dirs: [A, B] }) => {
       const coreDir = join(home, '.core');
       registerProject(coreDir, A);
@@ -645,7 +649,8 @@ test('a pin written while the project was unregistered still names its folder af
   const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   withProject(({ home, projectDir }) => {
     const coreDir = join(home, '.core');
-    const meta = operationalMetricsDir(projectDir, { home, env: E });
+    writeFileSync(join(coreDir,'projects.json'),'[]');
+    const meta = seedLocalMetrics(projectDir,home);
     assert.equal(meta, join(localStateDir({ root: projectRootFor(projectDir, { home, coreDir }), harness: 'claude-code', coreDir }), 'metrics'));
     const old = appData(home, 'p1'); mkdirSync(old, { recursive: true });
     signedPin(meta, home, old, projectDir);
@@ -669,7 +674,7 @@ test('a pin in the project folder still names its folder when the root turns rea
     signedPin(meta, home, old, projectDir);
     chmodSync(projectDir, 0o555);
     try {
-      assert.notEqual(operationalMetricsDir(projectDir, { home, env: E }), meta, 'routing fell back');
+      assert.throws(()=>operationalMetricsDir(projectDir, { home, env: E }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='root-not-writable');
       assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((f) => f.folder), [old]);
       const r = purgeTurnCapture(projectDir, { apply: false, home, env: E });
       assert.ok(r.held_history.some((h) => h.what === old), JSON.stringify(r.held_history));
@@ -689,7 +694,8 @@ test('a purge removes classified rows in the project folder and the local fallba
     };
     const inProject = write();
     writeFileSync(join(coreDir, 'projects.json'), '[]\n');
-    const local = write();
+    const localDir=join(seedLocalMetrics(projectDir,home),'classified');mkdirSync(localDir,{recursive:true});
+    const local=join(localDir,'2026-10-03.jsonl');writeFileSync(local,'{"user_text":"synthetic"}\n');
     assert.notEqual(inProject, local, 'the two rows are in different places');
     const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
     assert.equal(r.purged, true, r.reason);
@@ -703,7 +709,8 @@ test("a local state folder linked to another project's before the purge is not t
   const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   withProject(({ home, dirs: [A, B] }) => {
     const coreDir = join(home, '.core');
-    const clsB = join(operationalMetricsDir(B, { home, env: E }), 'classified');
+    writeFileSync(join(coreDir,'projects.json'),'[]');
+    const clsB = join(seedLocalMetrics(B,home), 'classified');
     mkdirSync(clsB, { recursive: true });
     const rowB = join(clsB, '2026-10-03.jsonl'); writeFileSync(rowB, '{"user_text":"B"}\n');
     const keyOf = (p) => dirname(localStateDir({ root: projectRootFor(p, { home, coreDir }), harness: 'claude-code', coreDir }));
@@ -738,7 +745,7 @@ function registeredThenReset(home, projectDir) {
   const coreDir = join(home, '.core');
   registerProject(coreDir, projectDir);
   const meta = operationalMetricsDir(projectDir, { home, env: E });
-  return { coreDir, meta, reset: () => { writeFileSync(join(coreDir, 'projects.json'), '[]\n'); operationalMetricsDir(projectDir, { home, env: E }); } };
+  return { coreDir, meta, reset: () => { writeFileSync(join(coreDir, 'projects.json'), '[]\n'); } };
 }
 
 test('a denied metrics folder in inactive project state is held, not read as having no records', { skip: AS_ROOT }, async (t) => {
@@ -854,7 +861,7 @@ test('one unknown state location does not hide a known history folder from the p
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
     signedPin(meta, home, old, projectDir);
-    const codex = join(projectDir, '.core', 'codex');
+    const codex = join(projectDir, '_core', 'codex');
     mkdirSync(codex, { recursive: true }); writeFileSync(join(codex, 'workspace.json'), '{}');
     const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
     assert.equal(r.purged, false);
@@ -888,4 +895,19 @@ test("a state folder that can't be listed does not hide another harness's known 
     assert.equal(readFileSync(join(old, 'row.jsonl'), 'utf8'), '{}\n');
   });
   if (skipped) t.skip('the platform does not deny the listing');
+});
+
+test('a failed route creates no capture folder or ignore rule', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mi-ignore-first-'));
+  try {
+    const project = join(root, 'proj');
+    mkdirSync(project);
+    const home = join(root, 'home-is-a-file');
+    writeFileSync(home, 'not a directory');           // any ~/.core path under it fails with ENOTDIR
+    const r = initMetrics({ projectDir: project, home, env: {} });
+    assert.equal(r.ok, false);
+    assert.equal(r.status,'NOT_STORED');
+    assert.equal(r.reason,'unregistered');
+    assert.equal(existsSync(join(project,'_metrics')),false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -10,16 +10,16 @@
 
 import {
   chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-} from 'node:fs';
+  existsSync, 
+  readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { parseFrontmatter } from './priority.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
+import { ensureLibDir } from './store-ignores.mjs';
 
 export const ENRICHMENT_SCHEMA = 'core-enrichment-sidecar/1';
 
@@ -61,6 +61,7 @@ function safeUnitPath(value) {
 }
 
 function loadRawSidecar(store) {
+  assertStoreBoundary(store);
   const path = enrichmentSidecarPath(store);
   if (!existsSync(path)) return { schema: ENRICHMENT_SCHEMA, records: {} };
   const parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -108,7 +109,8 @@ export function writeEnrichment(store, {
   };
 
   const path = enrichmentSidecarPath(root);
-  mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
+  assertStoreBoundary(root);
+  ensureLibDir(root);
   // Load, mutate, and replace under one lock — the read is inside it, because a
   // snapshot taken outside the lock is already stale by the time it is written.
   withFileLock(enrichmentSidecarLockPath(root), () => {

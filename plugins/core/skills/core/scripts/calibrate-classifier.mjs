@@ -30,15 +30,16 @@
 
 import {
   existsSync, readFileSync, writeFileSync, mkdirSync,
-  readdirSync, chmodSync,
+  readdirSync, chmodSync, lstatSync,
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { todayUTC, operationalMetricsDir } from './log-event.mjs';
+import { todayUTC, operationalMetricsDir, trustedMetricsDir } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { detectStateHarness } from './project-state.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
@@ -69,7 +70,7 @@ export const CANONICAL_STATES = [
 ];
 
 // ============================================================
-// Calibration state (persisted to the project's .core/<harness>/metrics/)
+// Calibration state (persisted to the project's _core/<harness>/metrics/)
 // ============================================================
 
 export function emptyCalibrationState() {
@@ -96,9 +97,13 @@ export function emptyCalibrationState() {
   };
 }
 
-export function readCalibrationState(metaDir) {
+export function readCalibrationState(metaDir, { strict = false } = {}) {
   const f = join(metaDir, 'calibration-state.json');
-  if (!existsSync(f)) return emptyCalibrationState();
+  if (strict) {
+    const st = calibrationReadKind(f);
+    if (!st) return emptyCalibrationState();
+    requireCalibrationReadFile(st);
+  } else if (!existsSync(f)) return emptyCalibrationState();
   try {
     const state = JSON.parse(readFileSync(f, 'utf8'));
     if (state.classifier_version !== CLASSIFIER_VERSION
@@ -106,8 +111,15 @@ export function readCalibrationState(metaDir) {
       || state.classified_schema_version !== CLASSIFIED_SCHEMA_VERSION) {
       return { ...emptyCalibrationState(), invalidated_stale_state: true };
     }
+    if (strict && (state.schema_version !== CALIBRATION_VERSION
+      || typeof state.is_calibrated !== 'boolean' || typeof state.provisional !== 'boolean'
+      || !Number.isSafeInteger(state.labeled_count) || state.labeled_count < 0
+      || (state.overall_precision !== null && (!Number.isFinite(state.overall_precision)
+        || state.overall_precision < 0 || state.overall_precision > 1)))) {
+      throw Object.assign(new Error('calibration conclusion fields are invalid'), { code: 'CALIBRATION_STATE_INVALID' });
+    }
     return state;
-  } catch { return emptyCalibrationState(); }
+  } catch (e) { if (strict) throw e; return emptyCalibrationState(); }
 }
 
 export function writeCalibrationState(metaDir, state) {
@@ -201,8 +213,22 @@ export function computePrecision(labeledTurns) {
  * Collect classified turn records from all daily files under classifiedDir.
  * Returns an array of records, newest-first up to maxCount.
  */
-export function collectClassifiedTurns(classifiedDir, maxCount = 500) {
-  if (!existsSync(classifiedDir)) return [];
+// Strict readiness reads distinguish genuine absence from unknown evidence and
+// refuse links before traversing them. Explicit worksheet writers keep their existing policy.
+function calibrationReadKind(path) {
+  try { return lstatSync(path); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+}
+function requireCalibrationReadFile(st) {
+  if (!st || !st.isFile() || st.isSymbolicLink() || st.nlink !== 1) {
+    throw Object.assign(new Error('calibration file is not physically owned'), { code: 'CALIBRATION_CUSTODY' });
+  }
+}
+export function collectClassifiedTurns(classifiedDir, maxCount = 500, { strict = false } = {}) {
+  if (strict) {
+    const st = calibrationReadKind(classifiedDir);
+    if (!st) return [];
+    if (!st.isDirectory() || st.isSymbolicLink()) throw Object.assign(new Error('classified directory is not physically owned'), { code: 'CALIBRATION_CUSTODY' });
+  } else if (!existsSync(classifiedDir)) return [];
   const files = readdirSync(classifiedDir)
     .filter((f) => f.endsWith('.jsonl'))
     .sort()
@@ -210,10 +236,12 @@ export function collectClassifiedTurns(classifiedDir, maxCount = 500) {
   const out = [];
   for (const f of files) {
     if (out.length >= maxCount) break;
-    const lines = safeRead(join(classifiedDir, f)).split('\n').filter(Boolean);
+    const path = join(classifiedDir, f);
+    if (strict) requireCalibrationReadFile(calibrationReadKind(path));
+    const lines = (strict ? readFileSync(path, 'utf8') : safeRead(path)).split('\n').filter(Boolean);
     for (const l of lines) {
       if (out.length >= maxCount) break;
-      try { out.push(JSON.parse(l)); } catch { /* skip malformed */ }
+      try { out.push(JSON.parse(l)); } catch (e) { if (strict) throw e; /* explicit worksheet policy: skip malformed */ }
     }
   }
   return out;
@@ -399,7 +427,7 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
 }
 
 /** Read a labeled worksheet file, compute precision, write updated calibration state. */
-export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED }) {
+export function importLabels({ worksheetFile, metaDir, expectedHarness, minLabeled = MIN_LABELED }) {
   if (!existsSync(worksheetFile)) {
     return { status: 'ERROR', message: `Worksheet not found: ${worksheetFile}` };
   }
@@ -428,6 +456,7 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
     return { status: 'ERROR', message: 'Labels must contain exactly one harness: claude-code or codex.' };
   }
   const harness = harnesses[0];
+  if (expectedHarness && expectedHarness !== harness) return {status:'ERROR', message:'Worksheet harness does not match the selected --harness.'};
   if (unique.some((row) => row.classifier_version !== CLASSIFIER_VERSION || row.proxy_version !== PROXY_VERSION)) {
     return { status: 'ERROR', message: 'Labels were not captured with the current classifier and proxy versions.' };
   }
@@ -553,6 +582,39 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
   };
 }
 
+/**
+ * The calibration gate across harnesses. Each harness's state lives with that harness and is the
+ * authority only for its own entry; the gate clears when every harness's own entry has cleared. A state
+ * that can't be read, or belongs to an older instrument, counts as not cleared, and the unreadable ones
+ * are named.
+ */
+export function aggregateCalibration(project, { home = coreHome(), env = process.env } = {}) {
+  const byHarness = {};
+  const unreadable = [];
+  for (const name of CALIBRATION_HARNESSES) {
+    let state;
+    try {
+      const dir = trustedMetricsDir(project, { home, env, harness: name, guardReadParents: true });
+      if (!dir) continue;
+      state = readCalibrationState(dir, { strict: true });
+    } catch { unreadable.push(name); continue; }
+    if (!state.invalidated_stale_state && state.by_harness?.[name]) byHarness[name] = state.by_harness[name];
+  }
+  const cleared = CALIBRATION_HARNESSES.filter((name) => byHarness[name]?.is_calibrated === true);
+  const all = cleared.length === CALIBRATION_HARNESSES.length;
+  const waiting = CALIBRATION_HARNESSES.filter((name) => !cleared.includes(name));
+  return {
+    is_calibrated: all,
+    provisional: !all,
+    by_harness: byHarness,
+    unreadable,
+    labeled_count: Object.values(byHarness).reduce((sum, item) => sum + (item.labeled_count || 0), 0),
+    overall_precision: all ? Math.min(...CALIBRATION_HARNESSES.map((name) => byHarness[name].overall_precision)) : null,
+    notes: all ? 'Claude Code and Codex calibration gates both cleared.'
+      : `Calibration remains provisional until ${waiting.join(' and ')} clear${waiting.length === 1 ? 's' : ''} independently${unreadable.length ? ` (state unreadable: ${unreadable.join(', ')})` : ''}.`,
+  };
+}
+
 // ============================================================
 // Readiness summary
 // ============================================================
@@ -561,21 +623,41 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
  * How close is the calibration pool to the minimum? Useful for the agent to know
  * when to launch the labeling pass.
  */
-export function readinessReport({ project, home = homedir(), env = process.env }) {
+export function readinessReport({ project, home = coreHome(), env = process.env, harness }) {
   const minLabeled = resolveMinLabeled(project);
-  const metaDir = operationalMetricsDir(project, { home, env });
-  const classifiedDir = join(metaDir, 'classified');
-  const state = readCalibrationState(metaDir);
-  const turns = collectClassifiedTurns(classifiedDir, minLabeled + 50);
+  let metaDir = null, classifiedDir = null;
+  let state = emptyCalibrationState(), turns = [], failure = null;
+  try {
+    metaDir = trustedMetricsDir(project, { home, env, harness, guardReadParents: true });
+    classifiedDir = metaDir ? join(metaDir, 'classified') : null;
+    if (metaDir) {
+      state = readCalibrationState(metaDir, { strict: true });
+      if (state.invalidated_stale_state) throw Object.assign(new Error('calibration instrument is stale'), { code: 'CALIBRATION_STALE' });
+      turns = collectClassifiedTurns(classifiedDir, minLabeled + 50, { strict: true });
+    }
+  } catch (e) { failure = e.code || e.name || 'calibration-read-failed'; }
+  const available = Boolean(metaDir) && !failure;
+  const reason = failure ? `Calibration evidence is unavailable (${failure}).`
+    : !metaDir ? 'No trusted calibration data is available.' : null;
+  // Counts are this harness's; the conclusion comes from every harness's own state, not this file alone.
+  const gate = available ? aggregateCalibration(project, { home, env }) : null;
+  if (gate) {
+    state = { ...state, is_calibrated: gate.is_calibrated, provisional: gate.provisional, notes: gate.notes };
+    // Precision from this harness's own entry, the one its own import measured.
+    const own = gate.by_harness[harness || detectStateHarness(env)];
+    if (own && Number.isFinite(own.overall_precision)) state.overall_precision = own.overall_precision;
+  }
   return {
-    is_calibrated: state.is_calibrated,
-    provisional: state.provisional,
-    pool_size: turns.length,
+    available,
+    ...(reason ? { reason } : {}),
+    is_calibrated: available && state.is_calibrated,
+    provisional: available ? state.provisional : true,
+    pool_size: failure ? null : turns.length,
     min_needed: minLabeled,
-    ready_to_label: turns.length >= minLabeled,
+    ready_to_label: available && turns.length >= minLabeled,
     overall_precision: state.overall_precision,
     labeled_count: state.labeled_count,
-    notes: state.notes,
+    notes: reason || state.notes,
     metaDir,
     classifiedDir,
   };
@@ -598,8 +680,18 @@ if (isCliEntry(import.meta.url)) {
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
   const harness = opt('harness');
 
+  const writableMetrics = () => {
+    try { return operationalMetricsDir(project, {harness}); }
+    catch (e) {
+      if (e.code !== 'STATE_NO_PROJECT_PLACE') throw e;
+      const result = { status: 'NOT_STORED', reason: e.reason, error_code: e.code };
+      process.stdout.write(argv.includes('--json') ? JSON.stringify(result) + '\n' : `calibrate-classifier: not stored: ${e.reason}\n`);
+      process.exit(1);
+    }
+  };
+
   if (has('check')) {
-    const r = readinessReport({ project });
+    const r = readinessReport({ project, harness });
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.is_calibrated ? 0 : 1); }
     process.stdout.write(`calibrate-classifier: ${r.is_calibrated ? '✔ CALIBRATED' : '○ PROVISIONAL'}\n`);
     process.stdout.write(`  pool: ${r.pool_size} turns | labeled: ${r.labeled_count} | precision: ${r.overall_precision !== null ? (r.overall_precision * 100).toFixed(0) + '%' : 'n/a'}\n`);
@@ -609,9 +701,9 @@ if (isCliEntry(import.meta.url)) {
   }
 
   if (has('export-worksheet')) {
-    const metaDir = operationalMetricsDir(project);
+    const metaDir = writableMetrics();
     const classifiedDir = join(metaDir, 'classified');
-    const calibrationDir = worksheetDir(project);
+    const calibrationDir = join(metaDir, 'calibration');
     const count = parseInt(opt('count') || '200', 10);
     const r = exportWorksheet({ project, harness, classifiedDir, calibrationDir, count, minLabeled: resolveMinLabeled(project), replaceExisting: has('replace-existing') });
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
@@ -624,11 +716,15 @@ if (isCliEntry(import.meta.url)) {
   if (has('import-labels')) {
     const worksheetFile = opt('import-labels');
     if (!worksheetFile) { process.stdout.write('calibrate-classifier: --import-labels requires a file path\n'); process.exit(1); }
-    const metaDir = operationalMetricsDir(project);
-    const r = importLabels({ worksheetFile, metaDir, minLabeled: resolveMinLabeled(project) });
+    const metaDir = writableMetrics();
+    const r = importLabels({ worksheetFile, metaDir, expectedHarness:harness, minLabeled: resolveMinLabeled(project) });
+    // The overall answer spans every harness's own state, in both output formats.
+    const gate = r.status === 'OK' ? aggregateCalibration(project) : null;
+    if (gate) { r.all_harnesses_calibrated = gate.is_calibrated; r.by_harness = gate.by_harness; }
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.status === 'OK' ? 0 : 1); }
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
-    process.stdout.write(`calibrate-classifier: ${r.is_calibrated ? '✔ CALIBRATED' : '○ still provisional'} — ${r.notes}\n`);
+    process.stdout.write(`calibrate-classifier: ${harness} ${r.is_calibrated ? 'cleared' : 'not cleared'} — ${r.notes}\n`);
+    process.stdout.write(`  overall: ${gate.is_calibrated ? '✔ CALIBRATED' : '○ PROVISIONAL'} — ${gate.notes}\n`);
     process.exit(0);
   }
 

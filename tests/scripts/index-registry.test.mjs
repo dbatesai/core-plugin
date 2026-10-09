@@ -81,7 +81,7 @@ test('touch writes last-active into the project state; the reader finds it there
     registerProject(s.coreDir, p);
     assert.equal(readLastActive(s.coreDir, { root: p, harness: H }), null);
     const r = touchProject(s.coreDir, { root: p, harness: H, when: '2026-09-26T00:00:00Z' });
-    assert.ok(existsSync(join(p, '.core', H, 'last-active')));
+    assert.ok(existsSync(join(p, '_core', H, 'last-active')));
     assert.deepEqual(r.events.map((e) => e.kind), ['state-created']);
     assert.equal(readLastActive(s.coreDir, { root: p, harness: H }), '2026-09-26T00:00:00Z');
   } finally { s.cleanup(); }
@@ -111,14 +111,14 @@ test('touch on a copy sets the inherited state aside, keeps the original untouch
     const orig = updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
     const copy = join(s.base, 'Projects', 'Copy');
     cpSync(p, copy, { recursive: true });
-    const before = readFileSync(join(p, '.core', H, 'workspace.json'), 'utf8');
+    const before = readFileSync(join(p, '_core', H, 'workspace.json'), 'utf8');
     registerProject(s.coreDir, copy);
     const r = touchProject(s.coreDir, { root: copy, harness: H });
     assert.ok(r.events.some((e) => e.kind === 'state-copied'));
     const fresh = updateManifest({ root: copy, harness: H, coreDir: s.coreDir });
     assert.notEqual(fresh.project_id, orig.project_id, 'the copy gets its own project_id');
     assert.equal(fresh.agent_name, undefined, 'the copy starts fresh');
-    assert.equal(readFileSync(join(p, '.core', H, 'workspace.json'), 'utf8'), before, 'the original is untouched');
+    assert.equal(readFileSync(join(p, '_core', H, 'workspace.json'), 'utf8'), before, 'the original is untouched');
   } finally { s.cleanup(); }
 });
 
@@ -133,8 +133,8 @@ test('state-ask: a verified stamp for a path whose parent is gone waits for the 
       renameSync(gone, here);
       rmSync(join(s.base, 'Drive'), { recursive: true, force: true });
       registerProject(s.coreDir, here);
-      const r = touchProject(s.coreDir, { root: here, harness: H });
-      assert.ok(r.events.some((e) => e.kind === 'state-ask'), `${decision}: the question is raised`);
+      assert.throws(()=>touchProject(s.coreDir, { root: here, harness: H }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='ask');
+      assert.equal(existsSync(join(s.coreDir,'local')),false);
       const out = settleState(s.coreDir, { root: here, harness: H, decision });
       assert.equal(out.changed, true);
       const m = readManifest({ root: here, harness: H, coreDir: s.coreDir });
@@ -144,19 +144,19 @@ test('state-ask: a verified stamp for a path whose parent is gone waits for the 
   }
 });
 
-test('another install\'s valid-looking state is left alone; this machine keeps its own under ~/.core/local', () => {
+test('another install\'s valid-looking state is left alone; new local fallback writes are refused', () => {
   const s = sandbox();
   const other = sandbox();
   try {
     const p = s.mk('Shared', 'P');
     registerProject(other.coreDir, p);
     writeStamp({ root: p, harness: H, coreDir: other.coreDir });
-    const theirs = readFileSync(join(p, '.core', H, 'stamp'), 'utf8');
+    const theirs = readFileSync(join(p, '_core', H, 'stamp'), 'utf8');
     registerProject(s.coreDir, p);
-    const r = touchProject(s.coreDir, { root: p, harness: H });
-    assert.ok(r.events.some((e) => e.kind === 'state-foreign'));
-    assert.equal(readFileSync(join(p, '.core', H, 'stamp'), 'utf8'), theirs, 'the other machine\'s stamp is untouched');
-    assert.ok(readLastActive(s.coreDir, { root: p, harness: H }), 'this machine\'s record lives locally');
+    assert.throws(()=>touchProject(s.coreDir, { root: p, harness: H }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='foreign-install');
+    assert.equal(existsSync(join(s.coreDir,'local')),false);
+    assert.equal(readFileSync(join(p, '_core', H, 'stamp'), 'utf8'), theirs, 'the other machine\'s stamp is untouched');
+    assert.equal(readLastActive(s.coreDir, { root: p, harness: H }),null);
   } finally { s.cleanup(); other.cleanup(); }
 });
 
@@ -174,7 +174,7 @@ test('CLI: register, list, touch, last-active, manifest, bootstrap', () => {
     assert.equal(JSON.parse(m.stdout).agent_name, 'Plover');
     const b = run(s.coreDir, ['bootstrap', '--root', p, '--session-started', '2026-09-26T09:00:00Z']);
     assert.equal(b.status, 0, b.stderr);
-    const rec = JSON.parse(readFileSync(join(p, '.core', H, 'last-bootstrap.json'), 'utf8'));
+    const rec = JSON.parse(readFileSync(join(p, '_core', H, 'last-bootstrap.json'), 'utf8'));
     assert.equal(rec.session_started_at, '2026-09-26T09:00:00Z');
     assert.equal(run(s.coreDir, ['register', s.home]).status, 3, 'a refusal exits 3');
     assert.equal(run(s.coreDir, ['nope']).status, 2);
@@ -217,14 +217,14 @@ test('the bootstrap record is an atomic, owner-only write in the project state',
     const p = s.mk('Projects', 'B');
     registerProject(s.coreDir, p);
     const r = recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-07-28T09:00:00Z', completedAt: '2026-07-28T09:00:12Z' });
-    const file = join(p, '.core', H, 'last-bootstrap.json');
+    const file = join(p, '_core', H, 'last-bootstrap.json');
     assert.equal(r.path, file);
     assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), {
       session_started_at: '2026-07-28T09:00:00Z',
       bootstrap_completed_at: '2026-07-28T09:00:12Z',
     });
     // Temp-file + rename, not a truncating write: no sibling temp survives.
-    const litter = readdirSync(join(p, '.core', H)).filter((n) => n.startsWith('.'));
+    const litter = readdirSync(join(p, '_core', H)).filter((n) => n.startsWith('.'));
     assert.deepEqual(litter, [], `atomic write left temp litter: ${litter.join(', ')}`);
     if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o600, 'the bootstrap record is owner-only');
   } finally { s.cleanup(); }

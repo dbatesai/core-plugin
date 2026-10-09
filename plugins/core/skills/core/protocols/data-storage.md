@@ -62,9 +62,10 @@ Four CORE surfaces, four responsibilities. Don't mix them. Harness-local recall 
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. It stays in the project even when the folder syncs (OneDrive, iCloud Drive, Dropbox, Google Drive). Only the state of a read-only folder or of another install's project lives under `~/.core/local/` instead. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
+- **Project operational state** — `<project>/_core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. It stays in the project even when the folder syncs (OneDrive, iCloud Drive, Dropbox, Google Drive). A read-only folder, a fenced migration or another install's project refuses new operational payload. Copies an older version left under `~/.core/local/` remain read-only history, named in disclosure and explicit purge planning; they are not silently moved or deleted. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
 
-- **Agent operational meta** — `~/.core/` — only what serves every project. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `projects.json` lists the registered project roots. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache for cross-project files. `install-secret` and `install-id` sign project state. None of this holds project facts.
+- **Agent notes** — `<project>/_core/_agent/` — `agent-profile.md` (personality and the user model), `topics.md` (controlled vocabulary), saved `agents/` and `task-configs/`. Git-ignored. Copied once from the older shared `~/.core` folder by `import-agent-notes.mjs`; never read from there again.
+- **Install keys and registry** — `~/.core/` — `install-secret` and `install-id` sign project state; `projects.json` (and the legacy `index.json`) lists the registered project roots; `local/<key>/` keeps only the adoption-consent records. The older `state-cache.json`, `agent-profile.md`, `topics.md`, `agents/`, `task-configs/` and `research/` there are read-only history. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
@@ -81,7 +82,7 @@ When sources conflict, this is the order CORE resolves:
 1. **Direct user instruction in the current session** — overrides everything else.
 2. **User-edited `<project>/PROJECT.md`** — the user's curation surface; anti-resurrection rule applies.
 3. **Canonical units in `<project>/_memories/`** — project facts of record.
-4. **CORE operational state in `<project>/.core/` and `~/.core/`** — runtime state only; not project fact authority.
+4. **CORE operational state in `<project>/_core/` and `~/.core/`** — runtime state only; not project fact authority.
 5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
 
 See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the separation of operational state from external recall that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
@@ -131,7 +132,7 @@ during weekly sync.
 
 Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the flat-layout rule.
 
-You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
+You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `<project>/_core/_agent/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
 
 ### External-source observations — three-layer filtering
 
@@ -143,7 +144,7 @@ Observations from external sources (Teams, SharePoint, Jira, Confluence, Figma, 
 | 2. In-memory cheap filter | Pull subagent context | Haiku | No |
 | 3. Relevance judgment + extraction | Relevance subagent | Sonnet (default), Opus (multi-session context calls) | **Yes** — only here |
 
-**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `~/.core/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
+**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `<project>/_core/_agent/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
 
 **Layer 2** runs entirely in the pull subagent's context. Keyword + topic-vocabulary scan; drops obvious misses. Nothing written.
 
@@ -474,7 +475,7 @@ The user owns PROJECT.md. Manage it in whatever way best serves accuracy and tho
 
 ## Edit detection
 
-Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` — single-owner ACROSS PROJECTS (two projects closing at once write separate files, so they can't clobber each other), but NOT single-owner WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and `maintenance-run.mjs` can all stamp the same project-local cache in the same window, so the read-modify-write itself is locked (`stampFiles`/`stampFile` in `state-cache.mjs`, under `<project>/_memories/_lib/.state-cache.lock` via `withFileLock` — an unlocked stamp loses writes under concurrent processes). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`agent-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
+Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json`. Different projects write separate files; concurrent writers within one project share `.state-cache.lock` through `stampFiles`/`stampFile` in `state-cache.mjs`. Ordinary project reads and stamps use only this local cache, with no global fallback. A missing local entry means no local baseline; it does not prove an older global baseline never existed. Legacy global cache bytes remain untouched until their retention/disposition is separately resolved. The explicit import below preserves accepted old project stamps. A local own key wins even when its value is invalid; timestamps never choose authority. Ordinary stamps still use the existing install-id lock identity. Cache shape:
 
 ```json
 {
@@ -489,9 +490,17 @@ Hash-based comparison against the state cache. The cache of record is **per-proj
 }
 ```
 
-You update the cache on every read/write. You compare at every read.
+Reads compare against the established baseline without updating it. A creating or reconciled CORE writer stamps its actual write; an observation cannot replace evidence merely because it read current bytes.
 
-CORE's own writes are not user edits. Scripts that render PROJECT.md or a unit file on the user's behalf stamp `last_written_by` with their own name **in code**, via the shared `state-cache.mjs` helper (`stampFiles`/`stampFile` — the lock-and-prune plumbing every one of these callers shares, so there's exactly one copy of it) — but that label alone is not trustworthy evidence for a later mismatch: it says who wrote the previously cached bytes, not the current ones, so a user edit made after the fact would carry the same stale label. Two callers, same pattern, each with its own domain-specific classifier (the marker-delimited block differs per file shape, so the hashing logic stays next to each script rather than living in the shared helper):
+**Explicit legacy-baseline transfer, separate from adoption.** `node lifecycle-detect.mjs <project> --import-legacy-cache --json` is a dry-run. Add `--apply` only for the intended transfer. The importer reads the old `~/.core/state-cache.json` through the trusted account home, refuses unsafe/unreadable source selection, and retains its raw-byte SHA-256, byte length and file identity in a project-local receipt. It never modifies the source, takes a global cache lock, or hashes current target contents to establish authorship. It transfers only supported exact lexical keys with valid old stamp fields; local own keys remain authoritative, including invalid values that require reconciliation. Other project keys are not probed, and selected missing, unsupported, conflicting or unsafe entries remain held.
+
+The receipt lives in `legacy_baseline_import` in the same local cache image as the transferred stamps. It records the physical root, declared lexical `key_root`, exact-key coverage scope, original attribution, per-key stamp digest, tool digest and transfer phase. Its checksum detects integrity damage; it does not authenticate an unsigned historical source or establish who authored today's bytes. Coverage `complete` means the declared selected key scope only. Physical-project and cross-spelling consumer coverage are not evaluated by this milestone: alternate source spellings are not silently rekeyed, no matching source keys is held rather than absence, and a different-spelling rerun is locally held without reopening the global source. Existing alias reader/stamper behavior is preserved; consistent baseline consumption across spellings remains a separate obligation.
+
+Transfer phase and coverage are independent. Accepted keys can transfer and become `verified` while missing/invalid selections keep coverage `held`; the overall result and later local-only reruns remain held/exit 3. Genuine source absence is distinct from damage and creates no current-byte baseline. A verified receipt produces a local-only no-op, with generated policy/tracking and surviving mutex conditions still checked. The importer establishes local ignore policy before its mutex/cache writes and refuses tracked or unknown generated state; this does not establish coverage of every other `_lib` writer.
+
+An interrupted first image remains `applied-unverified`. `--recover` previews recovery and stays held without writes; `--recover --apply` verifies the recorded source snapshot, each selected source stamp and original attribution against the receipt, and each current local stamp before promotion. A newer stamp on an imported key is retained and leaves the old transfer unresolved; unrelated later local keys survive recovery. Damaged receipts, changed source, uncertain output or failed lock cleanup stay explicit, with any landed material or returned refusal result preserved alongside cleanup failures. There is no explicit reinspection/replan door for `verified` transfers with held coverage in this bounded milestone; that follow-through remains open. Do not remove the receipt, replay, adopt current bytes or override a surviving lock to hide an incomplete transfer. Static custody and bounded source controls do not establish kernel race or native subprocess confinement.
+
+CORE's own writes are not user edits. Scripts that render PROJECT.md or a unit file on the user's behalf stamp `last_written_by` with their own name **in code**, via the shared `state-cache.mjs` helper (`stampFiles`/`stampFile` — the locked stamp every one of these callers shares, so there's exactly one copy of it) — but that label alone is not trustworthy evidence for a later mismatch: it says who wrote the previously cached bytes, not the current ones, so a user edit made after the fact would carry the same stale label. Two callers, same pattern, each with its own domain-specific classifier (the marker-delimited block differs per file shape, so the hashing logic stays next to each script rather than living in the shared helper):
 
 - **PROJECT.md** — `hot-section.mjs apply` stamps `last_written_by: hot-section`. Use `classifyProjectMdChange(cachedStamp, currentText)` from `hot-section.mjs`: it hashes only the content outside the marker-delimited hot block, which `hot-section.mjs` never touches by construction. `'hot-block-only'` is CORE's synthesis: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` (a stamp with no `outside_hash`) must be treated as a genuine user edit.
 - **Unit files** (`_memories/*.md`) — `decorate-graph.mjs` stamps `last_written_by: decorate-graph` for every file it actually rewrites, in code. Use `classifyUnitChange(cachedStamp, currentText)` from `decorate-graph.mjs`: it hashes only the content outside the marker-delimited `CORE:BEGIN_EDGES`/`CORE:END_EDGES` block. `'edges-block-only'` is CORE's own regenerated wikilink block: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` must be treated as a genuine user edit.
@@ -523,24 +532,26 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
   marks, written through the same lock.
 - **Per-project records are single-owner files in the project's state.** `index-registry.mjs
   touch` writes `last-active`, `bootstrap` writes `last-bootstrap.json`, `manifest --set-json`
-  merges into the manifest — each under `<project>/.core/<harness>/`, needing no registry lock.
-- **`~/.core/migration-manifest.json`** is shared by every project and harness; the
-  migration writes it only under `~/.core/migration-manifest.lock`, after the project's close
-  lock.
+  merges into the manifest — each under `<project>/_core/<harness>/`, needing no registry lock.
+- **The migration's "already migrated" marks** are the project's signed per-harness receipts
+  (`<project>/_core/<harness>/migrated-from.json`), read under the project's close lock. An older
+  install's `~/.core/migration-manifest.json` is read as history and never written, there is no
+  account-wide manifest lock, and the note saying where the legacy state went is
+  `<project>/_core/legacy-moved.md`; nothing is written into `~/.core/workspaces/`.
 - **Edit-detection state-cache is per-project** (see §Edit detection above): the project-local
   cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
   and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
   serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (an
-  unlocked stamp loses writes under concurrent processes). The residual global cache (cross-project files
-  only) is written under `~/.core/state-cache.lock` via `withFileLock`.
-- **`agent-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
+  unlocked stamp loses writes under concurrent processes). No stamp writes the older global cache or
+  takes a lock beside it.
+- **`_core/_agent/agent-profile.md`, `_core/_agent/topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.
 - **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
   `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
-- A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
-  `~/.core/<wrapper>/` — and must not write `projects.json`, `index.json`, `state-cache.json`,
-  `agent-profile.md`, or `topics.md`.
+- A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace in the
+  project — `<project>/_core/<wrapper>/` — and must not write `~/.core`, CORE's harness folders,
+  or `_core/_agent/`.
 
 Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
 (10–30 min) — availability, not data loss. And if `~/.core` lands on a virtualized/synced path
@@ -551,7 +562,7 @@ treats that as "couldn't acquire" and retries, never crashes.
 
 ## Topic vocabulary
 
-`~/.core/topics.md` holds the controlled vocabulary. Currently 18 tags. You evolve the vocabulary during runs — add tags as units accumulate.
+`<project>/_core/_agent/topics.md` holds the controlled vocabulary. Currently 18 tags. You evolve the vocabulary during runs — add tags as units accumulate.
 
 Each addition is appended to a changelog at the top of the file:
 
@@ -573,7 +584,7 @@ When you write an observation that references a person, topic, or deliverable th
 **Stub creation triggers:**
 
 - Observation's `references-person` field names someone with no `who-<slug>.md` unit.
-- Observation's `references-topic` field uses a tag that doesn't have a `topic-<slug>.md` unit (the topic itself may already exist in `~/.core/topics.md`; the unit holds the substantive description).
+- Observation's `references-topic` field uses a tag that doesn't have a `topic-<slug>.md` unit (the topic itself may already exist in `<project>/_core/_agent/topics.md`; the unit holds the substantive description).
 - Observation mentions a deliverable (named work product, milestone, named artifact) with no `del-<slug>.md` unit.
 
 **Stub frontmatter (minimal — graduate later):**
@@ -626,7 +637,7 @@ The anti-resurrection rule fires. You don't re-promote the retired unit. A genui
 
 ### Cross-project drift (different projects, same fact, different framings)
 
-You don't auto-reconcile across projects. The cross-project store is `~/.core/research/` for shared knowledge; `agent-profile.md` is cross-project patterns only. Project facts stay in their project. If the user switches projects mid-conversation and starts referencing facts from a different project, surface the project-switch and either context-shift to the other project or ask the user to restate the relevant facts.
+You don't auto-reconcile across projects. Each project keeps its own research and profile; nothing reads another project's copy. Project facts stay in their project. If the user switches projects mid-conversation and starts referencing facts from a different project, surface the project-switch and either context-shift to the other project or ask the user to restate the relevant facts.
 
 ### No-response-inference default
 
@@ -698,7 +709,7 @@ You don't have to narrate placement when the path is fully determined without a 
 - `inbox.md` raw external pulls.
 - Harness-local recall writes (path resolved per the `save-recall-note` adapter verb in `harnesses/<name>.md` — Claude Code's `~/.claude/projects/<hash>/memory/`, Codex's `~/.codex/memories/extensions/ad_hoc/notes/`).
 - Edits to a file the user explicitly named in the same turn.
-- State cache writes (`~/.core/state-cache.json`).
+- State cache writes (`<project>/_memories/_lib/state-cache.json`).
 - Hygiene log entries (`<project>/_sessions/<date>/hygiene-log.jsonl`).
 
 The test: exempt only when the path is determined by the artifact's own name, schema, or the user's explicit statement — not by classification you had to make.
@@ -731,7 +742,8 @@ Three rings, one read at runtime.
 ├── _outputs/                      ← swarm synthesis, deliverables (CORE-created)
 ├── docs/                          ← architecture, explainers (user surface)
 ├── .claude/                       ← harness config + scripts
-└── .core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
+└── _core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
+    ├── _agent/                    ← agent-profile.md, topics.md, agents/, task-configs/, import-receipt.json
     └── <harness>/                 ← one per harness: claude-code, codex, …
         ├── stamp                  ← provenance: HMAC of (path, harness, install id)
         ├── workspace.json         ← manifest: project_id, agent_name, disclosure flags, opt-outs
@@ -750,15 +762,15 @@ Three rings, one read at runtime.
 
 ```
 ~/.core/
-├── agent-profile.md               ← cross-project personality, portfolio observations
 ├── projects.json                  ← registered project roots (auto-close trust anchor)
 ├── install-secret, install-id     ← sign and identify this install's project state
-├── topics.md                      ← controlled vocabulary
-├── state-cache.json               ← edit-detection hashes for cross-project files
-├── local/<root-slug>/<harness>/   ← project state that must stay on this disk (synced, read-only, or another install's)
+├── local/<key>/                   ← adoption-consent records only; older project state here is read-only history
+├── migration-manifest.json        ← read-only history: an older install's record of the legacy workspaces/ folders
 ├── index.json, workspaces/<id>/   ← legacy layout; read by the migration, never written for new projects
-├── research/                      ← cross-project knowledge library
-└── <wrapper>/                     ← co-installed wrapper sub-namespace (writes only here — never the shared files above)
+├── agent-profile.md, dm-profile.md, topics.md, agents/, task-configs/
+│                                  ← older shared copies; read-only history, copied into a project once by import-agent-notes.mjs
+└── research/, state-cache.json    ← read-only history, copied only on an explicit ask: --research, or the
+                                     legacy-cache importer (§Edit detection)
 ```
 
 **Skill ring** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace) or `~/.claude/skills/core/` (legacy direct install)

@@ -1,25 +1,29 @@
 #!/usr/bin/env node
 /**
  * migrate-workspace-state.mjs — move per-project state from the legacy
- * ~/.core/workspaces/<id>/ folders into <project>/.core/<harness>/.
+ * ~/.core/workspaces/<id>/ folders into <project>/_core/<harness>/.
  *
  * --manifest (dry run) classifies every legacy workspace folder and
  * ~/.core/index.json entry and reports; it writes nothing but --out.
  *
  * --apply migrates ONE project for ONE harness (the one running it). It holds
- * the project's close lock for the whole run, re-classifies under the global
- * manifest lock (so workspaces an older install registered since the last run
+ * the project's close lock for the whole run, re-classifies (so workspaces an older install registered since the last run
  * are seen), copies — never moves — the live workspace into the project's state
  * and duplicates into superseded/<old-id>/, verifies every copy by SHA-256 and
  * writes the migrated-from.json receipt last. A run that finds the receipt does
  * nothing; a run interrupted mid-copy has no receipt and redoes the copy. Only
- * once EVERY harness registered for the path has migrated does it write MOVED.md
- * into the old folders, turn the root workspace.json pointer into a moved note
+ * once EVERY harness registered for the path has migrated does it write legacy-moved.md
+ * into the project's state folder (nothing is written into the account's old folders), turn the root workspace.json pointer into a moved note
  * (left alone when git tracks it), and mark the index.json entries migrated —
- * an older install that still reads them keeps working until then.
+ * an older install that still reads them keeps working until then. A finished
+ * run is recorded in the project (signed, with fingerprints of the legacy registry and the
+ * classification table); while those match and the receipt still verifies, a startup returns
+ * from that record without taking the close lock or the shared registry lock.
  *
- * Lock order: the project's close lock, then the global manifest lock, then the
- * registry lock. Nothing is deleted.
+ * Marks that a workspace has migrated are read from the project's own signed per-harness receipts (and
+ * from an older install's migration-manifest.json, read only); nothing is written to the account's
+ * migration-manifest.json and no account-wide manifest lock is taken. Lock order: the project's close
+ * lock, then the registry lock. Nothing is deleted.
  *
  * Classes (exactly one per workspace id):
  *   migrate              registered, path exists, harness known — becomes the live state
@@ -28,6 +32,8 @@
  *   orphan-unregistered  a workspace folder with no registry entry that holds data
  *   empty                a workspace folder with no registry entry and no data
  *   hold                 needs a person: harness unknown, or duplicates with no tie-break
+ *   history              a person selected it in the table (disposition: retained-history, with evidence):
+ *                        reported as legacy history retained, not imported; never copied, never marked migrated
  *
  * The harness comes from an explicit table (--table), never from the id's
  * spelling; a workspace.json `harness` field is the fallback for workspaces the
@@ -43,8 +49,8 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync, truncateSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, readdirSync, readFileSync, lstatSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync, truncateSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -53,16 +59,25 @@ import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
   writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath, markMetricsEverExternal,
 } from './project-state.mjs';
-import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
+import { acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
 import { assertSafeWorkspaceId, isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
+import { ensureRealFolders, assertOrdinaryLeaf } from './store-ignores.mjs';
 
 // Bookkeeping, not data: a folder holding only these has nothing worth migrating.
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const RETAINED_HISTORY = 'retained-history';
 
 function readTextOrNull(file) {
   try { return readFileSync(file, 'utf8').trim(); } catch { return null; }
+}
+
+/** sha256 of a file's bytes, 'absent' when it doesn't exist, 'unreadable' on any other read error. */
+function fileSha(file) {
+  try { return createHash('sha256').update(readFileSync(file)).digest('hex'); }
+  catch (e) { return e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
 }
 
 function readJson(file, fallback) {
@@ -81,6 +96,32 @@ class LegacyStateError extends Error {
   }
 }
 
+/** 'folder' (a real directory), 'absent', or 'other' (a link, not a directory, or not examinable). */
+function legacyFolderState(path) {
+  try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink() ? 'folder' : 'other'; }
+  catch (e) { return e.code === 'ENOENT' ? 'absent' : 'other'; }
+}
+/** 'file' (an ordinary single-named file), 'absent', or 'other' (a link, a second name, a FIFO, not examinable). */
+function legacyLeafState(path) {
+  try { const st = lstatSync(path); return st.isFile() && !st.isSymbolicLink() && st.nlink === 1 ? 'file' : 'other'; }
+  catch (e) { return e.code === 'ENOENT' ? 'absent' : 'other'; }
+}
+function isRealFolder(path) { try { const st = lstatSync(path); return st.isDirectory() && !st.isSymbolicLink(); } catch { return false; } }
+
+/** A legacy folder that is absent is fine; one that is a link, not a folder, or can't be examined is held. */
+function assertLegacyFolder(path) {
+  let st;
+  try { st = lstatSync(path); }
+  catch (e) { if (e.code === 'ENOENT') return; throw new LegacyStateError('LEGACY_UNREADABLE', path, `cannot examine (${e.code || e.message})`); }
+  if (st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', path, 'the legacy folder is a link');
+  if (!st.isDirectory()) throw new LegacyStateError('LEGACY_UNREADABLE', path, 'not a folder');
+}
+
+/** Every entry is an ordinary single-named file or a folder: walked in full before anything is copied. */
+function assertLegacyContents(path) {
+  if (isRealFolder(path)) listFiles(path, { strict: true });
+}
+
 function listFiles(dir, { strict = false } = {}) {
   const out = [];
   const walk = (d) => {
@@ -93,6 +134,9 @@ function listFiles(dir, { strict = false } = {}) {
       try { st = lstatSync(p); }
       catch (e) { if (strict) throw new LegacyStateError('LEGACY_UNREADABLE', p, `cannot stat (${e.code || e.message})`); continue; }
       if (strict && st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', p, 'symlink inside the legacy workspace');
+      // A file with a second name is the same bytes living somewhere else; a FIFO or device would
+      // block or misbehave when read. Neither is this workspace's own ordinary file.
+      if (strict && !st.isDirectory() && (!st.isFile() || st.nlink !== 1)) throw new LegacyStateError('LEGACY_UNREADABLE', p, st.isFile() ? 'a file with a second name inside the legacy workspace' : 'not an ordinary file inside the legacy workspace');
       if (st.isDirectory()) walk(p);
       else out.push(relative(dir, p).replace(/\\/g, '/'));
     }
@@ -137,20 +181,43 @@ function expandHome(p, home) {
   return p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p;
 }
 
+/**
+ * When this workspace was last active: { t, unknown }. Its own ordinary last-active file in a real
+ * legacy folder wins; a genuinely absent file falls back to the registry field. A link, a second
+ * name, a FIFO or a read error is never opened or trusted, and is reported in `unknown`: the
+ * registry date is still returned, but a choice between duplicates must not rest on it.
+ */
 function lastActive(coreDir, id, indexEntry) {
-  const file = join(coreDir, 'workspaces', id, 'last-active');
-  try {
-    const t = Date.parse(readFileSync(file, 'utf8').trim());
-    if (!Number.isNaN(t)) return t;
-  } catch { /* fall back to the registry field */ }
+  const dir = join(coreDir, 'workspaces', id), file = join(dir, 'last-active');
+  let unknown = null;
+  if (legacyFolderState(dir) === 'other') unknown = 'the workspace folder is a link or not a folder';
+  else if (legacyFolderState(dir) === 'folder') {
+    const leaf = legacyLeafState(file);
+    if (leaf === 'other') unknown = 'last-active is a link, has a second name, or is not an ordinary file';
+    else if (leaf === 'file') {
+      try {
+        const t = Date.parse(readFileSync(file, 'utf8').trim());
+        if (!Number.isNaN(t)) return { t, unknown: null };
+      } catch (e) { if (e.code !== 'ENOENT') unknown = `last-active could not be read (${e.code || 'error'})`; }
+    }
+  }
   const t = Date.parse(indexEntry?.last_active || '');
-  return Number.isNaN(t) ? null : t;
+  return { t: Number.isNaN(t) ? null : t, unknown };
 }
 
 /** Build the manifest. Pure read. */
 export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date(), applyHarness = null } = {}) {
   const home = join(coreDir, '..');
-  const index = readJson(join(coreDir, 'index.json'), []);
+  // The registry is read once, and the fingerprint is of the exact bytes classified. A read
+  // that fails, or bytes that don't parse, are classified as empty (as before) but marked
+  // 'unreadable', so that result is never recorded as a finished check.
+  let index = [];
+  let indexSha;
+  try {
+    const raw = readFileSync(join(coreDir, 'index.json'));
+    indexSha = createHash('sha256').update(raw).digest('hex');
+    try { index = JSON.parse(raw.toString('utf8')); } catch { indexSha = 'unreadable'; }
+  } catch (e) { indexSha = e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
   const byId = new Map();
   for (const e of Array.isArray(index) ? index : []) if (e && e.workspace_id) byId.set(e.workspace_id, e);
 
@@ -164,7 +231,22 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const reg = byId.get(id) || null;
     const dir = join(wsRoot, id);
     const dirExists = dirs.includes(id);
-    const manifest = dirExists ? readJson(join(dir, 'workspace.json'), {}) : {};
+    // Parsed and fingerprinted from one read, as the registry is: the record must name the bytes
+    // the classifier used. An unreadable or unparseable manifest is classified as empty, as
+    // before, and marked 'unreadable' so that result is never recorded.
+    let manifest = {};
+    let manifestSha = 'absent';
+    if (dirExists && legacyLeafState(join(dir, 'workspace.json')) === 'other') {
+      // Not this workspace's own ordinary file: never opened, classified as empty, and marked so the
+      // result is not recorded. The copy step holds on it by name.
+      manifestSha = 'unreadable';
+    } else if (dirExists) {
+      try {
+        const raw = readFileSync(join(dir, 'workspace.json'));
+        manifestSha = createHash('sha256').update(raw).digest('hex');
+        try { manifest = JSON.parse(raw.toString('utf8')) || {}; } catch { manifestSha = 'unreadable'; }
+      } catch (err) { manifestSha = err.code === 'ENOENT' ? 'absent' : 'unreadable'; }
+    }
     const files = dirExists ? dataFiles(dir) : [];
     const rawPath = registryEntryPath(reg);
     const path = rawPath ? canonical(expandHome(rawPath, home)) : null;
@@ -181,9 +263,13 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
       harness = manifest.harness; harnessEvidence = 'workspace.json harness field';
     }
     const unlabeled = harness === 'unknown' && !(tableEntry && tableEntry.harness === 'unknown');
+    // A person may select a registered row, whose path exists, to be kept as history and not imported. It needs
+    // recorded evidence and no harness label; a malformed selection is held, never taken as a guess.
+    const retainedSelection = tableEntry && tableEntry.disposition === RETAINED_HISTORY;
+    const retainedValid = retainedSelection && typeof tableEntry.evidence === 'string' && tableEntry.evidence.trim() && !tableEntry.harness;
 
     const e = {
-      workspace_id: id, registered: !!reg, dir_exists: dirExists, path, path_exists: pathExists,
+      workspace_id: id, registered: !!reg, dir_exists: dirExists, path, path_exists: pathExists, manifest_sha256: manifestSha,
       harness, harness_evidence: harnessEvidence, data_files: files.length,
       sample_files: files.slice(0, 5), class: null, reason: null,
       _unlabeled: unlabeled,
@@ -194,7 +280,13 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     } else if (!pathExists) {
       e.class = 'orphan-gone'; e.reason = 'registered path no longer exists';
     }
-    e._last = lastActive(coreDir, id, reg);
+    if (!e.class && retainedSelection) {
+      if (retainedValid) { e.class = 'history'; e.reason = `legacy history retained, not imported (${tableEntry.evidence.trim()})`; }
+      else { e.class = 'hold'; e.reason = `a ${RETAINED_HISTORY} selection needs recorded evidence and no harness label`; }
+    }
+    const active = lastActive(coreDir, id, reg);
+    e._last = active.t;
+    if (active.unknown) e.last_active_unknown = active.unknown;
     return e;
   });
 
@@ -202,7 +294,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
   // running the apply claims one only when it is the sole registration for its path.
   const perPath = new Map();
   for (const e of entries) {
-    if (e.class || !e.path) continue;
+    if ((e.class && e.class !== 'history') || !e.path) continue;   // a retained-history row still counts: selecting one of two never lets the running harness claim the other
     perPath.set(e.path, (perPath.get(e.path) || 0) + 1);
   }
   for (const e of entries) {
@@ -229,14 +321,16 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const pointer = readJson(join(group[0].path, 'workspace.json'), {});
     let live = group.find((e) => e.workspace_id === pointer.workspace_id);
     let why = live ? `project pointer names ${live.workspace_id}` : null;
-    if (!live) {
+    const unsure = group.find((e) => e.last_active_unknown);
+    if (!live && unsure) why = `last-active of ${unsure.workspace_id} unknown: ${unsure.last_active_unknown}`;
+    else if (!live) {
       const dated = group.filter((e) => e._last !== null).sort((a, b) => b._last - a._last);
       if (dated.length === group.length && dated[0]._last !== dated[1]._last) {
         live = dated[0]; why = `newest last-active (${new Date(live._last).toISOString()})`;
       }
     }
     for (const e of group) {
-      if (!live) { e.class = 'hold'; e.reason = `duplicate-no-tiebreak with ${group.filter((x) => x !== e).map((x) => x.workspace_id).join(', ')}`; }
+      if (!live) { e.class = 'hold'; e.reason = `duplicate-no-tiebreak with ${group.filter((x) => x !== e).map((x) => x.workspace_id).join(', ')}${why ? ` (${why})` : ''}`; }
       else if (e === live) { e.class = 'migrate'; e.reason = `live duplicate: ${why}`; }
       else { e.class = 'supersede'; e.reason = `duplicate of ${live.workspace_id}: ${why}`; }
     }
@@ -245,15 +339,15 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
   for (const e of entries) { delete e._last; delete e._unlabeled; }
   const counts = {};
   for (const e of entries) counts[e.class] = (counts[e.class] || 0) + 1;
-  const flagged = entries.filter((e) => e.class === 'hold' || e.class === 'orphan-unregistered')
+  const flagged = entries.filter((e) => e.class === 'hold' || e.class === 'orphan-unregistered' || e.class === 'history')
     .map((e) => ({ workspace_id: e.workspace_id, class: e.class, reason: e.reason, harness_evidence: e.harness_evidence, sample_files: e.sample_files }));
-  return { generated_at: now.toISOString(), core_dir: coreDir, table_version: table.version ?? null, counts, flagged, entries };
+  return { generated_at: now.toISOString(), core_dir: coreDir, table_version: table.version ?? null, index_sha256: indexSha, counts, flagged, entries };
 }
 
 // ---------- apply ----------
 
 // Statuses that mean the project's state is not migrated and needs attention or a retry.
-const BLOCKED_STATUSES = new Set(['legacy-held', 'migration-incomplete', 'receipt-unverified', 'lock-held']);
+const BLOCKED_STATUSES = new Set(['held', 'legacy-held', 'migration-incomplete', 'receipt-unverified', 'lock-held']);
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const RECEIPT = 'migrated-from.json';
 const LEGACY_MANIFEST = 'legacy-workspace.json';
@@ -266,13 +360,36 @@ function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
 }
 
-function copyTree(src, dest, recorded) {
+/**
+ * Ready a destination inside one of `stateDirs` (folders stateDir has already checked): every folder
+ * between them is made one level at a time and must be a real folder, and the file itself is absent
+ * or an ordinary file. A link anywhere on the way holds the run before anything lands outside.
+ */
+function prepareDest(stateDirs, to) {
+  const base = stateDirs.find((d) => containedPath(d, to));
+  if (!base) throw new LegacyStateError('DESTINATION_UNSAFE', to, 'destination outside the project state');
+  try {
+    ensureRealFolders(base, relative(base, dirname(to)));
+    assertOrdinaryLeaf(to);
+  } catch (e) {
+    if (e.code === 'FOLDER_UNSAFE' || e.code === 'FILE_UNSAFE') throw new LegacyStateError('DESTINATION_UNSAFE', to, e.message);
+    throw e;
+  }
+}
+
+/** The project's `_memories` folder, which holds the close lock: made if absent, refused if it is a link or not a folder. */
+function lockParent(real) {
+  try { return ensureRealFolders(real, '_memories'); }
+  catch (e) { if (e.code === 'FOLDER_UNSAFE') throw new LegacyStateError('DESTINATION_UNSAFE', join(real, '_memories'), e.message); throw e; }
+}
+
+function copyTree(src, dest, recorded, stateDirs) {
   for (const rel of listFiles(src, { strict: true })) {
     const base = rel.split('/').pop();
     if (SKIP_ON_COPY.some((re) => re.test(base))) continue;
     const from = join(src, rel);
     const to = join(dest, rel);
-    mkdirSync(dirname(to), { recursive: true });
+    prepareDest(stateDirs, to);
     copyFileSync(from, to);
     recorded.push({ from, to, sha256: sha256(from), length: statSync(from).size });
   }
@@ -293,6 +410,10 @@ function verifiedReceipt({ root, harness, coreDir, stateDirs }) {
   try { receipt = JSON.parse(raw); } catch { return { ok: false, problems: ['receipt is not valid JSON'] }; }
   if (!receipt || receipt.complete !== true) return { ok: false, receipt, problems: ['receipt does not say complete'] };
   if (!Array.isArray(receipt.files)) return { ok: false, receipt, problems: ['receipt has no file list'] };
+  // A receipt written before the state folder took its visible name lists destinations under the
+  // older name; they are read as the same files in the renamed folder.
+  const older = join(root, LEGACY_STATE_DIRNAME) + sep;
+  receipt.files = receipt.files.map((f) => (f && typeof f.to === 'string' && f.to.startsWith(older) ? { ...f, to: join(root, STATE_DIRNAME, f.to.slice(older.length)) } : f));
   const problems = [];
   for (const f of receipt.files) {
     if (!f || typeof f.to !== 'string') { problems.push('a receipt entry has no destination'); continue; }
@@ -332,27 +453,74 @@ function resolvePendingAppend({ from, known }) {
 function manifestPath(coreDir) { return join(coreDir, 'migration-manifest.json'); }
 
 /**
- * Re-classify and merge the persisted "migrated" marks, under the global manifest
- * lock. `mutate(manifest)` may add marks; the merged manifest is written back.
+ * The "already migrated" marks for the workspaces on one project path: what an older install recorded
+ * in the account's migration-manifest.json (read only, never written now), plus the ids named by this
+ * project's own signed receipts, one per harness. A receipt counts only when it passes the same check
+ * as the running harness's own (signed, complete, every listed file inside that harness's state and
+ * present); one that fails contributes nothing and is named in `unverified`, so release waits.
  */
-function withManifest(coreDir, table, applyHarness, mutate) {
-  return withFileLock(join(coreDir, 'migration-manifest.lock'), () => {
-    const prior = readJson(manifestPath(coreDir), null);
-    const marks = new Map();
-    for (const e of prior?.entries || []) if (e.migrated_at) marks.set(e.workspace_id, { migrated_at: e.migrated_at, migrated_to: e.migrated_to, migrated_by: e.migrated_by });
-    const m = buildManifest({ coreDir, table, applyHarness });
-    for (const e of m.entries) if (marks.has(e.workspace_id)) Object.assign(e, marks.get(e.workspace_id));
-    const out = mutate ? mutate(m) : undefined;
-    atomicWriteFileSync(manifestPath(coreDir), JSON.stringify(m, null, 2) + '\n');
-    return { manifest: m, out };
-  }, { retries: 80, retryDelayMs: 100 });
+function migratedMarks(coreDir, real, unverified = []) {
+  const marks = new Map();
+  const prior = readJson(manifestPath(coreDir), null);
+  for (const e of prior?.entries || []) if (e.migrated_at) marks.set(e.workspace_id, { migrated_at: e.migrated_at, migrated_to: e.migrated_to, migrated_by: e.migrated_by });
+  let harnesses = [];
+  try { harnesses = readdirSync(join(real, STATE_DIRNAME), { withFileTypes: true }).filter((d) => d.isDirectory() && HARNESS_RE.test(d.name)).map((d) => d.name); } catch { /* no state folder yet */ }
+  for (const h of harnesses) {
+    const durable = stateDir({ root: real, harness: h, kind: 'durable', coreDir });
+    const hot = stateDir({ root: real, harness: h, kind: 'hot', coreDir });
+    if (!durable || !hot) continue;
+    if (readSignedFile({ root: real, harness: h, name: RECEIPT, coreDir }) === null) continue;
+    const checked = verifiedReceipt({ root: real, harness: h, coreDir, stateDirs: [durable.dir, hot.dir] });
+    if (!checked.ok) { if (checked.receipt?.complete === true) unverified.push({ harness: h, problems: checked.problems.slice(0, 10) }); continue; }
+    const receipt = checked.receipt;
+    for (const id of [receipt.live, ...(Array.isArray(receipt.superseded) ? receipt.superseded : [])]) {
+      if (typeof id === 'string' && id) marks.set(id, { migrated_at: receipt.migrated_at, migrated_to: join(real, STATE_DIRNAME, h), migrated_by: h });
+    }
+  }
+  return marks;
 }
 
+/**
+ * Classify the legacy workspaces (a pure read of the account's older folders) and merge the migrated
+ * marks for `real`. `mutate(manifest)` may add marks in memory. Nothing is written to the account's
+ * folder and no account-wide lock is taken: the project's close lock, held by the caller, is the only
+ * serialization, and a mark persists as the project's signed receipt.
+ */
+function withManifest(coreDir, table, applyHarness, mutate, real, unverified) {
+  const marks = migratedMarks(coreDir, real, unverified);
+  const m = buildManifest({ coreDir, table, applyHarness });
+  for (const e of m.entries) if (marks.has(e.workspace_id)) Object.assign(e, marks.get(e.workspace_id));
+  const out = mutate ? mutate(m) : undefined;
+  return { manifest: m, out };
+}
+
+/**
+ * Whether git tracks `rel`: true, false, or 'unknown'. Only two answers count as "no": exit 1 from
+ * --error-unmatch (the path is not tracked), or git's "not a git repository" when no `.git` entry
+ * exists at the root or above it and the caller named no repository of its own (GIT_DIR or
+ * GIT_WORK_TREE). A `.git` that git cannot use is damaged metadata, not absence; a named repository
+ * this check does not consult may track the file.
+ * Any other failure (git missing, an I/O error, a timeout) is unknown, and unknown never licenses
+ * rewriting the file. The question is asked of the project's own repository and index: inherited
+ * GIT_* settings are not passed on.
+ */
 function gitTracks(root, rel) {
+  const named = Object.keys(process.env).some((k) => ['GIT_DIR', 'GIT_WORK_TREE'].includes(k.toUpperCase()));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith('GIT_')));
   try {
-    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: 'ignore', timeout: 3000 });
+    execFileSync('git', ['-C', root, 'ls-files', '--error-unmatch', rel], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 3000, env });
     return true;
-  } catch { return false; }
+  } catch (e) {
+    if (e?.status === 1) return false;
+    if (e?.status === 128 && /not a git repository/i.test(String(e.stderr || '')) && !named && !gitEntryAtOrAbove(root)) return false;
+    return 'unknown';
+  }
+}
+function gitEntryAtOrAbove(root) {
+  for (let dir = root; ; dir = dirname(dir)) {
+    try { lstatSync(join(dir, '.git')); return true; } catch (e) { if (e.code !== 'ENOENT') return true; }
+    if (dirname(dir) === dir) return false;
+  }
 }
 
 /**
@@ -368,24 +536,107 @@ export function applyMigration(opts = {}) {
   }
 }
 
-function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = {}) {
+// A finished migration is recorded in the project, signed, with fingerprints of everything that
+// could give it new work: the legacy registry and the classification table. While both match,
+// a startup returns from the record without taking the project's close lock or the shared
+// manifest and registry locks, so one project's startup never queues behind another's.
+const CHECK_RECORD = 'migration-check.json';
+// Older fast records can omit unresolved pointer state; revalidate them once.
+const CHECK_RECORD_VERSION = 1;
+const RECORDABLE = new Set(['migrated', 'already-migrated', 'nothing-to-migrate']);
+
+const historyField = (history) => (history.length ? { history } : {});
+
+const tableSha = (table) => createHash('sha256').update(JSON.stringify(table)).digest('hex');
+
+/** What a pass classified from: the registry bytes, the table, and the legacy manifest of every
+ *  registration on this path (any harness; its own workspace.json can name the harness). */
+function classifiedInputs(manifest, real, table) {
+  return { index_sha256: manifest.index_sha256, table_sha256: tableSha(table),
+    path_entries: manifest.entries.filter((e) => e.path === real).map((e) => ({ workspace_id: e.workspace_id, manifest_sha256: e.manifest_sha256 })) };
+}
+
+function currentMigrationCheck({ real, harness, coreDir, table }) {
+  if (existsSync(join(real, STATE_DIRNAME, harness, MIGRATING_MARKER))) return null;
+  const raw = readSignedFile({ root: real, harness, name: CHECK_RECORD, coreDir });
+  if (raw === null) return null;
+  let rec;
+  try { rec = JSON.parse(raw); } catch { return null; }
+  if (!rec || rec.validation_version !== CHECK_RECORD_VERSION || rec.harness !== harness || rec.root !== real || !RECORDABLE.has(rec.status) || !Array.isArray(rec.path_entries)) return null;
+  const index = fileSha(join(coreDir, 'index.json'));
+  if (index === 'unreadable' || index !== rec.index_sha256 || tableSha(table) !== rec.table_sha256) return null;
+  for (const e of rec.path_entries) {
+    if (!e || !isSafeWorkspaceId(e.workspace_id)) return null;
+    // A recorded check proves what was read then, not where this path leads now. If the legacy store
+    // or this workspace is no longer a real folder, nothing under it is opened and the full path
+    // (which holds or skips it) decides.
+    if (legacyFolderState(join(coreDir, 'workspaces')) === 'other' || legacyFolderState(join(coreDir, 'workspaces', e.workspace_id)) === 'other') return null;
+    // The same for the manifest file itself: only its own ordinary file is opened.
+    if (legacyLeafState(join(coreDir, 'workspaces', e.workspace_id, 'workspace.json')) === 'other') return null;
+    const now = fileSha(join(coreDir, 'workspaces', e.workspace_id, 'workspace.json'));
+    if (now === 'unreadable' || now !== e.manifest_sha256) return null;
+  }
+  // The receipt is re-checked every time, as the full path does: project-local reads, no lock.
+  if (rec.status !== 'nothing-to-migrate') {
+    const durable = stateDir({ root: real, harness, kind: 'durable', coreDir });
+    const hot = stateDir({ root: real, harness, kind: 'hot', coreDir });
+    if (!durable || !hot || !verifiedReceipt({ root: real, harness, coreDir, stateDirs: [durable.dir, hot.dir] }).ok) return null;
+  }
+  return { status: rec.status === 'nothing-to-migrate' ? 'nothing-to-migrate' : 'already-migrated', root: real, harness,
+    live: rec.live ?? null, superseded: rec.superseded || [], files: 0, released: rec.released ?? false, ...historyField(Array.isArray(rec.history) ? rec.history : []), fast: true };
+}
+
+function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
+  // A root pointer kept because git could not say, or a release held on a sibling's damaged receipt,
+  // is unresolved: every run re-inspects it and says so.
+  if (!RECORDABLE.has(result.status) || result.metrics_held || result.root_pointer || result.release_held || !inputs) return;
+  // Only a classification made from bytes that were all read is recorded.
+  if (inputs.index_sha256 === 'unreadable' || inputs.path_entries.some((e) => e.manifest_sha256 === 'unreadable')) return;
+  try {
+    const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
+    writeSignedFile({ dir: durable.dir, name: CHECK_RECORD, coreDir, body: JSON.stringify({
+      validation_version: CHECK_RECORD_VERSION,
+      status: result.status, root: real, harness, live: result.live ?? null, superseded: result.superseded || [],
+      released: result.released ?? false, history: result.history || [], checked_at: now.toISOString(), ...inputs,
+    }, null, 2) + '\n' });
+  } catch { /* no record just means the next startup takes the full path */ }
+}
+
+function applyMigrationInner(opts = {}) {
+  const { root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = opts;
   assertHarnessName(harness);
   const real = canonical(root);
+  const fast = currentMigrationCheck({ real, harness, coreDir, table });
+  if (fast) return fast;
+  const seen = {};
+  const result = fullMigration({ root, harness, coreDir, table, now, seen });
+  if (typeof opts.beforeRecord === 'function') opts.beforeRecord();   // test seam: a change after the pass, before the record
+  recordMigrationCheck({ real, harness, coreDir, result, inputs: seen.inputs, now });
+  return result;
+}
+
+function fullMigration({ root, harness, coreDir, table, now, seen }) {
+  assertHarnessName(harness);
+  // The legacy store's own folder is checked before it is listed: a link there would make every
+  // read below somebody else's files.
+  assertLegacyFolder(join(coreDir, 'workspaces'));
+  const real = canonical(root);
   const iso = now.toISOString();
-  const lockFile = join(real, '_memories', '_close.lock');
-  mkdirSync(dirname(lockFile), { recursive: true });
+  const lockFile = join(lockParent(real), '_close.lock');
   const lock = acquireFileLock(lockFile, { extra: { session_id: `migrate-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
-  try {
-    const { manifest } = withManifest(coreDir, table, harness);
+  return withAcquiredFileLock(lockFile, lock.nonce, () => {
+    const { manifest } = withManifest(coreDir, table, harness, undefined, real);
+    seen.inputs = classifiedInputs(manifest, real, table);
     const mine = manifest.entries.filter((e) => e.path === real && e.harness === harness);
     const held = manifest.entries.filter((e) => e.path === real && e.class === 'hold');
+    const history = manifest.entries.filter((e) => e.path === real && e.class === 'history').map((e) => ({ workspace_id: e.workspace_id, reason: e.reason }));
     const live = mine.find((e) => e.class === 'migrate');
     const dups = mine.filter((e) => e.class === 'supersede');
     if (!live && !dups.length) {
-      const marker = join(real, '.core', harness, MIGRATING_MARKER);
+      const marker = join(real, STATE_DIRNAME, harness, MIGRATING_MARKER);
       if (existsSync(marker)) return { status: 'migration-incomplete', root: real, harness, reason: 'an earlier migration stopped part-way and there is no legacy state left to finish it from' };
-      return { status: held.length ? 'held' : 'nothing-to-migrate', root: real, harness, held: held.map((e) => ({ workspace_id: e.workspace_id, reason: e.reason })) };
+      return { status: held.length ? 'held' : 'nothing-to-migrate', root: real, harness, held: held.map((e) => ({ workspace_id: e.workspace_id, reason: e.reason })), ...historyField(history) };
     }
 
     const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
@@ -405,12 +656,16 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
       const covered = new Set([checked.receipt.live, ...(checked.receipt.superseded || [])].filter(Boolean));
       const late = [...(live ? [live] : []), ...dups].filter((e) => !covered.has(e.workspace_id));
       if (late.length) {
+        // The same rule as a first migration: each late source is a real folder, checked before the
+        // marker, the copy and the receipt change, so a refusal leaves the earlier receipt as it was.
+        for (const e of late) { assertSafeWorkspaceId(e.workspace_id); assertLegacyFolder(join(coreDir, 'workspaces', e.workspace_id)); }
         atomicWriteFileSync(markerFile, `${iso}\n`);
+        for (const e of late) assertLegacyContents(join(coreDir, 'workspaces', e.workspace_id));
         const lateCopies = [];
         for (const e of late) {
           assertSafeWorkspaceId(e.workspace_id);
           const src = join(coreDir, 'workspaces', e.workspace_id);
-          if (existsSync(src)) copyTree(src, join(durable.dir, 'superseded', e.workspace_id), lateCopies);
+          if (existsSync(src)) copyTree(src, join(durable.dir, 'superseded', e.workspace_id), lateCopies, [durable.dir, hot.dir]);
         }
         for (const c of lateCopies) {
           if (sha256(c.to) !== c.sha256) throw new Error(`copy verification failed: ${c.to}`);
@@ -427,14 +682,21 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     }
 
     if (copies) {
+      // Each workspace about to be copied from must itself be a real folder. Checked before the
+      // marker, the copy and the MOVED note, so a refusal leaves both sides exactly as found.
+      for (const e of [...(live ? [live] : []), ...dups]) { assertSafeWorkspaceId(e.workspace_id); assertLegacyFolder(join(coreDir, 'workspaces', e.workspace_id)); }
       atomicWriteFileSync(markerFile, `${iso}\n`);
+      // Every source is walked in full before the first byte is copied: a link, a second-named file
+      // or a non-ordinary file anywhere inside holds the migration with nothing copied. The marker is
+      // already down, so the project's state stays fenced until the legacy folder is put right.
+      for (const e of [...(live ? [live] : []), ...dups]) assertLegacyContents(join(coreDir, 'workspaces', e.workspace_id));
       const toCopy = [...(live ? [{ e: live, superseded: false }] : []), ...dups.map((e) => ({ e, superseded: true }))];
       for (const { e, superseded } of toCopy) {
         assertSafeWorkspaceId(e.workspace_id);
         const src = join(coreDir, 'workspaces', e.workspace_id);
         if (!existsSync(src)) continue;
         if (superseded) {
-          copyTree(src, join(durable.dir, 'superseded', e.workspace_id), copies);
+          copyTree(src, join(durable.dir, 'superseded', e.workspace_id), copies, [durable.dir, hot.dir]);
           continue;
         }
         // Live workspace: hot files to the hot location, everything else to durable.
@@ -444,7 +706,7 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
           try { st = lstatSync(from); } catch (e) { throw new LegacyStateError('LEGACY_UNREADABLE', from, `cannot stat (${e.code || e.message})`); }
           if (st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', from, 'symlink inside the legacy workspace');
           const target = HOT_TOP.has(name) ? hot.dir : durable.dir;
-          if (st.isDirectory()) { copyTree(from, join(target, name), copies); continue; }
+          if (st.isDirectory()) { copyTree(from, join(target, name), copies, [durable.dir, hot.dir]); continue; }
           if (SKIP_ON_COPY.some((re) => re.test(name))) continue;
           // The legacy manifest is kept verbatim beside the live one, which is built from its fields.
           const to = join(target, name === 'workspace.json' ? LEGACY_MANIFEST : name);
@@ -452,6 +714,7 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
             // A control file: carried over with its MAC so it verifies in the new layout.
             writeSignedFile({ dir: target, name, body: readFileSync(from), coreDir, mode: 0o600 });
           } else {
+            prepareDest([durable.dir, hot.dir], to);
             copyFileSync(from, to);
           }
           copies.push({ from, to, sha256: sha256(from), length: statSync(from).size });
@@ -513,13 +776,14 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
 
     // Record the marks, then release the old surfaces once every harness on the path has migrated.
     const ids = [...(live ? [live.workspace_id] : []), ...dups.map((e) => e.workspace_id)];
+    const unverified = [];
     const { out: release } = withManifest(coreDir, table, harness, (m) => {
       for (const e of m.entries) {
         if (ids.includes(e.workspace_id) && !e.migrated_at) Object.assign(e, { migrated_at: iso, migrated_to: durable.dir, migrated_by: harness });
       }
       const onPath = m.entries.filter((e) => e.path === real && e.registered && (e.class === 'migrate' || e.class === 'supersede' || e.class === 'hold'));
       return { allDone: onPath.length > 0 && onPath.every((e) => e.migrated_at), onPath };
-    });
+    }, real, unverified);
 
     mutateProjects(coreDir, (entries) => {
       if (entries.some((e) => e && typeof e.path === 'string' && canonical(e.path) === real)) return entries;
@@ -527,16 +791,21 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     });
 
     let released = false;
-    if (release.allDone) {
-      for (const e of release.onPath) {
-        const dir = join(coreDir, 'workspaces', e.workspace_id);
-        if (existsSync(dir) && !existsSync(join(dir, 'MOVED.md'))) {
-          atomicWriteFileSync(join(dir, 'MOVED.md'), `This workspace's CORE state now lives in ${e.migrated_to} (migrated ${e.migrated_at}). Nothing here was deleted.\n`);
-        }
+    let pointerKept = null;   // why the project's root workspace.json was left as it was, when it was
+    // A sibling receipt that failed its check holds release even when an older install's account
+    // manifest marks the same workspaces migrated: the project's own record outranks that history.
+    if (release.allDone && unverified.length === 0) {
+      // The note that says where each legacy workspace's state went lives in the project, not in the account's folders.
+      const movedNote = join(real, STATE_DIRNAME, 'legacy-moved.md');
+      if (!existsSync(movedNote)) {
+        const lines = release.onPath.map((e) => `- workspace ${e.workspace_id}: its CORE state now lives in ${e.migrated_to || join(real, STATE_DIRNAME)} (migrated ${e.migrated_at || iso}). Nothing was deleted.`);
+        atomicWriteFileSync(movedNote, `# Where the older CORE workspaces for this project went\n\n${lines.join('\n')}\n`);
       }
       const pointerFile = join(real, 'workspace.json');
-      if (existsSync(pointerFile) && !gitTracks(real, 'workspace.json')) {
-        atomicWriteFileSync(pointerFile, JSON.stringify({ moved: '.core/', note: 'CORE state for this project now lives in .core/<harness>/.' }) + '\n');
+      const tracked = existsSync(pointerFile) ? gitTracks(real, 'workspace.json') : false;
+      if (tracked === 'unknown') pointerKept = 'tracking-unknown';
+      if (existsSync(pointerFile) && tracked === false) {
+        atomicWriteFileSync(pointerFile, JSON.stringify({ moved: `${STATE_DIRNAME}/`, note: `CORE state for this project now lives in ${STATE_DIRNAME}/<harness>/.` }) + '\n');
       }
       const onIds = new Set(release.onPath.map((e) => e.workspace_id));
       mutateIndex(coreDir, (entries) => entries.map((e) => (e && onIds.has(e.workspace_id) && !e.migrated ? { ...e, migrated: true, migrated_at: iso } : e)));
@@ -546,11 +815,9 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     return {
       status: copies === null ? 'already-migrated' : 'migrated',
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-      files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
+      files: copies ? copies.length : 0, released, ...(unverified.length ? { release_held: unverified } : {}), ...historyField(history), ...(pointerKept ? { root_pointer: `kept (${pointerKept})` } : {}), ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
     };
-  } finally {
-    releaseFileLock(lockFile, lock.nonce);
-  }
+  });
 }
 
 // ---------- old builds after migration ----------
@@ -604,12 +871,12 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
   if (!checked.ok) return { status: 'receipt-unverified', root: real, harness, problems: checked.problems.slice(0, 10) };
   const receipt = checked.receipt;
 
-  const lockFile = join(real, '_memories', '_close.lock');
-  mkdirSync(dirname(lockFile), { recursive: true });
+  const lockFile = join(lockParent(real), '_close.lock');
   const lock = acquireFileLock(lockFile, { extra: { session_id: `legacy-drift-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
-  try {
+  return withAcquiredFileLock(lockFile, lock.nonce, () => {
     const hot = hotDir;
+    const stateDirs = [durable.dir, hot.dir];
     const byFrom = new Map((receipt.files || []).map((f) => [f.from, f]));
     const sources = [
       ...(receipt.live ? [{ id: receipt.live, superseded: false }] : []),
@@ -621,9 +888,11 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
     const persistReceipt = () => writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n' });
     // Every source is listed before anything is written: an unreadable folder or a symlink
     // must stop the check with the project's copies and the receipt still as they were.
+    assertLegacyFolder(join(coreDir, 'workspaces'));
     const listed = sources.map(({ id, superseded: isSup }) => {
       assertSafeWorkspaceId(id);
       const src = join(coreDir, 'workspaces', id);
+      assertLegacyFolder(src);
       return { id, isSup, src, rels: existsSync(src) ? listFiles(src, { strict: true }) : [] };
     });
     for (const { id, isSup, src, rels } of listed) {
@@ -634,12 +903,13 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
         const size = statSync(from).size;
         let known = byFrom.get(from);
         if (known && known.pending) {
+          prepareDest(stateDirs, known.to);
           const resolved = resolvePendingAppend({ from, known });
           if (resolved.conflict) {
             // The recorded range is gone from the source, or the project's copy holds something
             // that is neither the tail nor a part of it: keep the legacy bytes aside and say so.
             const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
-            mkdirSync(dirname(aside), { recursive: true });
+            prepareDest(stateDirs, aside);
             copyFileSync(from, aside);
             superseded.push({ from, to: aside, reason: 'unresolved-pending-append' });
             byFrom.set(from, { from, to: known.to, sha256: sha256(from), length: statSync(from).size });
@@ -662,7 +932,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
           && (!known || known.pending || (typeof known.length === 'number' && sha256Prefix(from, priorLen) === known.sha256));
 
         if (appendOnly) {
-          mkdirSync(dirname(to), { recursive: true });
+          prepareDest(stateDirs, to);
           const tail = readRange(from, priorLen);
           // Write ahead: the intent reaches the signed receipt before the bytes reach the copy.
           byFrom.set(from, { from, to, sha256: known ? known.sha256 : null, length: priorLen, pending: {
@@ -676,7 +946,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
           persistReceipt();
         } else {
           const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
-          mkdirSync(dirname(aside), { recursive: true });
+          prepareDest(stateDirs, aside);
           copyFileSync(from, aside);
           superseded.push({ from, to: aside });
           byFrom.set(from, { from, to: known ? known.to : aside, sha256: sha256(from), length: size });
@@ -685,9 +955,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
     }
     if (appended.length || superseded.length) persistReceipt();
     return { status: appended.length || superseded.length ? 'brought-in' : 'unchanged', root: real, harness, appended, superseded };
-  } finally {
-    releaseFileLock(lockFile, lock.nonce);
-  }
+  });
 }
 
 function parseArgs(argv) {
@@ -734,6 +1002,13 @@ if (isCliEntry(import.meta.url)) {
     // A migration that could not finish is not a clean run: exit 3 so a caller sees it.
     process.exit(BLOCKED_STATUSES.has(result.status) ? 3 : 0);
   } catch (err) {
+    if (err.code === 'LOCK_RELEASE_FAILED' || err.lockReleaseFailure) {
+      const result = { status: err.code === 'LOCK_RELEASE_FAILED' ? 'lock-release-failed' : 'operation-failed',
+        error: { code: err.code ?? null, message: err.message }, lock_path: err.lockPath,
+        release: err.releaseResult ?? err.lockReleaseFailure, operation: err.operationResult ?? null,
+        additional_lock_releases: err.lockReleaseFailures || [], recovery: err.recovery };
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    }
     process.stderr.write(`migrate-workspace-state: ${err.message}\n`);
     process.exit(2);
   }

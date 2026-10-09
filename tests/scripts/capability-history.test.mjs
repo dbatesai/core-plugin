@@ -21,10 +21,14 @@ function tmpHome() {
   return mkdtempSync(join(tmpdir(), 'caphist-'));
 }
 
-// A project root inside the temp home; its state lands in <root>/.core/claude-code/.
+// A project root inside the temp home; its state lands in <root>/_core/claude-code/.
 function tgt(home, name) {
   const root = join(home, `proj-${name}`);
   mkdirSync(root, { recursive: true });
+  mkdirSync(join(home,'.core'),{recursive:true});
+  const registry=join(home,'.core','projects.json');
+  const entries=existsSync(registry)?JSON.parse(readFileSync(registry,'utf8')):[];
+  if(!entries.some(e=>e.path===root)){entries.push({path:root});writeFileSync(registry,JSON.stringify(entries));}
   return { root, harness: 'claude-code' };
 }
 

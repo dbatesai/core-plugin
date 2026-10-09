@@ -23,11 +23,14 @@
  * non-fatal — metrics capture degrades, the session continues.
  */
 
-import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
-import { join } from 'node:path';
-import { homedir, platform } from 'node:os';
-import { operationalMetricsDir } from './log-event.mjs';
+import { sep, join } from 'node:path';
+import {  platform } from 'node:os';
+import { operationalMetricsDir, prepareStorageDir, appendLeaf } from './log-event.mjs';
+import { ensureRealFolders } from './store-ignores.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 // Typed marker an older scaffold wrote when it could not pin storage, and that capture read to
 // stay off. Nothing writes it now; one left behind by an earlier version is read by
@@ -36,14 +39,23 @@ export const CAPTURE_DISABLED_MARKER = 'capture-disabled.json';
 
 /** Where that marker may sit: the operational meta dir, then the project-local `_metrics/`. */
 export function captureDisabledMarkerCandidates({ projectDir, operationalMetaDir }) {
+  // The same marker left in an older `.core` beside `_core` still disables capture.
+  const inState = `${sep}${STATE_DIRNAME}${sep}`;
+  const older = operationalMetaDir?.includes(inState)
+    ? operationalMetaDir.slice(0, operationalMetaDir.lastIndexOf(inState)) + `${sep}${LEGACY_STATE_DIRNAME}${sep}` + operationalMetaDir.slice(operationalMetaDir.lastIndexOf(inState) + inState.length)
+    : null;
   return [
     ...(operationalMetaDir ? [join(operationalMetaDir, CAPTURE_DISABLED_MARKER)] : []),
+    ...(older ? [join(older, CAPTURE_DISABLED_MARKER)] : []),
     join(projectDir, '_metrics', CAPTURE_DISABLED_MARKER),
   ];
 }
 
 function clearCaptureDisabledMarkers({ projectDir, operationalMetaDir }) {
-  for (const path of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
+  // An older `.core` copy is read by the gate but never removed here: that folder is history, and a
+  // link in it could point the removal anywhere. Left in place, it keeps capture off, which is safe.
+  const inOlder = `${sep}${LEGACY_STATE_DIRNAME}${sep}`;
+  for (const path of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir }).filter((p) => !p.includes(inOlder))) {
     try { rmSync(path, { force: true }); } catch { /* best-effort; a stale marker only keeps capture off */ }
   }
 }
@@ -57,7 +69,7 @@ function clearCaptureDisabledMarkers({ projectDir, operationalMetaDir }) {
  * @param {object} [args.env] - Environment for harness detection.
  * @returns {object} - { ok, storagePath, detection, scaffold_log_line }
  */
-export function initMetrics({ projectDir, home = homedir(), env = process.env }) {
+export function initMetrics({ projectDir, home = coreHome(), env = process.env }) {
   if (!projectDir) {
     return { ok: false, reason: 'missing-required-args' };
   }
@@ -68,14 +80,34 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   const detection = detectStoragePath({ projectDir });
   const storagePath = detection.path;
 
-  // Write the forensic line BEFORE any other work so a partial failure
-  // still leaves a debug trail.
+  // Establish the writable project route before creating capture folders or
+  // clearing any old marker. Unsupported routes preserve existing history.
   let operationalMetaDir;
   try {
     operationalMetaDir = operationalMetricsDir(projectDir, { home, env });
-    mkdirSync(operationalMetaDir, { recursive: true });
   } catch (err) {
+    if (err.code === 'STATE_NO_PROJECT_PLACE') {
+      return { ok: false, status: 'NOT_STORED', written: false,
+        reason: err.reason, error_code: err.code, err: err.message };
+    }
     return { ok: false, reason: 'cannot-create-operational-meta-dir', err: err.message };
+  }
+
+  // The same preparation every capture write uses: a linked `_metrics` is refused before its ignore file is written.
+  try {
+    prepareStorageDir(projectDir);
+  } catch (err) {
+    return { ok: false, reason: 'cannot-create-storage-dir', err: err.message };
+  }
+
+  // The operational subfolders hooks write to. A missing one is only best-effort (the writer makes it
+  // later), but one that is a link is refused here, before the log line or any marker change.
+  for (const sub of ['classified', 'detectors', 'evaluations', 'rollups/daily', 'rollups/weekly', 'sessions-active']) {
+    try {
+      ensureRealFolders(operationalMetaDir, sub);
+    } catch (err) {
+      if (err.code === 'FOLDER_UNSAFE') return { ok: false, reason: 'operational-folder-unsafe', err: err.message };
+    }
   }
 
   const scaffoldLogLine = formatScaffoldLog({
@@ -86,34 +118,16 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     chosen_reason: detection.reason,
   });
 
+  // The log is best-effort and never fails the scaffold, but whether it landed is reported.
+  let scaffoldLog = 'written';
   try {
-    appendFileSync(join(operationalMetaDir, 'scaffold.log'), scaffoldLogLine + '\n');
-  } catch {
-    // Don't fail scaffold on log-write failure; the directories still get created.
+    appendLeaf(join(operationalMetaDir, 'scaffold.log'), scaffoldLogLine + '\n');
+  } catch (err) {
+    scaffoldLog = `not-written (${err.code || err.message})`;
   }
 
   clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
 
-  // Create the storage root. Writers (scorecard-log.jsonl, capture files)
-  // land directly under it; the retired OTel/push subdirectories (traces/,
-  // payloads/, queue/) had no shipped producer or consumer and are no longer
-  // scaffolded.
-  try {
-    mkdirSync(storagePath, { recursive: true });
-    // Generated captures stay out of git unless the project already carries its own rules here.
-    if (!existsSync(join(storagePath, '.gitignore'))) writeFileSync(join(storagePath, '.gitignore'), '*\n!.gitignore\n!README.md\n');
-  } catch (err) {
-    return { ok: false, reason: 'cannot-create-storage-dir', err: err.message, scaffoldLogLine };
-  }
-
-  // Also create the operational-meta subdirs that hooks will write to.
-  for (const sub of ['classified', 'detectors', 'evaluations', 'rollups/daily', 'rollups/weekly', 'sessions-active']) {
-    try {
-      mkdirSync(join(operationalMetaDir, sub), { recursive: true });
-    } catch {
-      // Best-effort; the hook will recreate if missing.
-    }
-  }
 
   return {
     ok: true,
@@ -121,6 +135,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     operationalMetaDir,
     detection,
     scaffold_log_line: scaffoldLogLine,
+    scaffold_log: scaffoldLog,
   };
 }
 

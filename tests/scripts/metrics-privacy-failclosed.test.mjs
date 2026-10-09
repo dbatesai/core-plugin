@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 // metrics-privacy-failclosed.test.mjs — the capture-disabled marker an earlier
 // scaffold left (when it could not pin storage) keeps capture OFF until a scaffold
@@ -10,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
@@ -17,7 +19,7 @@ const INIT_URL = pathToFileURL(join(SCRIPTS, 'metrics-init.mjs')).href;
 const LOG_EVENT_URL = pathToFileURL(join(SCRIPTS, 'log-event.mjs')).href;
 
 function runChild(runner, env) {
-  return spawnSync(process.execPath, ['--input-type=module', '-e', runner], {
+  return spawnSync(process.execPath, [...(env.HOME ? accountHomeArgs(env.HOME) : []), '--input-type=module', '-e', runner], {
     encoding: 'utf8',
     env: { ...process.env, ...env },
   });
@@ -48,6 +50,7 @@ test('a scaffold clears a stale capture-disabled marker and capture resumes (rec
   const fakeHome = mkdtempSync(join(tmpdir(), 'core-pin-recover-home-'));
   const project = mkdtempSync(join(tmpdir(), 'core-pin-recover-'));
   try {
+    registerFixtureProject(fakeHome, project);
     // Stale marker from a previously failed scaffold.
     mkdirSync(join(project, '_metrics'), { recursive: true });
     writeFileSync(join(project, '_metrics', 'capture-disabled.json'),

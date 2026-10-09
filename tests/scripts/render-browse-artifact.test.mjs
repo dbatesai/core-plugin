@@ -14,10 +14,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename, sep } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { symlinkSync, realpathSync } from 'node:fs';
 // A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
@@ -227,35 +227,34 @@ rtest('writes a local receipt in the project state with content identical to the
     assert.equal(receiptWritten, true);
     assert.equal(manifest.receipt_fallback, false);
     assert.match(manifest.project_id, /^[0-9a-f]{32}$/, 'the project id rides the manifest');
-    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '.core')),
+    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '_core')),
       'receipt lands in the project\'s own .core/<harness>/artifact-receipts');
     const receipt = JSON.parse(readFileSync(manifest.receipt_path, 'utf8'));
     assert.deepEqual(receipt, manifest, 'receipt content == manifest content');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-rtest('refused project state (a symlinked .core) → receipt still written to the flagged fallback location', async () => {
+rtest('refused project state (a symlinked .core) refuses publication and receipt fallback', async () => {
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-elsewhere-')));
   try {
-    symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
-    const { manifest, receiptWritten } = await generate(root, home);
-    assert.equal(receiptWritten, true);
-    assert.equal(manifest.receipt_fallback, true);
-    assert.equal(manifest.project_id, null);
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'artifact-receipts')));
-    assert.ok(existsSync(manifest.receipt_path));
+    symlinkSync(elsewhere, join(root, '_core'), DIR_LINK);
+    const before = snapshotBytes(join(home, '.core'));
+    await assert.rejects(generate(root, home), /refusing .*_core: symlink/);
+    assert.equal(existsSync(join(root, 'out', 'view.html')), false);
+    assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.deepEqual(readdirSync(elsewhere), [], 'nothing written through the symlink');
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
 });
 
-rtest('an unregistered folder keeps its receipt on this machine, never inside the folder', async () => {
+rtest('an unregistered folder refuses generation without writing receipts anywhere', async () => {
   const { root, home } = fixtureProject({ workspace: false });
   try {
-    const { manifest } = await generate(root, home);
-    assert.equal(manifest.receipt_fallback, false);
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'local')), 'receipt under ~/.core/local');
-    assert.equal(existsSync(join(root, '.core')), false, 'no .core/ planted in an unregistered folder');
+    const before = snapshotBytes(join(home, '.core'));
+    await assert.rejects(generate(root, home), error => error.code === 'STATE_NO_PROJECT_PLACE');
+    assert.equal(existsSync(join(root, 'out', 'view.html')), false);
+    assert.deepEqual(snapshotBytes(join(home, '.core')), before);
+    assert.equal(existsSync(join(root, '_core')), false, 'no .core/ planted in an unregistered folder');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -688,18 +687,16 @@ test('a planted .core cannot redirect the receipt out of the operational root', 
   try {
     mkdirSync(join(home, '.core'), { recursive: true });
     writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
-    symlinkSync(stolen, join(project, '.core'), DIR_LINK);
-    const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
-    assert.equal(loc.projectId, null, 'refused state yields no project id');
-    assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
-      'it falls back to the flagged location, never to a project-chosen path');
-    assert.ok(loc.receiptPath.startsWith(join(home, '.core') + sep), 'and the receipt stays under the operational root');
+    symlinkSync(stolen, join(project, '_core'), DIR_LINK);
+    const before = snapshotBytes(join(home, '.core'));
+    assert.throws(() => generationReceiptLocation({home, projectDir:project, generatedAt:'2026-07-28T00:00:00Z', env:{CORE_HARNESS:'claude-code'}}), /refusing .*_core: symlink/);
+    assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.deepEqual(readdirSync(stolen), [], 'nothing lands in the symlink target');
 
-    rmSync(join(project, '.core'));
+    rmSync(join(project, '_core'));
     const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
     assert.match(ok.projectId, /^[0-9a-f]{32}$/);
-    assert.equal(ok.receiptDir, join(realpathSync(project), '.core', 'claude-code', 'artifact-receipts'));
+    assert.equal(ok.receiptDir, join(realpathSync(project), '_core', 'claude-code', 'artifact-receipts'));
   } finally {
     for (const d of [home, project, stolen]) rmSync(d, { recursive: true, force: true });
   }
@@ -1118,4 +1115,84 @@ rtest('CLI: --metrics-cache with a pre-seeded cache embeds it, reports metrics_s
     assert.ok(html.includes('CACHED REPORT BRAVO'), 'cached block embedded by the CLI path');
     assert.match(html, /Metrics as of 2026-07-29T00:00:00\.000Z/, 'labeled with the cache stamp');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a --metrics-cache path that links into _memories/ is refused on its real target; nothing is written to the store', { skip: process.platform === 'win32' }, async () => {
+  const { root, mem, home } = fixtureProject();
+  try {
+    const before = readdirSync(mem).sort();
+    symlinkSync(mem, join(root, 'cache-alias'));
+    await assert.rejects(
+      () => renderBrowseArtifact(root, {
+        outPath: join(root, 'out', 'view.html'), home, metricsProvider: stubMetrics,
+        metricsCachePath: join(root, 'cache-alias', 'derived-cache.json'),
+      }),
+      (e) => e.code === 'CACHE_IN_STORE');
+    assert.deepEqual(readdirSync(mem).sort(), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest("--out in the project's _core/_scratch/ makes that folder with its ignore file first", async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const r = await renderBrowseArtifact(root, { outPath: join(root, '_core', '_scratch', 'view.html'), home, metricsProvider: null });
+    assert.ok(existsSync(join(root, '_core', '_scratch', 'view.html')), JSON.stringify(Object.keys(r)));
+    assert.equal(readFileSync(join(root, '_core', '_scratch', '.gitignore'), 'utf8'), '*\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a cache nested inside _core/_scratch/ gets the scratch ignore file before anything is written there', async () => {
+  const { ensureScratchFor } = await import('../../plugins/core/skills/core/scripts/project-artifacts.mjs');
+  const { root } = fixtureProject();
+  try {
+    ensureScratchFor(root, join(root, '_core', '_scratch', 'nested', 'metrics-cache.json'));
+    assert.equal(readFileSync(join(root, '_core', '_scratch', '.gitignore'), 'utf8'), '*\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a metrics cache outside the project, or reached through a folder that links outside, is refused before anything is read or written', { skip: process.platform === 'win32' }, async () => {
+  const { root } = fixtureProject();
+  const outside = mkdtempSync(join(tmpdir(), 'cache-outside-'));
+  try {
+    let ran = 0;
+    const provider = async () => { ran += 1; return { report: 'R', mechanics: { status: 'ok' } }; };
+    for (const cache of [join(outside, 'c.json'), (symlinkSync(outside, join(root, 'alias')), join(root, 'alias', 'c.json'))]) {
+      await assert.rejects(() => resolveMetricsForRender(root, { metricsProvider: provider, metricsCachePath: cache, generatedAt: '2026-10-05T00:00:00.000Z' }), (e) => e.code === 'CACHE_OUTSIDE_PROJECT');
+    }
+    assert.equal(ran, 0);
+    assert.deepEqual(readdirSync(outside), []);
+    const inside = join(root, '_core', '_scratch', 'c.json');
+    mkdirSync(join(root, '_core', '_scratch'), { recursive: true });
+    await resolveMetricsForRender(root, { metricsProvider: provider, metricsCachePath: inside, generatedAt: '2026-10-05T00:00:00.000Z' });
+    assert.equal(statSync(inside).mode & 0o777, 0o600);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});
+
+rtest('the renderer makes the scratch ignore file before a nested cache is written', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const ignore = join(root, '_core', '_scratch', '.gitignore');
+    let seen = null;
+    await renderBrowseArtifact(root, {
+      outPath: join(root, '_core', '_scratch', 'view.html'), home,
+      metricsCachePath: join(root, '_core', '_scratch', 'nested', 'metrics-cache.json'),
+      metricsProvider: async () => { seen = existsSync(ignore); return { report: 'R', mechanics: { status: 'ok' } }; },
+    });
+    assert.equal(seen, true, 'the ignore file was there before the cache write');
+    assert.ok(existsSync(join(root, '_core', '_scratch', 'nested', 'metrics-cache.json')));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a hard-linked cache file inside the project is refused before it is read', { skip: process.platform === 'win32' }, async () => {
+  const { linkSync } = await import('node:fs');
+  const { root } = fixtureProject();
+  const outside = mkdtempSync(join(tmpdir(), 'cache-link-'));
+  try {
+    writeFileSync(join(outside, 'c.json'), JSON.stringify({ report: 'OUTSIDE', generated_at: '2026-01-01T00:00:00Z' }));
+    linkSync(join(outside, 'c.json'), join(root, 'cache.json'));
+    let ran = 0;
+    await assert.rejects(() => resolveMetricsForRender(root, { metricsProvider: async () => { ran += 1; return { report: 'R' }; }, metricsCachePath: join(root, 'cache.json'), generatedAt: 'x' }),
+      (e) => e.code === 'CACHE_OUTSIDE_PROJECT' && /single-named/.test(e.message));
+    assert.equal(ran, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
 });

@@ -338,6 +338,13 @@
       "surface": "shipped"
     },
     {
+      "name": "import-agent-notes",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/import-agent-notes.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "index-registry",
       "kind": "script",
       "harness": "shared",
@@ -506,6 +513,20 @@
       "surface": "shipped"
     },
     {
+      "name": "project-artifacts",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/project-artifacts.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "project-only",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/project-only.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "project-slug",
       "kind": "script",
       "harness": "shared",
@@ -569,6 +590,13 @@
       "surface": "shipped"
     },
     {
+      "name": "restrictive-mode",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/restrictive-mode.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "retrieval-harness",
       "kind": "script",
       "harness": "shared",
@@ -608,6 +636,20 @@
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/state-cache.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "state-dirname",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/state-dirname.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "store-ignores",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/store-ignores.mjs",
       "surface": "shipped"
     },
     {

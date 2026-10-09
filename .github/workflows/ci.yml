@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Node syntax check on all scripts
         run: |
@@ -287,11 +287,26 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
-      - name: Run node test suite
+      - name: Record the real account ~/.core before the suite
         shell: bash
-        run: node --test tests/scripts/*.test.mjs
+        run: node scripts/release/real-home-guard.mjs snapshot "$RUNNER_TEMP/real-home.json"
+
+      # Both platforms: the suite runs against a disposable, seeded account home whose ~/.core takes no new
+      # entries, after controls that prove the account resolved, a write refused, and the test root writable.
+      # On Windows the refusal is a folder-only ACL deny the runner adds and removes itself. The hosted
+      # runner's account is not bound by it (the runner prints its groups, privileges and the folder ACL);
+      # there the run says so and relies on the disposable account plus the real-home check below.
+      - name: Run node test suite (isolated account home)
+        shell: bash
+        env:
+          CORE_SUITE_ALLOW_UNENFORCED_DENY: ${{ runner.os == 'Windows' && '1' || '' }}
+        run: node scripts/release/run-suite-isolated.mjs
+
+      - name: The suite must not have written to the real account ~/.core
+        shell: bash
+        run: node scripts/release/real-home-guard.mjs check "$RUNNER_TEMP/real-home.json"
 
   source-package-smoke:
     name: source-package smoke (package built from committed source)
@@ -306,7 +321,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Source-package smoke — committed artifact, packaged-path hooks, hostile env, rollback round-trip
         shell: bash

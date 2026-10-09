@@ -2,8 +2,8 @@
  * project-state.mjs — where a project's CORE operational state lives, and whether
  * state found there can be trusted.
  *
- * Layout: <project-root>/.core/<harness>/, with a `*` .gitignore written into
- * .core/ before anything else. ~/.core keeps only cross-project files plus
+ * Layout: <project-root>/_core/<harness>/, with a `*` .gitignore written into
+ * _core/ before anything else. ~/.core keeps only the registry and the install keys,
  * projects.json (the registered roots) and local/ (state that must not sit in the
  * project: read-only roots, another install's project).
  *
@@ -15,7 +15,7 @@
  * Trust: a registry entry can only be written by a startup the user ran, so the
  * registry is the auto-close anchor. State inside the project is trusted only when
  * its stamp verifies: an HMAC-SHA256 over (path, harness, install_id) keyed with
- * ~/.core/install-secret. A cloned or downloaded .core/ cannot carry a valid stamp.
+ * ~/.core/install-secret. A cloned or downloaded _core/ cannot carry a valid stamp.
  *
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
@@ -24,7 +24,7 @@ import {
   appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
   rmSync, statSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
-import { dirname, join, resolve, sep, isAbsolute } from 'node:path';
+import { basename, dirname, join, resolve, sep, isAbsolute } from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -33,7 +33,8 @@ import { mapProjectPathToSlug } from './project-slug.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
 
-export const STATE_DIRNAME = '.core';
+export { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const HEX64_RE = /^[0-9a-f]{64}$/;
 
@@ -194,7 +195,8 @@ export function localStateDir({ root, harness, coreDir = defaultCoreDir() }) {
  * Both kinds, 'durable' (manifest, stamp, drafts) and 'hot' (append logs, metrics,
  * locks), stay in the project, synced folder or not, unless the root is not writable.
  * A root that is not registered (~/.core/projects.json, or the legacy index.json)
- * never gets in-project state: its state lives under ~/.core/local/.
+ * never gets in-project state: new payload writes are refused, while any older
+ * ~/.core/local/ copy remains history for read-only consumers.
  * Returns { dir, location: 'project' | 'local', reason }.
  */
 export function projectStateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), registered }) {
@@ -205,7 +207,7 @@ export function projectStateDir({ root, harness, kind = 'durable', coreDir = def
   if (real === dirname(core) || isInside(real, core)) {
     return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'not-a-project-root' };
   }
-  // Only a folder the user registered by running /core gets a .core/ inside it; a
+  // Only a folder the user registered by running /core gets a _core/ inside it; a
   // hook or script working anywhere else keeps its state on this machine.
   let roots = registered;
   if (!roots) { try { roots = readRegisteredRoots({ coreDir: core }); } catch { roots = new Set(); } }
@@ -219,7 +221,7 @@ export function projectStateDir({ root, harness, kind = 'durable', coreDir = def
 }
 
 /**
- * Containment for in-project state: .core/ and .core/<harness>/ must each be a real
+ * Containment for in-project state: _core/ and _core/<harness>/ must each be a real
  * directory (not a symlink) directly inside the root. Returns null when they are
  * absent, 'ok' when sound, or the refusal reason.
  */
@@ -237,21 +239,19 @@ export function checkStateContainment({ root, harness }) {
 }
 
 /**
- * Create the state directory for writing. In-project: .core/.gitignore ("*") is
- * written before any other file, and a symlinked or non-directory .core refuses.
+ * Create the state directory for writing. In-project: _core/.gitignore ("*") is
+ * written before any other file, and a symlinked or non-directory _core refuses.
  */
 export function ensureStateDir(opts) {
-  const target = projectStateDir(opts);
-  if (target.location === 'project') {
-    const dir = join(ensureCoreDir(opts.root, opts.harness), assertHarnessName(opts.harness));
-    if (!existsSync(dir)) writeStamp({ root: opts.root, harness: opts.harness, coreDir: opts.coreDir || defaultCoreDir() });
-    return { ...target, dir };
-  }
-  mkdirSync(target.dir, { recursive: true });
-  return target;
+  // Provisioning uses the same stamp, migration and no-place checks as every writer.
+  return stateDir({ ...opts, forWrite: true });
 }
 
-/** Create <root>/.core/ — refusing a symlinked or escaping .core — with .gitignore first. */
+function noProjectPlace(reason) {
+  throw Object.assign(new Error(`not stored: ${reason}; no writable project state`), { code: 'STATE_NO_PROJECT_PLACE', reason });
+}
+
+/** Create <root>/_core/ — refusing a symlinked or escaping _core — with .gitignore first. */
 function ensureCoreDir(root, harness) {
   const real = canonical(root);
   const containment = checkStateContainment({ root: real, harness });
@@ -296,13 +296,32 @@ function createOnce(file, content, mode) {
   return readFileSync(file, 'utf8').trim();
 }
 
+// An install id is one token (the writer makes 32 hex characters). Reader and writer hold it to the
+// same shape, so an id the writer would accept is never one the reader calls absent.
+const INSTALL_ID_RE = /^[0-9A-Za-z._-]{1,128}$/;
+
 /** This install's secret and id, created on first use (the secret mode 0600). */
 export function ensureInstallIdentity({ coreDir = defaultCoreDir() } = {}) {
   mkdirSync(coreDir, { recursive: true });
   const secretHex = createOnce(join(coreDir, 'install-secret'), randomBytes(32).toString('hex') + '\n', 0o600);
   const installId = createOnce(join(coreDir, 'install-id'), randomBytes(16).toString('hex') + '\n', 0o644);
   if (!HEX64_RE.test(secretHex)) throw new Error(`install-secret is malformed: ${join(coreDir, 'install-secret')}`);
+  if (!INSTALL_ID_RE.test(installId)) throw new Error(`install-id is malformed: ${join(coreDir, 'install-id')}`);
   return { secret: Buffer.from(secretHex, 'hex'), installId };
+}
+
+/**
+ * This install's secret and id as they are on disk, or null when either is absent, unreadable or
+ * malformed. Never creates anything: every check that only reads state uses this, so looking at a
+ * project can't mint an identity. Only a write (enrollment, a stamp, a signed file) creates one.
+ */
+export function readInstallIdentity({ coreDir = defaultCoreDir() } = {}) {
+  try {
+    const secretHex = readFileSync(join(coreDir, 'install-secret'), 'utf8').trim();
+    const installId = readFileSync(join(coreDir, 'install-id'), 'utf8').trim();
+    if (!HEX64_RE.test(secretHex) || !INSTALL_ID_RE.test(installId)) return null;
+    return { secret: Buffer.from(secretHex, 'hex'), installId };
+  } catch { return null; }
 }
 
 export function stampHmac(secret, { path, harness, install_id }) {
@@ -332,8 +351,8 @@ function wellFormed(s) {
 /**
  * Classify the in-project state for (root, harness). Reads only the stamp file,
  * never any other state file.
- *   absent          — no .core/<harness>/ yet
- *   refused         — .core or .core/<harness> is a symlink, not a directory, or escapes the root
+ *   absent          — no _core/<harness>/ yet
+ *   refused         — _core or _core/<harness> is a symlink, not a directory, or escapes the root
  *   verified        — this install's stamp for this path: use the state
  *   planted         — missing/malformed stamp, or this install's id but it does not verify
  *   foreign-install — well-formed stamp from another install: leave it untouched
@@ -356,8 +375,10 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
   } catch { stamp = null; }
   if (!wellFormed(stamp)) return { status: 'planted', reason: stamp ? 'malformed-stamp' : 'missing-stamp' };
 
-  const { secret, installId } = ensureInstallIdentity({ coreDir });
-  if (stamp.install_id !== installId) return { status: 'foreign-install', stamp };
+  // No identity on this machine: the stamp can't be this install's, so it is another install's.
+  const identity = readInstallIdentity({ coreDir });
+  if (!identity || stamp.install_id !== identity.installId) return { status: 'foreign-install', stamp };
+  const { secret } = identity;
   const expected = Buffer.from(stampHmac(secret, stamp), 'hex');
   const given = Buffer.from(stamp.hmac, 'hex');
   if (stamp.harness !== harness || given.length !== expected.length || !timingSafeEqual(given, expected)) {
@@ -371,10 +392,30 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
 
 // A migration writes into the project's state before it is whole. While its marker is
 // present, everything except the migration itself is kept out of that state: reads see
-// nothing, and writes go to this machine's local state instead, so no reader or writer
-// consumes half a copy.
+// nothing from the fenced state, and ordinary writes are refused, so no reader
+// or writer consumes half a copy. Existing local history remains read-only.
 export const MIGRATING_MARKER = '.migrating';
+
+/** Read-only state preflight: an unfinished or uninspectable state cannot supply
+ * retrieval or capture. Inspect each parent before the marker; never follow a link. */
+export function projectMigrationFence({ root, harness }) {
+  const real = canonical(root);
+  const parent = join(real, STATE_DIRNAME, assertHarnessName(harness));
+  for (const dir of [join(real, STATE_DIRNAME), parent]) {
+    try {
+      const st = lstatSync(dir);
+      if (!st.isDirectory() || st.isSymbolicLink()) return 'state-untrusted';
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      return 'state-uninspectable';
+    }
+  }
+  try { lstatSync(join(parent, MIGRATING_MARKER)); return 'migration-in-progress'; }
+  catch (e) { return e.code === 'ENOENT' ? null : 'state-uninspectable'; }
+}
+
 let migrationDepth = 0;
+export const insideMigration = () => migrationDepth > 0;
 export function duringMigration(fn) {
   migrationDepth++;
   try { return fn(); } finally { migrationDepth--; }
@@ -438,39 +479,54 @@ function setAside(harnessDir, label) {
  * trustworthy to read (forWrite false). With forWrite true the directory exists on
  * return and is this install's: an absent state dir is created and stamped; planted
  * or copied state is set aside unread under superseded/ and replaced; another
- * install's state and an unresolved move/copy ('ask') route to ~/.core/local/;
+ * install's state and an unresolved move/copy ('ask') refuse new payload writes;
+ * existing ~/.core/local/ history stays available to readers;
  * a moved project is re-stamped at its new path.
  *
- * Refused containment (a symlinked or escaping .core) throws on write and reads as null.
+ * Refused containment (a symlinked or escaping _core) throws on write and reads as null.
+ * Optional readDirectoryGuard checks a selected state directory before child probes;
+ * false means genuinely absent, and throws distinguish unsafe/unreadable parents.
  */
-export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent } = {}) {
+export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent, readDirectoryGuard } = {}) {
   assertHarnessName(harness);
   const real = canonical(root);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
+  // Only a registered project's own folder is renamed, and before anything in it is read.
+  if (target.location === 'project') {
+    const settled = settleStateFolderName(real, { coreDir });
+    if (forWrite && settled?.startsWith('not-renamed')) noProjectPlace(`the older ${LEGACY_STATE_DIRNAME} folder could not be renamed (${settled.slice(12)})`);
+  }
+  // Strict consumers inspect the selected parent chain before any child probe.
+  // Ordinary readers and explicit writers retain their existing behavior.
+  if (!forWrite && readDirectoryGuard && !readDirectoryGuard(target.dir)) return null;
   if (target.location === 'local') {
-    if (forWrite) mkdirSync(target.dir, { recursive: true });
-    else if (!existsSync(target.dir)) return null;
+    if (forWrite) noProjectPlace(target.reason);
+    if (!existsSync(target.dir)) return null;
     return { dir: target.dir, location: 'local', status: target.reason, trusted: true };
   }
 
   const verdict = classifyStamp({ root: real, harness, coreDir });
   const harnessDir = join(real, STATE_DIRNAME, harness);
-  const local = () => {
+  const local = (reason = verdict.status) => {
     const dir = localStateDir({ root: real, harness, coreDir });
-    if (forWrite) mkdirSync(dir, { recursive: true });
-    else if (!existsSync(dir)) return null;
-    return { dir, location: 'local', status: verdict.status, trusted: true };
+    if (!forWrite && readDirectoryGuard && !readDirectoryGuard(dir)) return null;
+    if (forWrite) noProjectPlace(reason);
+    if (!existsSync(dir)) return null;
+    return { dir, location: 'local', status: reason, trusted: true };
   };
   const note = (event) => { if (typeof onEvent === 'function') onEvent({ ...event, root: real, harness }); };
 
   switch (verdict.status) {
-    case 'verified':
-      if (!migrationDepth && existsSync(join(harnessDir, MIGRATING_MARKER))) {
-        const held = local();
-        return held && { ...held, status: 'migrating' };
+    case 'verified': {
+      const fence = !migrationDepth && projectMigrationFence({root:real, harness});
+      if (fence) {
+        const reason = fence === 'migration-in-progress' ? 'migrating' : fence;
+        const held = local(reason);
+        return held && { ...held, status: reason };
       }
       if (forWrite) mkdirSync(target.dir, { recursive: true });
       return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
+    }
     case 'refused':
       if (forWrite) {
         throw Object.assign(new Error(`refusing ${join(real, STATE_DIRNAME)}: ${verdict.reason}`), { code: 'STATE_CONTAINMENT', reason: verdict.reason });
@@ -484,14 +540,29 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
       writeStamp({ root: real, harness, coreDir });
       note({ kind: 'state-created' });
       return { dir: target.dir, location: 'project', status: 'created', trusted: true };
-    case 'moved':
+    case 'moved': {
+      // A moved project's half-finished migration is fenced the same way, before any re-stamp or write.
+      const fence = !migrationDepth && projectMigrationFence({ root: real, harness });
+      if (fence) {
+        const reason = fence === 'migration-in-progress' ? 'migrating' : fence;
+        const held = local(reason);
+        return held && { ...held, status: reason };
+      }
       if (!forWrite) return { dir: target.dir, location: 'project', status: 'moved', trusted: true };
       writeStamp({ root: real, harness, coreDir });
       note({ kind: 'state-moved', oldPath: verdict.oldPath });
       return { dir: target.dir, location: 'project', status: 'moved', trusted: true, oldPath: verdict.oldPath };
+    }
     case 'planted':
     case 'copied': {
       if (!forWrite) return null;
+      // Nothing is archived or re-stamped while a migration is unfinished: the marker and bytes stay as found.
+      const fence = !migrationDepth && projectMigrationFence({ root: real, harness });
+      if (fence) {
+        const reason = fence === 'migration-in-progress' ? 'migrating' : fence;
+        const held = local(reason);
+        return held && { ...held, status: reason };
+      }
       if (classifyStamp({ root: real, harness, coreDir }).status === 'verified') {
         return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
       }
@@ -519,33 +590,30 @@ export function contentMac(secret, rel, bytes) {
   return createHmac('sha256', secret).update(JSON.stringify([rel, Buffer.from(bytes).toString('base64')])).digest('hex');
 }
 
-/** Names under .core/<harness>/ that git tracks at `root`; empty outside a repo or without git. */
+/** Names under _core/<harness>/ that git tracks at `root`; empty outside a repo or without git. */
 /** The git index file for the repo containing `root` (worktrees and submodules included), or null. */
 function gitIndexFile(root) {
   for (let dir = root; ; dir = dirname(dir)) {
     const dotGit = join(dir, '.git');
-    try {
-      const st = lstatSync(dotGit);
+    let st;
+    try { st = lstatSync(dotGit); }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (st) {
       if (st.isDirectory()) return join(dotGit, 'index');
+      if (!st.isFile() || st.isSymbolicLink()) throw new Error('Unknown Git metadata type');
       const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
-      return m ? join(resolve(dir, m[1]), 'index') : null;
-    } catch { /* no .git here; keep walking */ }
+      if (!m) throw new Error('Unreadable Git metadata pointer');
+      return join(resolve(dir, m[1]), 'index');
+    }
     if (dirname(dir) === dir) return null;
   }
 }
 
-// Paths sit in a v2/v3 index as plain bytes, so a file that never mentions the state
-// prefix can't be tracking anything under it; that skips spawning git on every read.
-// A v4 (prefix-compressed) or split index can hide the bytes, so those always ask git.
-function indexMightTrack(root, prefix) {
-  const idx = gitIndexFile(root);
-  if (!idx) return false;
-  let buf;
-  try { buf = readFileSync(idx); } catch { return true; }
-  const version = buf.length >= 8 ? buf.readUInt32BE(4) : 0;
-  if (version >= 4) return true;
-  try { if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true; } catch { return true; }
-  return buf.includes(prefix);
+// Inside a repository, git alone says what is tracked: a raw scan of the index cannot tell an
+// index git would reject (truncated, an unsupported version, an extension it does not know)
+// from a healthy one that tracks nothing here.
+function indexMightTrack(root) {
+  return gitIndexFile(root) !== null;
 }
 
 // Returned when git ls-files errors or times out while the index says the prefix
@@ -556,12 +624,22 @@ const UNKNOWN_TRACKED = { has: () => true };
 
 export function trackedStateFiles(root, harness) {
   const prefix = `${STATE_DIRNAME}/${harness}/`;
-  if (!indexMightTrack(root, prefix)) return new Set();
+  try { return indexMightTrack(root) ? trackedProjectFiles(root, prefix) : new Set(); }
+  catch { return UNKNOWN_TRACKED; }
+}
+
+/** Generated-family tracking guard. Metadata errors remain unknown, never an empty set. */
+export function trackedProjectFiles(root, prefix) {
+  if (typeof prefix !== 'string' || !prefix.endsWith('/') || prefix.startsWith('/') || prefix.split('/').some(p => p === '..' || p === '.')) return UNKNOWN_TRACKED;
   try {
+    if (!gitIndexFile(root)) return new Set();
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+    env.GIT_CONFIG_NOSYSTEM = '1';
+    env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
     // Without --full-name, ls-files prints paths relative to -C, so a project nested
-    // inside a larger repo still lists as `.core/<harness>/<name>`.
+    // inside a larger repo still lists as `_core/<harness>/<name>`.
     const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', prefix], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000, env,
     });
     return new Set(out.split('\0').filter(Boolean).filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length)));
   } catch {
@@ -585,19 +663,23 @@ export function writeSignedFile({ dir, name, body, coreDir = defaultCoreDir(), m
  * A writer sits between the file and its sidecar for a moment, so one re-read is taken
  * before calling a mismatch.
  */
-export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir() }) {
+export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir(), throwReadErrors = false }) {
   const s = stateDir({ root, harness, kind: 'durable', coreDir });
   if (!s) return null;
   if (s.location === 'project' && trackedStateFiles(canonical(root), harness).has(name)) return null;
-  let secret;
-  try { ({ secret } = ensureInstallIdentity({ coreDir })); } catch { return null; }
+  const identity = readInstallIdentity({ coreDir });
+  if (!identity) return null;   // nothing here was signed by an install that doesn't exist
+  const { secret } = identity;
   const file = join(s.dir, name);
   for (let attempt = 0; attempt < 2; attempt++) {
     let bytes, mac;
     try {
       bytes = readFileSync(file);
       mac = readFileSync(`${file}${MAC_SUFFIX}`, 'utf8').trim();
-    } catch { return null; }
+    } catch (e) {
+      if (throwReadErrors && e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e;
+      return null;
+    }
     const want = Buffer.from(contentMac(secret, name, bytes), 'hex');
     const got = /^[0-9a-f]{64}$/.test(mac) ? Buffer.from(mac, 'hex') : null;
     if (got && timingSafeEqual(want, got)) return bytes.toString('utf8');
@@ -612,8 +694,9 @@ export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir()
  * match this install's secret. A file written by anything but writeSignedFile reads as absent.
  */
 export function readSignedFileAt({ dir, name, coreDir = defaultCoreDir() }) {
-  let secret;
-  try { ({ secret } = ensureInstallIdentity({ coreDir })); } catch { return null; }
+  const identity = readInstallIdentity({ coreDir });
+  if (!identity) return null;   // nothing here was signed by an install that doesn't exist
+  const { secret } = identity;
   const file = join(dir, name);
   for (let attempt = 0; attempt < 2; attempt++) {
     let bytes, mac;
@@ -701,7 +784,7 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 
 /**
- * The harnesses with state for this project, in the project's `.core/` and its machine-local
+ * The harnesses with state for this project, in the project's `_core/` and its machine-local
  * fallback folder: the names found in every folder that could be listed, plus each folder that
  * couldn't. A missing folder has no harnesses; one that can't be read is a problem, not an
  * absence, and the names seen in the other one are still returned.
@@ -727,7 +810,7 @@ export function stateHarnessesPartial({ root, coreDir = defaultCoreDir(), includ
 
 /**
  * Every place this project's state for one harness can be, whichever one routing picks today: the
- * project folder (`<root>/.core/<harness>`) and the machine-local fallback
+ * project folder (`<root>/_core/<harness>`) and the machine-local fallback
  * (`~/.core/local/<project>/<harness>`). Registration and root writability move routing between
  * them, and the one not chosen can still hold records and rows. Read-only: nothing is created,
  * adopted or set aside. A place that exists but can't be trusted as this project's is a problem,
@@ -852,8 +935,8 @@ function sleepMs(ms) {
 const MANIFEST = 'workspace.json';
 
 /** The manifest for (root, harness), or null when absent, untrusted, tracked, or its MAC fails. */
-export function readManifest({ root, harness, coreDir = defaultCoreDir() }) {
-  const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
+export function readManifest({ root, harness, coreDir = defaultCoreDir(), throwReadErrors = false }) {
+  const text = readSignedFile({ root, harness, name: MANIFEST, coreDir, throwReadErrors });
   if (text === null) return null;
   try { return JSON.parse(text); } catch { return null; }
 }
@@ -874,7 +957,7 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
       const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
       if (text === null) {
         // An untrusted manifest can only make capture safer: its opt-out survives the set-aside.
-        current = untrustedOptOuts(file);
+        current = readCaptureOptOuts(file);
         renameSync(file, `${file}.unverified-${isoStamp()}`);
       } else {
         // An unparseable manifest is surfaced, never silently replaced.
@@ -893,28 +976,43 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
 
 // Which capture switches an unverified manifest turns off. Untrusted content may only ever
 // make capture safer, so each opt-out it carries survives the set-aside.
-function untrustedOptOuts(file) {
+export function readCaptureOptOuts(file) {
   const out = {};
+  let text;
+  try { text = readFileSync(file, 'utf8'); }
+  catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return out;
+    // Unable to read is unknown, not an absent opt-out. Privacy consumers fail OFF;
+    // updateManifest must also preserve the unreadable file rather than replace it.
+    throw e;
+  }
   try {
-    const m = JSON.parse(readFileSync(file, 'utf8'));
-    if (m.metrics_enabled === false) out.metrics_enabled = false;
-    if (m.turn_capture === false) out.turn_capture = false;
-  } catch { /* unreadable: no opt-out to carry */ }
+    const m = JSON.parse(text);
+    if (m?.metrics_enabled === false) out.metrics_enabled = false;
+    if (m?.turn_capture === false) out.turn_capture = false;
+  } catch { /* readable malformed untrusted data carries no valid switch */ }
   return out;
 }
-function untrustedOptOut(file) { return untrustedOptOuts(file).metrics_enabled === false; }
+function untrustedOptOut(file) { return readCaptureOptOuts(file).metrics_enabled === false; }
 
 /**
  * True when this harness's manifest says metrics_enabled:false but doesn't verify.
  * Untrusted content may switch capture off, never on.
  */
 export function manifestOptsOutUnverified({ root, harness }) {
-  return untrustedOptOut(join(canonical(root), STATE_DIRNAME, harness, MANIFEST));
+  return optOutManifests(root, harness).some(untrustedOptOut);
 }
 
 /** Same rule for the turn-capture switch: an unverified manifest may switch it off, never on. */
 export function manifestTurnCaptureOptsOutUnverified({ root, harness }) {
-  return untrustedOptOuts(join(canonical(root), STATE_DIRNAME, harness, MANIFEST)).turn_capture === false;
+  return optOutManifests(root, harness).some((f) => readCaptureOptOuts(f).turn_capture === false);
+}
+
+// An older `.core` still in the project (not yet renamed, or left beside `_core`) is read too:
+// these switches only turn capture off, so a second place can restrict and never enable.
+function optOutManifests(root, harness) {
+  const real = canonical(root);
+  return [STATE_DIRNAME, LEGACY_STATE_DIRNAME].map((d) => join(real, d, harness, MANIFEST));
 }
 
 // ---------- the bootstrap record (last-bootstrap.json) ----------
@@ -962,6 +1060,9 @@ function pendingAdoption({ root, harness, coreDir }) {
   try {
     const plan = JSON.parse(readFileSync(pendingAdoptFile({ root, harness, coreDir }), 'utf8'));
     const superseded = join(root, STATE_DIRNAME, harness, 'superseded');
+    // A plan written before the state folder took its visible name names the archive under the older name.
+    const older = join(root, LEGACY_STATE_DIRNAME, harness, 'superseded');
+    if (plan && typeof plan.archive === 'string' && dirname(plan.archive) === older) plan.archive = join(superseded, basename(plan.archive));
     if (!plan || typeof plan.archive !== 'string' || dirname(plan.archive) !== superseded) return null;
     if (!lstatSync(superseded).isDirectory() || !lstatSync(plan.archive).isDirectory()) return null;
     return plan;
@@ -974,7 +1075,7 @@ function adoptedInstallsFile({ root, coreDir }) {
 
 /**
  * Stamps of the restore's other harnesses, recorded when its first harness was adopted: the
- * sha256 of each sibling .core/<harness>/stamp exactly as it arrived. An install id inside a
+ * sha256 of each sibling _core/<harness>/stamp exactly as it arrived. An install id inside a
  * foreign stamp is self-asserted and copyable, so the second-harness offer is bound to these
  * bytes instead: state planted after the first adoption never matches.
  */
@@ -1009,19 +1110,22 @@ function lastWrittenAt(dir) {
 
 /**
  * The adoption question for (root, harness), or null when there's nothing to offer.
- * Offered only for a folder not registered here whose .core/<harness>/ is a real
+ * Offered only for a folder not registered here whose _core/<harness>/ is a real
  * directory holding a well-formed stamp from another install, for this harness,
  * that git doesn't track and the user hasn't declined. Reads the stamp and file
  * times only, never any other state file.
  * Returns { root, harness, oldPath, lastWritten, stampHmac }.
  */
-export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() }) {
+export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir(), forDecline = false }) {
   assertHarnessName(harness);
   const real = canonical(root);
   const core = canonical(coreDir);
   const registered = readRegisteredRoots({ coreDir: core }).has(real);
   if (!registered && classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
   if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
+  // Nothing is offered while a migration is unfinished: adopting would archive and re-stamp half-copied state.
+  // A no to an offer already made is still recorded: it writes only this machine's consent record.
+  if (!forDecline && !migrationDepth && projectMigrationFence({ root: real, harness })) return null;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   // an adoption this machine started here and didn't finish is resumed, whatever the stamp now says
   const resume = pendingAdoption({ root: real, harness, coreDir });
@@ -1032,7 +1136,7 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
     if (st.isFile()) stamp = JSON.parse(readFileSync(join(harnessDir, 'stamp'), 'utf8'));
   } catch { return null; }
   if (!wellFormed(stamp) || stamp.harness !== harness) return null;
-  if (stamp.install_id === ensureInstallIdentity({ coreDir }).installId) return null;
+  if (stamp.install_id === readInstallIdentity({ coreDir })?.installId) return null;
   if (trackedStateFiles(real, harness).has('stamp')) return null;
   if (declinedStamps({ root: real, coreDir }).has(stamp.hmac)) return null;
   // A registered root is offered only for another harness of an install this machine already
@@ -1066,7 +1170,10 @@ function setAsideUnparseable(file) {
  */
 export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), decision }) {
   if (decision !== 'yes' && decision !== 'no') throw new Error(`adoptForeignState: decision must be 'yes' or 'no', got ${JSON.stringify(decision)}`);
-  const cand = adoptionCandidate({ root, harness, coreDir });
+  // A yes is held, before anything is read or moved, while a migration is unfinished.
+  const fence = decision === 'yes' && !migrationDepth && projectMigrationFence({ root: canonical(root), harness: assertHarnessName(harness) });
+  if (fence) return { status: 'held', reason: fence };
+  const cand = adoptionCandidate({ root, harness, coreDir, forDecline: decision === 'no' });
   if (!cand) return { status: 'not-a-candidate' };
   const real = cand.root;
 

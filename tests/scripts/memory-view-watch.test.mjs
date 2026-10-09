@@ -1106,3 +1106,15 @@ posixTest('an unreadable store during a check emits check-failed and holds the b
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test('a live-state path inside an older .core is refused rather than recreating that folder', async () => {
+  const { writeLiveState } = await import('../../plugins/core/skills/core/scripts/memory-view-watch.mjs');
+  const { mkdtempSync, existsSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const base = mkdtempSync(join(tmpdir(), 'live-old-'));
+  try {
+    assert.throws(() => writeLiveState(join(base, '.core', 'claude-code', 'memory-view-live.json'), {}), /inside a \.core folder/);
+    assert.equal(existsSync(join(base, '.core')), false);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});

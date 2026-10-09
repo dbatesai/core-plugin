@@ -51,7 +51,7 @@ const _pluginRootFromModule = (dir) => join(dir, '..', '..', '..');
  * truthfulProducerIdentity converts any failure into fail-closed.
  */
 export function pluginTreeDirty(dir, pluginRoot) {
-  const out = execFileSync('git', ['-C', dir, 'status', '--porcelain', '--', pluginRoot],
+  const out = execFileSync('git', ['-C', dir, '--no-optional-locks', 'status', '--porcelain', '--', pluginRoot],
     { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' });
   return out.trim().length > 0;
 }

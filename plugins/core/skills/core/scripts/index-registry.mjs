@@ -9,7 +9,7 @@
  * protocols/data-storage.md forbids hand-editing it.
  *
  * Per-project records (last-active, the bootstrap record) are single-owner files
- * in the project's own state, `<root>/.core/<harness>/`, written through
+ * in the project's own state, `<root>/_core/<harness>/`, written through
  * project-state.mjs. They need no registry lock.
  *
  * The legacy ~/.core/index.json is read-only here apart from mutateIndex, which the
@@ -29,7 +29,7 @@
  *   node index-registry.mjs touch [--root <dir>] [--when <ISO>]       [--core-dir <dir>]
  *        also prints one line per state event: state-created, state-unverified (set aside
  *        unread), state-copied, state-moved (registry updated), state-foreign (another
- *        install's state; this machine's lives under ~/.core/local/), state-ask
+ *        install's state; no new local fallback payload), state-ask
  *   node index-registry.mjs state --accept-move|--fresh [--root <dir>] [--core-dir <dir>]
  *   node index-registry.mjs manifest [--root <dir>] [--set-json '<json>'] [--core-dir <dir>]
  *   node index-registry.mjs path --kind durable|hot [--name <file>] [--root <dir>] [--core-dir <dir>]
@@ -47,7 +47,7 @@ import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest, writeBootstrap, readBootstrap,
-  classifyStamp, writeStamp, STATE_DIRNAME, adoptionCandidate, adoptForeignState,
+  classifyStamp, writeStamp, STATE_DIRNAME, settleStateFolderName, adoptionCandidate, adoptForeignState, projectMigrationFence, insideMigration,
 } from './project-state.mjs';
 
 /**
@@ -114,9 +114,18 @@ export function registerProject(coreDir, dir, { home, confirmNew = false, offerA
   if (verdict.action === 'registered') return verdict;
   if (verdict.action === 'ask' && !confirmNew) return verdict;
   const root = canonical(dir);
+  // The user is registering this folder: an older `.core` in it takes its visible name before any
+  // adoption check reads it.
+  const settled = settleStateFolderName(root, { coreDir: core });
+  // Not renamed: nothing here can be judged yet, so it is neither offered nor enrolled as new.
+  if (settled?.startsWith('not-renamed')) return { action: 'held', root, reason: `state-folder-${settled}` };
   if (offerAdopt) {
-    const cand = adoptionCandidate({ root, harness: harness || detectStateHarness(), coreDir: core });
+    const h = harness || detectStateHarness();
+    const cand = adoptionCandidate({ root, harness: h, coreDir: core });
     if (cand) return { action: 'adopt-ask', root, old_path: cand.oldPath, last_written: cand.lastWritten };
+    // A restore with an unfinished migration is not registered as new: that would lose its offer.
+    const fence = projectMigrationFence({ root, harness: h });
+    if (fence) return { action: 'held', root, reason: fence };
   }
   return mutateProjects(core, (entries) => {
     if (entries.some((e) => e && typeof e.path === 'string' && canonical(e.path) === root)) {
@@ -186,6 +195,9 @@ export function settleState(coreDir, { root, harness = detectStateHarness(), dec
   const r = rootOrThrow(root, core);
   const verdict = classifyStamp({ root: r, harness, coreDir: core });
   if (verdict.status !== 'ask') return { root: r, status: verdict.status, changed: false };
+  // Neither answer re-stamps or sets anything aside while a migration is unfinished.
+  const fence = !insideMigration() && projectMigrationFence({ root: r, harness });
+  if (fence) return { root: r, status: 'held', reason: fence, changed: false };
   if (decision === 'accept-move') {
     writeStamp({ root: r, harness, coreDir: core });
     recordMove(core, verdict.oldPath, r);
@@ -271,7 +283,7 @@ export function main(argv = process.argv.slice(2)) {
       case 'register': {
         const r = registerProject(coreDir, target || process.cwd(), { confirmNew: !!args.confirmNew, offerAdopt: true, harness });
         process.stdout.write(JSON.stringify(r) + '\n');
-        return r.action === 'refuse' ? 3 : r.action === 'ask' ? 4 : r.action === 'adopt-ask' ? 5 : 0;
+        return r.action === 'refuse' ? 3 : r.action === 'ask' ? 4 : r.action === 'adopt-ask' ? 5 : r.action === 'held' ? 6 : 0;
       }
       case 'adopt-status': {
         const c = adoptionCandidate({ root: args.root || target || process.cwd(), harness, coreDir });

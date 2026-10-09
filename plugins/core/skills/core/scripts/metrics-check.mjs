@@ -62,19 +62,20 @@
  * CLI: node metrics-check.mjs [project-dir] [--json]
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';
 import { newestRegisteredRound, measureRound } from './self-test-round.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
-import { turnCaptureStats } from './turn-capture.mjs';
+import { turnCaptureStats, readCaptureHealth, HEALTH_FILENAME } from './turn-capture.mjs';
 import { latestScorecards, scorecardLogPath } from './scorecard.mjs';
 import { evaluateTripwires } from './metrics-tripwires.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
+import { ensureProjectArtifactDir } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -212,11 +213,12 @@ const run = (script, args) => {
 // a crash of the whole health check.
 // ============================================================
 
-export function checkCalibrationPool(project, { home = homedir() } = {}) {
+export function checkCalibrationPool(project, { home = coreHome() } = {}) {
   try {
     const r = readinessReport({ project, home });
     return {
-      available: true,
+      available: r.available,
+      ...(r.reason ? { reason: r.reason } : {}),
       labeled_count: r.labeled_count,
       min_needed: r.min_needed,
       is_calibrated: r.is_calibrated,
@@ -530,8 +532,9 @@ export function computeRows(out) {
     section: SECTION.READINESS,
     label: 'Calibration pool',
     pct: calPct,
-    trust: TRUST.DIRECT,
-    value: `${labeled}/${minNeeded} labeled`,
+    trust: cal.available ? TRUST.DIRECT : TRUST.NOT_EVALUATED,
+    ...(cal.available ? {} : { noGauge: true }),
+    value: cal.available ? `${labeled}/${minNeeded} labeled` : `unavailable — ${cal.reason || 'no calibration data available'}`,
   });
 
   return rows;
@@ -552,6 +555,9 @@ export function buildNarrative(out) {
   const cal = out.readiness?.calibration || {};
   const labeled = cal.available ? (cal.labeled_count ?? 0) : 0;
   const minNeeded = cal.available ? (cal.min_needed ?? 100) : 100;
+  const calibrationSummary = cal.available
+    ? `the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`
+    : `calibration data is unavailable (${cal.reason || 'no calibration data available'}); the classifier stays unofficial`;
   const recognition = parseRecognitionSignal(out.readiness?.recognition_signal?.text);
 
   // A mechanics hard-fail leads with the failure and the single next action —
@@ -600,9 +606,9 @@ export function buildNarrative(out) {
   if (recognition.available) {
     const trend = recognition.arrow === '↑' ? 'down' : recognition.arrow === '↓' ? 'up' : 'steady';
     const worthLook = recognition.arrow === '↑' ? ' (worth a look)' : '';
-    parts.push(`measurement readiness: recognition is trending ${trend} this session${worthLook}, and the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
+    parts.push(`measurement readiness: recognition is trending ${trend} this session${worthLook}, and ${calibrationSummary}`);
   } else {
-    parts.push(`measurement readiness: recognition has no signal yet this session, and the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
+    parts.push(`measurement readiness: recognition has no signal yet this session, and ${calibrationSummary}`);
   }
   const s2Body = parts.join('; ') + '.';
   const s2 = `Retrieval regression: ${s2Body.charAt(0).toUpperCase()}${s2Body.slice(1)}`;
@@ -676,7 +682,7 @@ export function renderReport(out, { workspaceName } = {}) {
 // gathering itself is a plain function so it stays testable/importable).
 // ============================================================
 
-export async function gatherMetrics(cwd, { home = homedir() } = {}) {
+export async function gatherMetrics(cwd, { home = coreHome() } = {}) {
   // THE canonical object. Its top-level structure IS the three-evidence-class
   // taxonomy (mechanics/regression/readiness) plus identity and run
   // metadata — the renderer consumes this exact object and --json emits it
@@ -696,11 +702,12 @@ export async function gatherMetrics(cwd, { home = homedir() } = {}) {
   const mech = out.mechanics;
 
   // ---- 1. LIVE PROBE on a scratch store ----
-  const scratch = join(tmpdir(), `core-metrics-probe-${process.pid}`);
-  const mem = join(scratch, '_memories');
+  let scratch = null;
   const TOKEN = 'zephyrine-cobalt-ledger';       // unique: must be retrieved
   const RETIRED_TOKEN = 'halcyon-probe-retired'; // unique: must be suppressed
   try {
+    scratch = mkdtempSync(join(ensureProjectArtifactDir(resolve(cwd), '_scratch'), 'probe-'));
+    const mem = join(scratch, '_memories');
     mkdirSync(mem, { recursive: true });
     const unit = (id, status, body, topics) => writeFileSync(join(mem, `${id}.md`),
 `---
@@ -736,7 +743,12 @@ ${body}
   } catch (e) {
     mech.probe.round_trip = false; out.caveats.push(`probe crashed: ${String(e).slice(0, 120)}`);
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    if (scratch) {
+      try { rmSync(scratch, { recursive: true, force: true }); } catch (e) {
+        mech.probe.round_trip = false;
+        out.caveats.push(`probe scratch cleanup failed: ${e.code || 'cleanup-error'}`);
+      }
+    }
   }
 
   // ---- 2. THIS-STORE HEALTH (read-only) ----
@@ -832,7 +844,7 @@ ${body}
   // Turn-capture evidence-stream state (default-ON) — a
   // mechanics/instrumentation fact. Always rendered: ON shows the disclosure +
   // off-switches; OFF confirms the user's opt-out took effect.
-  mech.turn_capture = turnCaptureStats(cwd);
+  mech.turn_capture = turnCaptureStats(cwd, { home });
 
   // ---- mechanics status: hard evidence only; routine upkeep never demotes
   // it. Scoped to mechanics (mech.status), never an umbrella claim. ----
@@ -893,6 +905,8 @@ export function checkAnswerEvidence(projectDir) {
   } catch (e) {
     problems.push({ file: logPath, detail: `scorecard log unreadable: ${String(e && e.message).slice(0, 120)}` });
   }
+  const health = readCaptureHealth(projectDir);
+  if (health.unreadable) problems.push({ file: HEALTH_FILENAME, detail: `current capture health is unreadable (${health.unreadable})` });
   return { corrupt: problems.length > 0, problems };
 }
 

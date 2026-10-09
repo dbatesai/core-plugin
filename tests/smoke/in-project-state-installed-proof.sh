@@ -66,7 +66,7 @@ new_world() {
   printf '{"version":1,"entries":{"legacyid":{"harness":"claude-code","evidence":"proof"}}}' > "$CORE/migrate-harness-table.json"
   printf '{"workspace_id":"legacyid"}' > "$PROJ/workspace.json"
   export CLAUDECODE=1 CORE_HARNESS=claude-code
-  STATE="$PROJ/.core/claude-code"; LEG="$CORE/workspaces/legacyid"
+  STATE="$PROJ/_core/claude-code"; LEG="$CORE/workspaces/legacyid"
 }
 mig()   { node "$SCRIPTS/migrate-workspace-state.mjs" "$@" --root "$PROJ" --core-dir "$CORE"; }
 statusof() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).status)}catch{console.log("no-json")}})'; }
@@ -138,7 +138,7 @@ OUT="$(mig --apply)"; rc=$?; echo "  truncated receipt -> exit $rc, status $(ech
 
 new_world b3   # git-tracked
 mig --apply >/dev/null
-git -C "$PROJ" init -q && git -C "$PROJ" add -f ".core/claude-code/migrated-from.json" 2>/dev/null
+git -C "$PROJ" init -q && git -C "$PROJ" add -f "_core/claude-code/migrated-from.json" 2>/dev/null
 OUT="$(mig --apply)"; rc=$?; echo "  git-tracked receipt -> exit $rc, status $(echo "$OUT" | statusof)"
 [ $rc -eq 3 ] && [ "$(echo "$OUT" | statusof)" = receipt-unverified ] && ok "tracked receipt refused" || bad "tracked: $OUT"
 

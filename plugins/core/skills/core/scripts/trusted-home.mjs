@@ -20,8 +20,14 @@ import { userInfo } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
 import { resolve, join, dirname, basename, sep, relative, isAbsolute } from 'node:path';
 
+let memoHome = null;
+/** The OS account's home, resolved once per process (a failure is not remembered, so a later call may succeed). */
 export function trustedHome() {
-  try { return userInfo().homedir || null; } catch { return null; }
+  if (memoHome) return memoHome;
+  let home = null;
+  try { home = userInfo().homedir || null; } catch { home = null; }
+  if (home) memoHome = home;
+  return home;
 }
 
 /**
@@ -38,6 +44,16 @@ export function requireTrustedHome({ resolve: resolveHome = trustedHome } = {}) 
     );
   }
   return home;
+}
+
+/**
+ * The account home every CORE authority default resolves from: once per process, from the OS account
+ * record, never from $HOME, and the same value for every caller (trustedHome and requireTrustedHome
+ * share it). A test or owner seam passes `home` explicitly; nothing in the environment switches it.
+ * Harness-native roots (transcripts, memory, connector config) are a separate `nativeHome`.
+ */
+export function coreHome() {
+  return requireTrustedHome();
 }
 
 // ---------- workspace identity ----------
@@ -111,4 +127,22 @@ export function regularFileWithin(root, candidate) {
   if (!full) return null;
   try { if (!lstatSync(full).isFile()) return null; } catch { return null; }
   return full;
+}
+
+/** Retired account-global payload routes, including their physical aliases.
+ * Lexical and home-ancestor checks cover a first write before ~/.core exists. This is
+ * an exclusion check; it does not certify arbitrary paths as project state.
+ */
+export function isAccountCorePayloadPath(candidate, { home = requireTrustedHome() } = {}) {
+  const root = resolve(home, '.core');
+  const within = (parent, path) => {
+    const rel = relative(parent, path);
+    return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel));
+  };
+  if (within(root, resolve(candidate)) || containedPath(root, candidate) !== null) return true;
+  // Before ~/.core exists, resolve both future paths through the existing home.
+  // This also excludes a first write through a physical alias of that home.
+  const physicalRoot = containedPath(home, root);
+  const physicalCandidate = containedPath(home, candidate);
+  return physicalRoot !== null && physicalCandidate !== null && within(physicalRoot, physicalCandidate);
 }

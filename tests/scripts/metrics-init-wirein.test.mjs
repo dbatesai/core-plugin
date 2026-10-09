@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, symlinkSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, symlinkSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -9,6 +9,7 @@ import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 import { resolveStoragePath, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { readPinSigned, writePinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS ||= 'claude-code';
@@ -20,6 +21,7 @@ const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scrip
 test('wire-in: metrics-init scaffolds project-local storage, and log-event resolves to it even when an older pin names another folder', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
   try {
@@ -33,7 +35,7 @@ test('wire-in: metrics-init scaffolds project-local storage, and log-event resol
     mkdirSync(old, { recursive: true });
     writePinSigned({ dir: operationalMetricsDir(project, { home, env }), path: old, root: projectRootFor(project, { home, coreDir }), coreDir });
 
-    const r = initMetrics({ projectDir: project, env });
+    const r = initMetrics({ projectDir: project, home, env });
     assert.ok(r.ok, `scaffold ok: ${JSON.stringify(r)}`);
     assert.equal(r.storagePath, join(project, '_metrics'));
     assert.ok(existsSync(r.storagePath), 'storage root scaffolded');
@@ -55,14 +57,15 @@ test('wire-in: metrics-init scaffolds project-local storage, and log-event resol
 test('wire-in: metrics-init is idempotent (second run leaves the storage path stable)', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
   try {
     process.env.HOME = home;
     process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
     assert.equal(homedir(), home);
-    const r1 = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
-    const r2 = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
+    const r1 = initMetrics({ projectDir: project, home, env: { CORE_HARNESS: 'claude-code' } });
+    const r2 = initMetrics({ projectDir: project, home, env: { CORE_HARNESS: 'claude-code' } });
     assert.ok(r1.ok && r2.ok);
     assert.equal(r1.storagePath, r2.storagePath, 'storage path stable across runs');
   } finally {
@@ -81,11 +84,12 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
   if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const linkDir = mkdtempSync(join(tmpdir(), 'mi-link-'));
   const link = join(linkDir, 'metrics-init.mjs');
   try {
     symlinkSync(METRICS_INIT, link);
-    const out = execFileSync('node', [link, project], {
+    const out = execFileSync('node', [...accountHomeArgs(home), link, project], {
       env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' }, // USERPROFILE: Windows homedir()
       encoding: 'utf8',
     });

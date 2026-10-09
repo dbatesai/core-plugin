@@ -23,7 +23,7 @@ import { resolve, join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
-import { hashText, stampFiles } from './state-cache.mjs';
+import { hashText, stampFiles, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { purgeTurnCapture } from './turn-capture.mjs';
 import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
@@ -32,6 +32,7 @@ import { TRIPWIRE_THRESHOLDS } from './metrics-tripwires.mjs';
 import { shouldAuthorFreshRound, markAutoAuthorTriggered } from './self-test-round.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { ensureStoreIgnores, trackedGenerated, STORE_IGNORES, PROJECT_IGNORES } from './store-ignores.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
@@ -61,10 +62,11 @@ function findGhostDuplicates(memoriesDir) {
  * @param {{ apply?: boolean, now?: string, home?: string, env?: object }} opts
  * @returns {{ ranOps: string[], notes: string[], unitsChanged: boolean, narration: string }}
  */
-export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home, env = process.env } = {}) {
+export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home, env = process.env, metrics = true } = {}) {
   const root = resolve(projectPath);
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
+  const ignoreProblems = apply ? [...ensureStoreIgnores(root, { families: [...STORE_IGNORES, ...PROJECT_IGNORES] }), ...trackedGenerated(root)] : [];
 
   let ledger = {};
   if (existsSync(ledgerPath)) {
@@ -73,6 +75,8 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
 
   const ranOps = [];
   const notes = [];
+  for (const problem of ignoreProblems) notes.push(`git ignore: ${problem}`);
+  let attribution = null;
 
   // 1. Ghost duplicates — always (cheap). Reported, never removed.
   const ghosts = findGhostDuplicates(mem);
@@ -112,12 +116,10 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       } catch { /* best-effort: a stamp we can't compute never blocks the regen itself */ }
 
       const stampOutcome = stampFiles(root, stampEntries, { now, home });
-      // Truthful stamp-failure surfacing: the indexes wrote
-      // but their attribution stamp didn't. These are machine-generated files
-      // with no human region, so it's lower-stakes than a mixed-ownership
-      // write — but still report it rather than claim a clean maintenance run.
-      if (stampOutcome && stampOutcome.stamped === false) {
-        notes.push(`index attribution stamp failed (${stampOutcome.outcome}: ${stampOutcome.reason}) — recovery-required`);
+      attribution = stampOutcome;
+      // Keep the stamp receipt and cleanup failure visible after index writes.
+      if (stampNeedsRecovery(stampOutcome)) {
+        notes.push(`index ${stampRecoveryMessage(stampOutcome)}`);
       }
     }
     ranOps.push('decisions-index', 'risks-index', 'summary-index');
@@ -140,7 +142,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // (turn-capture is the live capture layer) is reported, never removed: CORE does not delete
   // data unattended. Remove this block, and the folder, in a release that adds the explicit
   // bounded removal command.
-  if (apply) {
+  if (apply && metrics) {
     try {
       const legacyDir = join(resolveStoragePath(root), 'rich-context');
       if (existsSync(legacyDir)) {
@@ -156,7 +158,9 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // idempotent. Runs BEFORE the scorecard op so fresh verdicts pin same-pass.
   // The global metrics opt-out covers derived metrics and automatic self-tests
   // too. Keep ordinary memory indexes and their cadence ledger independent.
-  const maintainMetrics = apply && metricsEnabled({ project: root, home, env });
+  // `metrics: false` is the folder-only caller: the metrics gate reads the registry and the signed
+  // manifest, so that caller keeps the memory indexes current and leaves derived metrics alone.
+  const maintainMetrics = apply && metrics && metricsEnabled({ project: root, home, env });
   if (maintainMetrics) {
     try {
       const jr = judgeUnjudgedTurns(root, { limit: 50, now, env });
@@ -224,7 +228,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   if (apply) atomicWriteFileSync(ledgerPath, JSON.stringify(newLedger, null, 2) + '\n');
 
   const narration = composeNarration(ranOps, notes);
-  return { ranOps, notes, unitsChanged, narration };
+  return { ranOps, notes, unitsChanged, narration, attribution };
 }
 
 function composeNarration(ranOps, notes) {
@@ -292,7 +296,7 @@ async function main(argv) {
   const regrade = await autoRegradeSelfTest(projectPath, { dryRun });
   if (json) process.stdout.write(JSON.stringify({ ...res, self_test_regrade: regrade }) + '\n');
   else process.stdout.write(res.narration + (regrade ? ' ' + regrade.note + '.' : '') + '\n');
-  return 0;
+  return stampNeedsRecovery(res.attribution) ? 1 : 0;
 }
 
 if (isCliEntry(import.meta.url)) {

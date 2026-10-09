@@ -432,3 +432,26 @@ test('force release removes every generation artifact', () => {
   const fresh = acquireFileLock(lock);
   assert.ok(fresh.ok, 'lock is cleanly acquirable after force release');
 });
+
+test('a family file whose second name clears within the look-again window is the lock\'s own; one that stays is refused', async (t) => {
+  const { foreignLockArtifact } = await import(new URL('../../plugins/core/skills/core/scripts/file-lock.mjs', import.meta.url).href);
+  const { linkSync, mkdirSync } = await import('node:fs');
+  const { Worker } = await import('node:worker_threads');
+  const dir = mkdtempSync(join(tmpdir(), 'lock-second-name-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const lockDir = join(dir, 'lock'), elsewhere = join(dir, 'elsewhere');
+  mkdirSync(lockDir); mkdirSync(elsewhere);
+  const lock = join(lockDir, '.state-cache.lock');
+  const gen = `${lock}.g1`;
+  writeFileSync(gen, '{}');
+  const outside = join(elsewhere, 'second-name');
+  try { linkSync(gen, outside); } catch (e) { return t.skip(`no hard links here (${e.code})`); }
+  // A name this scan can't count, removed ~8 ms after the scan starts: the shape of a temp name a listing missed.
+  const worker = new Worker(`const { parentPort, workerData } = require('node:worker_threads'); const { unlinkSync } = require('node:fs');
+    parentPort.postMessage('ready'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8); unlinkSync(workerData);`, { eval: true, workerData: outside });
+  await new Promise((resolve) => worker.once('message', resolve));
+  assert.equal(foreignLockArtifact(lock), null, 'a second name that clears in time is not refused');
+  await new Promise((resolve) => worker.once('exit', resolve));
+  linkSync(gen, outside);
+  assert.equal(foreignLockArtifact(lock), '.state-cache.lock.g1', 'a second name that stays outside the folder is refused');
+});

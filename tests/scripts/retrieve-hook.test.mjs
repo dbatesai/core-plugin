@@ -1,4 +1,4 @@
-import { test, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -34,24 +34,8 @@ const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
 cpSync(FIXT_SRC, FIXT, { recursive: true });
 process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
-// Isolate every hook test log: a subprocess hook run
-// that doesn't override CORE_HOOKS_LOG_FILE defaults to the real machine-wide
-// ~/.core/hooks-log.jsonl (hook-log.mjs's default path) — tests writing there
-// pollute the developer's real log and, under a sandboxed/CI HOME or
-// concurrent test runs, can behave differently across environments. Every
-// call gets its own fresh temp path unless the test explicitly needs a
-// specific one (those pass CORE_HOOKS_LOG_FILE in `env`, which wins here).
-// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
-// honors overrides inside the trusted ~/.core, so os.tmpdir() no longer
-// qualifies. Unlike os.tmpdir(), ~/.core isn't auto-cleaned — every created
-// dir is tracked and removed in the after() below.
-const _isolatedLogDirs = [];
-function isolatedHooksLog() {
-  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'retrieve-hook-log-'));
-  _isolatedLogDirs.push(dir);
-  return join(dir, 'hooks-log.jsonl');
-}
-after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
+// Logs live inside the selected fixture project and disappear with that fixture.
+function isolatedHooksLog(root = FIXT) { return join(root, '_core', '_hooks', 'hooks-log.jsonl'); }
 
 function runHook(prompt, env, cwd = FIXT) {
   return execFileSync('node', [HOOK], {
@@ -61,7 +45,7 @@ function runHook(prompt, env, cwd = FIXT) {
     // pointed at a COMMITTED fixture store must never write telemetry into it
     // (that exact pollution shipped in a2cab1b and was cleaned up same night).
     // Tests that assert the telemetry write opt back in against temp stores.
-    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...registryEnvFor(cwd), ...env },
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(cwd), ...registryEnvFor(cwd), ...env },
     encoding: 'utf8',
   });
 }
@@ -69,7 +53,7 @@ function runHook(prompt, env, cwd = FIXT) {
 function runHookProcess(prompt, env, cwd = FIXT) {
   return spawnSync('node', [HOOK], {
     input: JSON.stringify({ prompt, cwd }),
-    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...registryEnvFor(cwd), ...env },
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(cwd), ...registryEnvFor(cwd), ...env },
     encoding: 'utf8',
   });
 }
@@ -118,7 +102,7 @@ test('hook output carries the authority tier for observation hits (the label mus
   try {
     const out = execFileSync('node', [HOOK], {
       input: JSON.stringify({ prompt: 'quokka incident', cwd: dir }),
-      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...registryEnvFor(dir) },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog(dir), ...registryEnvFor(dir) },
       encoding: 'utf8',
     });
     assert.match(out, /obs-nested-note \[observation\]:/, 'observation hit is tier-labeled in the injected context');
@@ -223,7 +207,7 @@ test('absence: CORE_REASONING_ARM no longer forces the directive on a real hit (
 
 test('absence: an arbitrary CORE_REASONING_ARM value never crashes the hook — it is an ordinary unknown env var now', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-garbage-')));
-  const logFile = isolatedHooksLog();
+  const logFile = isolatedHooksLog(root);
   try {
     const child = runHookProcess('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'not-a-real-arm', CORE_HOOKS_LOG_FILE: logFile }, root);
     assert.equal(child.status, 0);
@@ -292,9 +276,7 @@ test('metrics-off automatic zero-hit still escalates (telemetry opt-out must not
 
 test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-wfail-')));
-  // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
-  // log can no longer live alongside the (os.tmpdir()-rooted) store fixture.
-  const logFile = isolatedHooksLog();
+  const logFile = isolatedHooksLog(root);
   try {
     // Force the legacy write path to fail: _sessions exists as a FILE.
     wf(join(root, '_sessions'), 'not a directory');
@@ -329,33 +311,22 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
   ];
   for (const b of branches) {
     const root = mkdtempSync(join(trustedTestTmpRoot(), `rh-recpt-${b.name}-`));
-    // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
-    // the log can no longer live alongside the (os.tmpdir()-rooted) store
-    // fixture — isolatedHooksLog() is rooted correctly and self-tracks cleanup.
-    const logFile = isolatedHooksLog();
+    let logFile;
     try {
       let store = root;
       if (b.storeless) { mkd(join(root, 'empty'), { recursive: true }); store = join(root, 'empty'); }
       else if (b.needStore !== false) makeStore(root);
       if (b.setup) b.setup(root);
-      // breakHookLog needs an unwritable path that still resolves inside the
-      // trusted ~/.core (else the gate silently substitutes the real
-      // default instead of hitting the write failure this branch tests for).
-      // Nested under `root` (already mkdtemp-unique) rather than a fixed
-      // name under the shared trusted-tmp root -- a fixed name collided
-      // under concurrent self-invocation (5 copies of this file at once
-      // all racing on the same path), a real EISDIR failure found while
-      // investigating a concurrency report, 2026-07-18.
-      const blockedParent = join(root, 'rh-blocked');
-      const effectiveLog = b.breakHookLog ? join(blockedParent, 'hooks-log.jsonl') : logFile;
-      if (b.breakHookLog) wf(blockedParent, 'not a directory');
+      logFile = isolatedHooksLog(store);
+      const effectiveLog = logFile;
+      if (b.breakHookLog) { mkd(dirname(logFile), { recursive: true }); mkd(logFile); }
       let run;
       if (b.directReceipt) {
         const prior = process.env.CORE_HOOKS_LOG_FILE;
         process.env.CORE_HOOKS_LOG_FILE = effectiveLog;
         try {
           const { receipt } = await import('../../plugins/core/skills/core/hooks/retrieve-context-hook.mjs');
-          receipt('failed', 'pipeline-error', { cwd: store });
+          receipt('failed', 'pipeline-error', { cwd: store, projectRoot: store });
           run = { stderr: '' };
         } finally {
           if (prior === undefined) delete process.env.CORE_HOOKS_LOG_FILE;
@@ -369,7 +340,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       // crash or not. Checked explicitly now rather than assumed from the
       // process merely producing output.
       if (!b.directReceipt) assert.equal(run.status, 0, `${b.name}: hook always exits 0 (fail-open), even on a genuine pipeline crash`);
-      const rawRows = ex(logFile) ? rf(logFile, 'utf8') : run.stderr;
+      const rawRows = !b.breakHookLog && ex(logFile) ? rf(logFile, 'utf8') : run.stderr;
       const rows = rawRows.trim().split('\n').map(l => JSON.parse(l)).filter(r => r.hook === 'retrieve-context');
       assert.equal(rows.length, 1, `${b.name}: exactly one terminal row`);
       assert.equal(rows[0].action, b.expect.action, `${b.name}: action`);
@@ -383,8 +354,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
 
 test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked telemetry)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-recpt-optout2-')));
-  // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
-  const logFile = isolatedHooksLog();
+  const logFile = isolatedHooksLog(root);
   try {
     runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile }, root);
     assert.equal(readEventRows(root).length, 0, 'no retrieval row when metrics are off');
@@ -399,7 +369,7 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
 // through the real subprocess path here, not just the library call.
 test('every terminal receipt carries the packaged producer identity from the plugin manifest', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-producer-')));
-  const logFile = isolatedHooksLog();
+  const logFile = isolatedHooksLog(root);
   try {
     runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile }, root);
     const rows = rf(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.hook === 'retrieve-context');
@@ -424,7 +394,7 @@ test('absence: no pending marker and no outcome row — the outcome pipeline is 
         // Strip ambient harness signals, declare claude-code explicitly, so
         // the result is identical anywhere `node --test` runs.
         CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
-        CLAUDECODE: '1', CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+        CLAUDECODE: '1', CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(root),
         ...registryEnvFor(root),
       },
       encoding: 'utf8',
@@ -527,12 +497,15 @@ test('a cloned repo with a planted _memories/ is NOT injected: a folder authoriz
     const other = mkdtempSync(join(tmpdir(), 'rh-other-'));
     const out = runHook('widget decision', { ...registryEnvFor(other) }, root);
     assert.equal(out, '', 'nothing is injected for an unregistered folder');
-    const logFile = isolatedHooksLog();
+    const logFile = isolatedHooksLog(root);
     const r = runHookProcess('widget decision', { ...registryEnvFor(other), CORE_HOOKS_LOG_FILE: logFile }, root);
     assert.equal(r.status, 0, 'and the hook still exits 0');
-    const row = JSON.parse(rf(logFile, 'utf8').trim().split('\n').pop());
-    assert.equal(row.action, 'skip', 'an unregistered folder is an expected skip, not a failure');
-    assert.equal(row.reason, 'not-registered-workspace', 'and the receipt names why (a reason outside the closed vocabulary would be coerced to a failed pipeline-error)');
+    assert.equal(ex(logFile), false, 'an unregistered folder receives no local artifact');
+    const row = JSON.parse(r.stderr.trim().split('\n').pop());
+    assert.equal(row.reason, 'hook-log-write-failed');
+    assert.equal(row.error_code, 'hook-log-project-required');
+    assert.equal(row.intended_action, 'skip');
+    assert.equal(row.intended_reason, 'not-registered-workspace');
     rmSync(other, { recursive: true, force: true });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -545,4 +518,22 @@ test('a registered project is injected, and so is a session started in one of it
     assert.match(runHook('widget decision', {}, root), /dc-1-widget/, 'the project root');
     assert.match(runHook('widget decision', { ...registryEnvFor(root) }, sub), /dc-1-widget/, 'a subfolder retrieves from the project root');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a migration fence stops retrieval and its receipt names the real reason, not pipeline-error', { skip: process.platform === 'win32' }, async () => {
+  const { symlinkSync, existsSync: ex2, readFileSync: rf } = await import('node:fs');
+  for (const [shape, expected] of [['marker', 'migration-in-progress'], ['linked state', 'state-untrusted']]) {
+    const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-fence-')));
+    try {
+      if (shape === 'marker') { mkd(join(root, '_core', 'claude-code'), { recursive: true }); wf(join(root, '_core', 'claude-code', '.migrating'), ''); }
+      else { const other = mkdtempSync(join(tmpdir(), 'rh-fence-other-')); symlinkSync(other, join(root, '_core')); }
+      const r = runHookProcess('widget decision', {}, root);
+      assert.equal(r.status, 0);
+      assert.doesNotMatch(r.stdout, /dc-1-widget/, `${shape}: nothing retrieved`);
+      const log = isolatedHooksLog(root);
+      const lines = (ex2(log) ? rf(log, 'utf8') : r.stderr).trim().split('\n').filter((l) => l.startsWith('{'));
+      const row = JSON.parse(lines.pop());
+      assert.ok(row.reason === expected || row.intended_reason === expected, `${shape}: ${JSON.stringify(row)}`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });

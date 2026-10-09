@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * lifecycle-detect.mjs — the lifecycle REPORTING preflight and the CORE
- * creation-baseline seam.
+ * creation-baseline seam, plus an explicit old-evidence importer.
  *
- * TWO honest jobs, and no more:
+ * THREE explicit jobs:
  *
  *   1. REPORTING preflight (`detectStore`/`classifyFileLifecycle`). Runs at
  *      startup / `/process-memory` / `/finalize` / close catch-up and returns a
@@ -46,6 +46,15 @@
  *      is deliberately not automatic and not silent: run it once, on purpose,
  *      when adopting a pre-existing store into this stamping regime.
  *
+ *   3. LEGACY EVIDENCE TRANSFER (`--import-legacy-cache`). Dry-run by default;
+ *      explicit --apply copies accepted OLD stamps, preserving local own keys
+ *      and the source. It never stamps current content. Receipts cover the
+ *      declared lexical keys only; cross-spelling consumption remains open.
+ *      Transfer verification and selected-key coverage are independent. A
+ *      verified transfer with held coverage is still held/exit3 on local-only
+ *      rerun. Interrupted transfer uses explicit --recover [--apply], per-key
+ *      checks and source snapshot verification, preserving newer local stamps.
+ *
  * Per-file classification (the point-1 enum):
  *   clean          — matches the last CORE baseline byte-for-byte.
  *   generated-only — only the marker-delimited generated region changed
@@ -74,6 +83,7 @@
  *   node lifecycle-detect.mjs <project> [--record-session-start <id>] [--json]
  *   node lifecycle-detect.mjs <project> --stamp-created <path> [--kind unit|project] [--by <label>]
  *   node lifecycle-detect.mjs <project> --adopt-existing-store [--apply] [--json]
+ *   node lifecycle-detect.mjs <project> --import-legacy-cache [--apply] [--recover] [--json]
  *     --record-session-start <id>  Snapshot which user-sensitive files exist NOW
  *                                  (diagnostic hint only — see above).
  *     --stamp-created <path>       Establish the first CORE-authored baseline for
@@ -87,10 +97,12 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE } from './state-cache.mjs';
+import { readProjectCache, hashText, stampFile, importLegacyProjectCache, CACHE_CORRUPT, CACHE_UNREADABLE, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, storeBoundaryProblem } from './generate-summary-index.mjs';
+import { ensureLibDir } from './store-ignores.mjs';
 
 // ---------- session-start inventory (diagnostic only, non-authoritative) ----------
 
@@ -104,6 +116,7 @@ export function sessionInventoryPath(projectDir) {
  * annotation on a no-baseline file). No safety decision depends on it.
  */
 export function readSessionInventory(projectDir) {
+  if (storeBoundaryProblem(projectDir)) return null;
   try {
     const inv = JSON.parse(readFileSync(sessionInventoryPath(projectDir), 'utf8'));
     if (inv && typeof inv === 'object' && Array.isArray(inv.paths)) return inv;
@@ -152,7 +165,8 @@ export function inventoryPaths(projectDir) {
 export function recordSessionStart(projectDir, { sessionId = null, now = new Date().toISOString() } = {}) {
   const inv = { session: sessionId, started_at: now, paths: inventoryPaths(projectDir) };
   const path = sessionInventoryPath(projectDir);
-  mkdirSync(dirname(path), { recursive: true });
+  assertStoreBoundary(projectDir);
+  ensureLibDir(resolve(projectDir));
   atomicWriteFileSync(path, JSON.stringify(inv, null, 2) + '\n');
   return inv;
 }
@@ -329,9 +343,11 @@ export function adoptExistingStore(projectDir, { apply = false, now, home } = {}
 
   const stamped = [];
   const failed = [];
+  const stampOutcomes = [];
   for (const f of candidates) {
     const kind = resolve(f.path) === pmPath ? 'project' : 'unit';
     const outcome = stampCreatedBaseline(root, f.path, { kind, lastWrittenBy: 'adopt-existing-store', now, home });
+    stampOutcomes.push({ ...outcome, path: f.path });
     if (outcome && outcome.stamped === false) {
       failed.push({ path: f.path, outcome: outcome.outcome, reason: outcome.reason });
     } else {
@@ -346,6 +362,7 @@ export function adoptExistingStore(projectDir, { apply = false, now, home } = {}
     stamped_count: stamped.length,
     stamped,
     failed,
+    stamp_outcomes: stampOutcomes,
   };
 }
 
@@ -366,30 +383,47 @@ function main(argv) {
   }
   const projectDir = resolve(positionals[0] || process.cwd());
 
+  if (flags.has('import-legacy-cache')) {
+    const conflicts = opts.record !== undefined || opts.stampCreated !== undefined || flags.has('adopt-existing-store');
+    const report = conflicts ? { status: 'held', reason: 'conflicting-lifecycle-actions', imported_count: 0 }
+      : importLegacyProjectCache(projectDir, { apply: flags.has('apply'), recover: flags.has('recover') });
+    if (flags.has('json')) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    else {
+      process.stdout.write(`lifecycle-detect: legacy baseline import ${report.status}${report.noop ? ' (local-only no-op)' : ''}; ${report.imported_count ?? 'unknown'} stamps transferred.\n`);
+      if (report.eligible_count !== undefined) process.stdout.write(`  dry-run: ${report.eligible_count} eligible old stamps; no cache writes.\n`);
+      process.stdout.write(`  key scope: ${report.coverage_scope || 'exact-lexical-keys'} at ${report.key_root || projectDir}; physical-project/cross-spelling coverage not evaluated.\n`);
+      if (report.status === 'held') process.stderr.write(`  import held: ${report.reason || report.coverage || 'selected evidence unavailable'}; ${(report.held || []).length} held entries. Preserve local/source evidence.\n`);
+    }
+    return report.status === 'held' || report.recovery ? 3 : 0;
+  }
+
   // Creation-baseline stamp: establish the first CORE-authored baseline for a
-  // file the agent just wrote (graduation / PROJECT.md render). Exits nonzero if
-  // the stamp could not land, so a caller sees the attribution-unknown state.
+  // file the agent just wrote (graduation / PROJECT.md render). Preserve the
+  // material stamp and return nonzero when stamping or cleanup needs recovery.
   if (opts.stampCreated !== undefined) {
     const target = resolve(projectDir, opts.stampCreated);
     const kind = opts.kind === 'project' ? 'project' : 'unit';
     const outcome = stampCreatedBaseline(projectDir, target, { kind, lastWrittenBy: opts.by || undefined });
-    if (outcome && outcome.stamped === false) {
-      process.stderr.write(`lifecycle-detect: stamp-created FAILED for ${basename(target)} (${outcome.outcome}: ${outcome.reason}) — attribution unknown, recovery required.\n`);
-      return 1;
-    }
+    const needsRecovery = stampNeedsRecovery(outcome);
+    if (needsRecovery) process.stderr.write(`lifecycle-detect: ${basename(target)}: ${stampRecoveryMessage(outcome)}.\n`);
     if (!flags.has('json')) {
-      process.stdout.write(`lifecycle-detect: stamped creation baseline for ${basename(target)} (kind: ${kind}).\n`);
+      process.stdout.write(outcome.stamped
+        ? `lifecycle-detect: stamped creation baseline for ${basename(target)} (kind: ${kind}).\n`
+        : `lifecycle-detect: creation baseline did not land for ${basename(target)} (kind: ${kind}).\n`);
     } else {
-      process.stdout.write(JSON.stringify({ stamped: true, path: target, kind }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ stamped: outcome.stamped, path: target, kind, stampOutcome: outcome }, null, 2) + '\n');
     }
-    return 0;
+    return needsRecovery ? 1 : 0;
   }
 
   // One-time batch adoption: dry-run by default, stamps only with --apply.
   if (flags.has('adopt-existing-store')) {
     const report = adoptExistingStore(projectDir, { apply: flags.has('apply') });
+    const recoveryOutcomes = (report.stamp_outcomes || []).filter(stampNeedsRecovery);
     if (flags.has('json')) {
       process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    } else if (report.refused_reason) {
+      process.stdout.write(`lifecycle-detect: adoption refused (${report.refused_reason}; baseline ${report.baseline_status}).\n`);
     } else if (!report.applied) {
       process.stdout.write(report.candidate_count
         ? `lifecycle-detect: DRY RUN — ${report.candidate_count} file(s) would be adopted (re-run with --apply):\n${report.candidates.map(p => `  ${basename(p)}`).join('\n')}\n`
@@ -398,10 +432,11 @@ function main(argv) {
       process.stdout.write(`lifecycle-detect: adopted ${report.stamped_count}/${report.candidate_count} file(s) as of today's bytes.\n`);
       if (report.failed.length) {
         process.stdout.write(`  FAILED (attribution unknown, recovery required): ${report.failed.map(f => basename(f.path)).join(', ')}\n`);
-        return 1;
       }
     }
-    return 0;
+    if (report.refused_reason) process.stderr.write(`lifecycle-detect: adoption refused (${report.refused_reason}); preserve and inspect the existing baseline.\n`);
+    for (const o of recoveryOutcomes) process.stderr.write(`lifecycle-detect: ${basename(o.path)}: ${stampRecoveryMessage(o)}.\n`);
+    return report.refused_reason || (report.failed || []).length || recoveryOutcomes.length ? 1 : 0;
   }
 
   if (opts.record !== undefined) {

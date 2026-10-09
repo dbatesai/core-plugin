@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 /** Finding 6: opt-out suppresses automatic metrics writes; write failures stay visible. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +19,7 @@ function fixture(t) {
   const home = join(root, 'home');
   const project = join(root, 'project');
   mkdirSync(home);
+  registerFixtureProject(home, project);
   mkdirSync(join(project, '_memories'), { recursive: true });
   writeFileSync(join(project, '_memories', 'unit-1.md'), '---\nid: unit-1\ntype: decision\n---\n# Synthetic decision\n');
   // HOME alone does not isolate CORE's trusted OS-account home. Keep the shim
@@ -180,8 +182,24 @@ test('classified append failure is non-OK and reports zero confirmed written rec
   assert.equal(result.status, 'WRITE_FAILED');
   assert.equal(result.written, false);
   assert.equal(result.written_records, 0);
-  assert.match(result.error_code, /^(EISDIR|EACCES|EPERM)$/);
+  // A folder where the day file belongs is refused by the leaf check before the append (FILE_UNSAFE).
+  assert.match(result.error_code, /^(FILE_UNSAFE|EISDIR|EACCES|EPERM)$/);
   assert.equal(result.total, 1, 'classification result is retained separately from persistence');
+});
+
+test('a classified day file that is a link is not appended through', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const result = f.evaluate(classificationSetup() + `
+    const outside=join(home,'outside.jsonl');
+    fs.writeFileSync(outside,'kept\\n');
+    fs.symlinkSync(outside,classifiedFile);
+    ${runClassification}
+    console.log(JSON.stringify({result,outside:fs.readFileSync(outside,'utf8')}));
+  `);
+  assert.equal(result.result.status, 'WRITE_FAILED');
+  assert.equal(result.result.written_records, 0);
+  assert.equal(result.result.error_code, 'FILE_UNSAFE');
+  assert.equal(result.outside, 'kept\n', 'the file the link points to is untouched');
 });
 
 test('a later classified append failure reports only the successfully written prefix', t => {

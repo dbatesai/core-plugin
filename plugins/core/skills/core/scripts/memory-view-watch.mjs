@@ -69,6 +69,8 @@ import { join, resolve, dirname } from 'node:path';
 import { collectUnits } from './render-browse-artifact.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { isAccountCorePayloadPath, requireTrustedHome } from './trusted-home.mjs';
+import { LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 
 export const DEFAULT_DEBOUNCE_MS = 250;
 export const DEFAULT_SWEEP_INTERVAL_MS = 300000; // 5 min
@@ -240,8 +242,10 @@ export function readLiveState(path) {
 export function writeLiveState(path, {
   artifactUrl, scope, excludeTopics = [], baselineSnapshot,
   publishCount = 0, windowStart = null, retryAt = null,
-  grantBasis = null, now = () => new Date(),
+  grantBasis = null, now = () => new Date(), home = requireTrustedHome(),
 } = {}) {
+  // A path kept from before the state folder was renamed would recreate `.core` beside `_core`.
+  if (String(path).split(/[\\/]/).includes(LEGACY_STATE_DIRNAME)) throw Object.assign(new Error(`not stored: the live-state path is inside a .core folder; resolve it again with index-registry.mjs path`), { code: "STATE_NO_PROJECT_PLACE" });
   if (!artifactUrl) throw new Error('--write-live-state requires --artifact-url');
   if (!WATCH_SCOPES.includes(scope)) throw new Error(`--write-live-state requires --scope ${WATCH_SCOPES.join('|')}`);
   if (!baselineSnapshot) throw new Error('--write-live-state requires --baseline-snapshot');
@@ -275,6 +279,10 @@ export function writeLiveState(path, {
   };
   assertLiveState(record); // same schema check the reader boundary applies
   const abs = resolve(path);
+  if (isAccountCorePayloadPath(abs, { home })) {
+    throw Object.assign(new Error('not stored: live-state is outside the project; existing grant and budget were preserved'),
+      { code: 'STATE_NO_PROJECT_PLACE', reason: 'historical-live-state-outside-project' });
+  }
   mkdirSync(dirname(abs), { recursive: true });
   atomicWriteFileSync(abs, JSON.stringify(record, null, 2) + '\n');
   return record;

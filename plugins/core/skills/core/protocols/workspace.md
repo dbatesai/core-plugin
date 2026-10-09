@@ -10,7 +10,7 @@ Read this when creating a new workspace, winding one down, or handling a project
 
 ## What the workspace is, and what it isn't
 
-The delivery workspace is your **operational state** for the project — how you've been working on it. It lives inside the project at `<project>/.core/<harness>/`, one subfolder per harness, ignored by git and trusted only when its stamp verifies. It holds the manifest, cross-session observations, pointers to session logs, the swarm-narrative log. Because it's inside the project, it moves, backs up, and is deleted with the project; a copy of the folder starts with fresh state.
+The delivery workspace is your **operational state** for the project — how you've been working on it. It lives inside the project at `<project>/_core/<harness>/`, one subfolder per harness, ignored by git and trusted only when its stamp verifies. It holds the manifest, cross-session observations, pointers to session logs, the swarm-narrative log. Because it's inside the project, it moves, backs up, and is deleted with the project; a copy of the folder starts with fresh state.
 
 **Project facts don't live here.** They live in `<project>/PROJECT.md` (rendered six-section view) and `<project>/_memories/` (canonical units). PROJECT.md is the user's editable surface; the workspace folder is operational only. When the two disagree, PROJECT.md wins because the user controls it.
 
@@ -66,5 +66,5 @@ When the user indicates completion:
 
 1. Present objective status from PROJECT.md — deliverables done/outstanding, open moves, remaining risks, quality assessment.
 2. Run a retrospective scaled to project complexity.
-3. Promote generalizable learnings — patterns that apply across projects — to `~/.core/agent-profile.md §Cross-Project Learnings`. Never promote project-specific facts to the profile; those stay in PROJECT.md.
+3. Promote generalizable learnings — patterns that apply across projects — to `<project>/_core/_agent/agent-profile.md §Cross-Project Learnings`. Never promote project-specific facts to the profile; those stay in PROJECT.md.
 4. PROJECT.md is the durable record of what happened on this project. The workspace's manifest + swarm-narrative can carry operational observations about how the work was run, but the project's story lives in PROJECT.md.

@@ -40,37 +40,45 @@ import { spawn } from 'node:child_process';
 import { resolveRegisteredRoot, shouldEnqueueClose } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
+import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
 // resumption; closing then is premature (startup catch-up re-detects on resume).
 const SKIP_REASONS = new Set(['resume']);
+// How long SessionEnd waits to learn whether its close child started.
+const SPAWN_CONFIRM_MS = Number(process.env.CORE_CLOSE_SPAWN_CONFIRM_MS) > 0 ? Number(process.env.CORE_CLOSE_SPAWN_CONFIRM_MS) : 2000;
 
 
 function main() {
-  // Guard 1 — environment suppression: a close already owns this environment. No-op.
-  if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
-    return 0;
-  }
-  // Guard 2 — kill switch: auto-close disabled.
-  if (process.env.CORE_AUTO_CLOSE === '0') {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'kill-switch' });
-    return 0;
-  }
-
   let payload = {};
   let raw = '';
   try { raw = readFileSync(0, 'utf8'); } catch { raw = ''; }
   if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
+  // A project-only folder has no automatic close (its next startup says so): exit before the
+  // registry gate and the logger.
+  if (projectOnlyHint(payload.cwd || process.cwd())) return 0;
+  const receiptCwd = resolve(payload.cwd || process.cwd());
+  const logContext = { cwd: receiptCwd, projectRoot: resolveRegisteredRoot(receiptCwd) };
+
+  // Guard 1 — environment suppression: a close already owns this environment. No-op.
+  if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
+    logHookEvent({ ...logContext, hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
+    return 0;
+  }
+  // Guard 2 — kill switch: auto-close disabled.
+  if (process.env.CORE_AUTO_CLOSE === '0') {
+    logHookEvent({ ...logContext, hook: 'session-end', action: 'skip', reason: 'kill-switch' });
+    return 0;
+  }
 
   const reason = String(payload.reason || '');
   if (SKIP_REASONS.has(reason)) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'session-reason=' + reason });
+    logHookEvent({ ...logContext, hook: 'session-end', action: 'skip', reason: 'session-reason=' + reason });
     return 0;
   }
 
   // Canonicalize (realpath) then require a REGISTERED CORE project before spawning anything.
-  // Security: a generic `_memories/` dir or a `.core/` folder is not proof; the ~/.core
+  // Security: a generic `_memories/` dir or a `_core/` folder is not proof; the ~/.core
   // registry is the trust anchor an attacker can't plant from inside a project dir.
   // A session in a plain subfolder closes its registered project; one inside a nested
   // `.git` (worktree, vendored clone) closes nothing.
@@ -78,32 +86,40 @@ function main() {
   try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
   const store = resolveRegisteredRoot(cwd);
   if (!store) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd });
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd, projectRoot: null });
     return 0;
   }
 
   // Guard 4 — the exact-session decision (pure; see decideCloseAction below).
   const decision = decideCloseAction(payload, { store });
   if (decision.action === 'skip') {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: decision.reason, cwd: store });
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: decision.reason, cwd: store, projectRoot: store });
     return 0;
   }
 
   // Spawn the DETERMINISTIC close for THIS EXACT SESSION. Detached + unref() so it
   // survives our exit; auth-strip and output logging live inside the runner.
-  try {
-    const child = spawn('node', decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' });
-    child.unref();
-    logHookEvent({
-      hook: 'session-end', action: 'spawn',
-      reason: 'session-reason=' + (reason || 'unknown'),
-      cwd: store, session: decision.sessionId,
+  // A launch can fail after spawn() returns (the executable is missing, a resource limit): that
+  // arrives as an 'error' event, not a throw. The receipt says `spawn` only once the child has
+  // actually started, and `spawn-failed` with the reason otherwise. The runner is this same Node
+  // binary, by its own path, so a PATH without `node` cannot lose it. Never blocks the exit.
+  return new Promise((done) => {
+    // One launch, one receipt: whichever of started / errored / no confirmation comes first settles
+    // it. The process exits as soon as it settles, so a later event has nowhere to land; the flag
+    // keeps that true if this is ever called without exiting.
+    let settled = false; let timer = null;
+    const settle = (row) => { if (settled) return; settled = true; clearTimeout(timer); logHookEvent(row); done(0); };
+    const failed = (why) => settle({ hook: 'session-end', action: 'spawn-failed', reason: String(why || 'error'), cwd: store, projectRoot: store, session: decision.sessionId });
+    let child;
+    try { child = spawn(process.execPath, decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' }); }
+    catch (e) { return failed(e?.code || e?.message); }
+    timer = setTimeout(() => failed('no-spawn-confirmation'), SPAWN_CONFIRM_MS);
+    child.once('error', (e) => failed(e?.code || e?.message));
+    child.once('spawn', () => {
+      try { child.unref(); } catch { /* already gone */ }
+      settle({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store, projectRoot: store, session: decision.sessionId });
     });
-  } catch {
-    // node/runner unavailable, or spawn failed — startup catch-up covers it. Never block exit.
-    logHookEvent({ hook: 'session-end', action: 'spawn-failed', cwd: store });
-  }
-  return 0;
+  });
 }
 
 /**
@@ -149,5 +165,5 @@ export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
 // Only run as the hook entry — importing this module (tests import decideCloseAction) must
 // NOT execute main() / process.exit().
 if (isCliEntry(import.meta.url)) {
-  try { process.exit(main() || 0); } catch { process.exit(0); }
+  Promise.resolve().then(main).then((code) => process.exit(code || 0), () => process.exit(0));
 }

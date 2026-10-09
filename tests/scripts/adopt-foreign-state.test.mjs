@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 // Adopting another install's CORE state: a project restored from backup onto a new
 // machine or path is offered once; yes carries its history, no touches nothing.
 import { test } from 'node:test';
@@ -6,13 +8,13 @@ import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, cpSync, statSync, existsSync, symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { registerProject, recordBootstrap, readBootstrapRecord, main as registryMain } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import {
-  readManifest, updateManifest, classifyStamp, adoptionCandidate, adoptForeignState,
+  readManifest, updateManifest, classifyStamp, adoptionCandidate, adoptForeignState, localStateDir, writeSignedFile, stateDir,
 } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -45,14 +47,15 @@ function treeHashes(dir) {
 }
 
 /** A project that lived under install A, then its archive restored at a new path under install B. */
-function restoredProject(s, manifestFields = { agent_name: 'Wren' }) {
+function restoredProject(s, manifestFields = { agent_name: 'Wren' }, sibling = false) {
   const homeA = s.home('homeA');
   const coreA = join(homeA, '.core');
   const original = s.mk('Old', 'Garden');
   registerProject(coreA, original);
   const m = updateManifest({ root: original, harness: H, coreDir: coreA, fields: manifestFields });
   recordBootstrap(coreA, { root: original, harness: H, sessionStartedAt: '2026-09-20T10:00:00Z' });
-  writeFileSync(join(original, '.core', H, 'capability-history.jsonl'), '{"row":1}\n{"row":2}\n');
+  writeFileSync(join(original, '_core', H, 'capability-history.jsonl'), '{"row":1}\n{"row":2}\n');
+  if (sibling) updateManifest({root:original, harness:'codex', coreDir:coreA, fields:{agent_name:'Synthetic sibling'}});
   const homeB = s.home('homeB');
   const coreB = join(homeB, '.core');
   const restored = join(s.base, 'New', 'Garden');
@@ -76,7 +79,7 @@ test('restore, yes: history, project_id and agent_name carry over, and the signe
     assert.equal(m.project_id, project_id);
     assert.equal(m.agent_name, 'Wren');
     assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'completion evidence from another install is not carried: startup runs in full here');
-    assert.equal(readFileSync(join(restored, '.core', H, 'capability-history.jsonl'), 'utf8'), '{"row":1}\n{"row":2}\n');
+    assert.equal(readFileSync(join(restored, '_core', H, 'capability-history.jsonl'), 'utf8'), '{"row":1}\n{"row":2}\n');
     assert.equal(registerProject(coreB, restored).action, 'registered');
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'asked once');
     assert.equal(checkMetricsDisclosure({ projectDir: restored, home: homeB, env: ENV }).shown, true, 'the notice shows again on this machine');
@@ -88,8 +91,8 @@ test('restore, yes: a fabricated unsigned bootstrap record is not promoted to ve
   try {
     const { coreB, restored } = restoredProject(s);
     const now = new Date().toISOString();
-    writeFileSync(join(restored, '.core', H, 'last-bootstrap.json'), JSON.stringify({ session_started_at: now, bootstrap_completed_at: now }));
-    rmSync(join(restored, '.core', H, 'last-bootstrap.json.mac'), { force: true });
+    writeFileSync(join(restored, '_core', H, 'last-bootstrap.json'), JSON.stringify({ session_started_at: now, bootstrap_completed_at: now }));
+    rmSync(join(restored, '_core', H, 'last-bootstrap.json.mac'), { force: true });
     assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'unsigned before adoption');
     assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
     assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'still not evidence after adoption: startup is owed');
@@ -100,14 +103,14 @@ test('restore, no: nothing is read, the foreign files stay byte-identical, and i
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
-    const before = treeHashes(join(restored, '.core'));
+    const before = treeHashes(join(restored, '_core'));
     assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'no' }).status, 'declined');
-    assert.deepEqual(treeHashes(join(restored, '.core')), before);
+    assert.deepEqual(treeHashes(join(restored, '_core')), before);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }), null, 'the foreign manifest is not read');
     assert.equal(registerProject(coreB, restored, { offerAdopt: true, harness: H }).action, 'new', 'register proceeds normally after a no');
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }), null, 'still not read once registered');
-    assert.deepEqual(treeHashes(join(restored, '.core')), before);
+    assert.deepEqual(treeHashes(join(restored, '_core')), before);
   } finally { s.cleanup(); }
 });
 
@@ -159,7 +162,9 @@ test("this machine's own opt-out for the folder survives adopting a manifest tha
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
-    updateManifest({ root: restored, harness: H, coreDir: coreB, fields: { metrics_enabled: false } });
+    const local = localStateDir({root:restored, harness:H, coreDir:coreB});
+    mkdirSync(local, {recursive:true});
+    writeSignedFile({dir:local, name:'workspace.json', body:JSON.stringify({metrics_enabled:false}), coreDir:coreB});
     adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }).metrics_enabled, false);
   } finally { s.cleanup(); }
@@ -175,7 +180,9 @@ test('the turn-evidence opt-out carries through adoption from either side: the a
   const t = sandbox();
   try {
     const { coreB, restored } = restoredProject(t);
-    updateManifest({ root: restored, harness: H, coreDir: coreB, fields: { turn_capture: false } });
+    const local = localStateDir({root:restored, harness:H, coreDir:coreB});
+    mkdirSync(local, {recursive:true});
+    writeSignedFile({dir:local, name:'workspace.json', body:JSON.stringify({turn_capture:false}), coreDir:coreB});
     adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }).turn_capture, false);
   } finally { t.cleanup(); }
@@ -185,9 +192,9 @@ test('an unparseable manifest is set aside on yes, not adopted', () => {
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
-    writeFileSync(join(restored, '.core', H, 'workspace.json'), '{not json');
+    writeFileSync(join(restored, '_core', H, 'workspace.json'), '{not json');
     assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
-    assert.ok(readdirSync(join(restored, '.core', H)).some((n) => n.startsWith('workspace.json.unparseable-')));
+    assert.ok(readdirSync(join(restored, '_core', H)).some((n) => n.startsWith('workspace.json.unparseable-')));
     const m = readManifest({ root: restored, harness: H, coreDir: coreB });
     assert.equal(m, null, 'no manifest was adopted');
   } finally { s.cleanup(); }
@@ -209,7 +216,7 @@ test('a stamp git tracks (committed state, not a restore) is never an adoption c
   try {
     const { coreB, restored } = restoredProject(s);
     assert.equal(spawnSync('git', ['-C', restored, 'init', '-q']).status, 0);
-    assert.equal(spawnSync('git', ['-C', restored, 'add', '-f', '.core/claude-code/stamp']).status, 0);
+    assert.equal(spawnSync('git', ['-C', restored, 'add', '-f', '_core/claude-code/stamp']).status, 0);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
@@ -249,9 +256,9 @@ test('a symlinked .core is never an adoption candidate', () => {
   try {
     const { coreB, restored } = restoredProject(s);
     const elsewhere = join(s.base, 'Elsewhere');
-    cpSync(join(restored, '.core'), elsewhere, { recursive: true });
-    rmSync(join(restored, '.core'), { recursive: true, force: true });
-    symlinkSync(elsewhere, join(restored, '.core'), DIR_LINK);
+    cpSync(join(restored, '_core'), elsewhere, { recursive: true });
+    rmSync(join(restored, '_core'), { recursive: true, force: true });
+    symlinkSync(elsewhere, join(restored, '_core'), DIR_LINK);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
@@ -286,7 +293,7 @@ test('the home folder is never offered for adoption, even holding a foreign stam
     const { homeB, coreB, restored } = restoredProject(s);
     const homeState = join(homeB, '.core', H);
     mkdirSync(homeState, { recursive: true });
-    writeFileSync(join(homeState, 'stamp'), readFileSync(join(restored, '.core', H, 'stamp')));
+    writeFileSync(join(homeState, 'stamp'), readFileSync(join(restored, '_core', H, 'stamp')));
     assert.equal(adoptionCandidate({ root: homeB, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
@@ -306,7 +313,7 @@ test('a hand-built hostile stamp (never written by a real install) is offered wi
     const homeB = s.home('homeB');
     const coreB = join(homeB, '.core');
     const target = s.mk('Target', 'Folder');
-    const harnessDir = join(target, '.core', H);
+    const harnessDir = join(target, '_core', H);
     mkdirSync(harnessDir, { recursive: true });
 
     const hostileStamp = {
@@ -334,5 +341,83 @@ test('a hand-built hostile stamp (never written by a real install) is offered wi
     assert.equal(m.agent_name, 'Mallory', 'agent_name is inert display data, carried over by design');
     assert.equal('metrics_enabled' in m, false, 'a hostile opt-in from a fully fabricated source is dropped, same as a copied one');
     assert.deepEqual(Object.keys(m).sort(), ['agent_name', 'harness', 'project_id'], 'the carry-over is allowlisted: no unexpected key from a hostile manifest survives signing, even one shaped like a future trust flag');
+  } finally { s.cleanup(); }
+});
+
+
+test('the narrow account-local adoption exception writes consent/recovery records, while fresh payload writers still refuse', () => {
+  const observed = [];
+  for (const decision of ['no', 'yes']) {
+    const s = sandbox();
+    const originals = Object.fromEntries(['writeFileSync', 'appendFileSync', 'renameSync'].map(name => [name, fs[name]]));
+    try {
+      const {coreB, restored} = restoredProject(s, {agent_name:'Synthetic restore'}, true);
+      const localRoot = join(coreB, 'local');
+      for (const name of Object.keys(originals)) fs[name] = (...args) => {
+        const destinations = name === 'renameSync' ? [args[0], args[1]] : [args[0]];
+        for (const path of destinations) if (typeof path === 'string' && path.startsWith(localRoot + sep)) observed.push(relative(localRoot, path).split(sep).join('/'));
+        return originals[name](...args);
+      };
+      syncBuiltinESMExports();
+      assert.equal(adoptForeignState({root:restored, harness:H, coreDir:coreB, decision}).status, decision === 'yes' ? 'adopted' : 'declined');
+      const before = treeHashes(localRoot);
+      const fresh = s.mk('Fresh', 'Unregistered');
+      assert.throws(() => stateDir({root:fresh, harness:H, coreDir:coreB, forWrite:true}), error => error.code === 'STATE_NO_PROJECT_PLACE');
+      assert.deepEqual(treeHashes(localRoot), before, 'a refused current payload writer does not reuse the consent exception');
+      if (decision === 'yes') assert.ok(!Object.keys(before).some(name => name.includes('pending-adopt-')), 'the completed recovery plan is removed');
+    } finally {
+      for (const [name, fn] of Object.entries(originals)) fs[name] = fn;
+      syncBuiltinESMExports();
+      s.cleanup();
+    }
+  }
+  assert.ok(observed.some(path => path.endsWith('/declined-adopt')), 'actual refusal stamp observed');
+  assert.ok(observed.some(path => path.endsWith('/adopted-sibling-stamps')), 'actual sibling consent hashes observed');
+  assert.ok(observed.some(path => path.endsWith('/pending-adopt-claude-code.json')), 'actual interrupted-recovery plan observed');
+  assert.ok(observed.some(path => /\/pending-adopt-claude-code\.json\.tmp-/.test(path)), 'actual atomic companion observed');
+  assert.ok(observed.every(path => /^[^/]+\/(declined-adopt|adopted-sibling-stamps|pending-adopt-claude-code\.json|pending-adopt-claude-code\.json\.tmp-[^/]+)$/.test(path)), JSON.stringify(observed));
+});
+
+test('a restored project with an unfinished migration is not offered, and a yes is held: nothing archived, re-stamped or registered; without the marker adoption works as before', () => {
+  for (const fenced of [true, false]) {
+    const s = sandbox();
+    try {
+      const { coreB, restored } = restoredProject(s);
+      if (fenced) writeFileSync(join(restored, '_core', H, '.migrating'), '');
+      const before = treeHashes(join(restored, '_core'));
+      const registryBefore = fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null;
+      if (fenced) {
+        assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'not offered while fenced');
+        const r = adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
+        assert.equal(r.status, 'held'); assert.equal(r.reason, 'migration-in-progress');
+        assert.deepEqual(treeHashes(join(restored, '_core')), before, 'marker, foreign stamp and files exactly as found');
+        assert.equal(fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null, registryBefore, 'nothing registered');
+        const reg = registerProject(coreB, restored, { offerAdopt: true, harness: H });
+        assert.deepEqual([reg.action, reg.reason], ['held', 'migration-in-progress'], 'registration is held, not new');
+        assert.equal(fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null, registryBefore, 'still nothing registered');
+        assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'no' }).status, 'declined', 'a no is recorded while fenced');
+        assert.deepEqual(treeHashes(join(restored, '_core')), before, 'the no touched nothing in the project');
+        fs.rmSync(join(restored, '_core', H, '.migrating'));
+        assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'the no is remembered once the marker clears');
+      } else {
+        assert.ok(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), 'control: offered');
+        assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
+      }
+    } finally { s.cleanup(); }
+  }
+});
+
+test('an interrupted adoption whose plan names the archive under the older .core resumes after the rename', async () => {
+  const { localRootKey } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredProject(s);
+    const real = realpathSync(restored);
+    mkdirSync(join(real, '_core', H, 'superseded', 'adopted-1'), { recursive: true });
+    const plan = join(coreB, 'local', localRootKey(real), `pending-adopt-${H}.json`);
+    mkdirSync(join(plan, '..'), { recursive: true });
+    writeFileSync(plan, JSON.stringify({ archive: join(real, '.core', H, 'superseded', 'adopted-1'), oldPath: '/elsewhere' }));
+    const cand = adoptionCandidate({ root: restored, harness: H, coreDir: coreB });
+    assert.equal(cand?.resume?.archive, join(real, '_core', H, 'superseded', 'adopted-1'));
   } finally { s.cleanup(); }
 });

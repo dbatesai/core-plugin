@@ -65,7 +65,7 @@ When the user wants to change an existing source's authority, relevance, confide
 
 Tell the user what happened in one or two sentences. Names of sources registered or modified, what changed, where the files landed. If the registration round-trips into anything else the user should know about — e.g., the installation's orchestration skill needs to be re-pointed at the new registration — say so.
 
-If the user added the project's first source, mention that the installation now needs to write to `<hot>/source-pull-log.jsonl (path from `index-registry.mjs path --kind hot`)` per the monitoring contract (framework §7). Nothing in CORE reads that log yet, so do not say `/process-memory` will surface signals from it.
+If the user added the project's first source, mention that the installation now needs to write to `<hot>/source-pull-log.jsonl (path from `index-registry.mjs path --kind hot`)` per the monitoring contract (framework §7). Require a successful nonempty absolute path; if the resolver refuses, report source monitoring as not stored and defer the log write without substituting another folder. Nothing in CORE reads that log yet, so do not say `/process-memory` will surface signals from it.
 
 ---
 

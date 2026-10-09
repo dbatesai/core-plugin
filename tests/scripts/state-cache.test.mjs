@@ -8,10 +8,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, symlinkSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { join, dirname, resolve, delimiter } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   hashText, projectCachePath, readProjectCache, stampFiles, stampFile,
   CACHE_ABSENT, CACHE_CORRUPT,
@@ -168,25 +169,26 @@ test('stampFiles is a no-op for an empty/absent entries array — never creates 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('stampFiles prunes the same paths from the GLOBAL cache (one-release migration), preserving other files\' global entries', () => {
-  const { root, project, home, cachePath } = setup();
+// A stamp works inside its project: the child runs under the attempted-access gate with the
+// project and this repo (the code) as the only roots, so any touch of ~/.core, the OS temp dir or
+// another project is refused and recorded, even if the code swallows the error.
+test('a stamp touches no global cache or shared lock — its only outside access is the lock-identity read', () => {
+  const { root, project, cachePath } = setup();
   try {
-    const globalPath = join(home, '.core', 'state-cache.json');
-    writeFileSync(globalPath, JSON.stringify({
-      files: {
-        '/a.md': { last_hash: 'stale0000000000', last_written: 'x', last_written_by: 'old' },
-        '/keep-me.md': { last_hash: 'aaaaaaaaaaaaaaaa', last_written: 'y', last_written_by: 'someone-else' },
-      },
-    }, null, 2));
-
-    stampFiles(project, [{ path: '/a.md', hash: hashText('a'), lastWrittenBy: 'maintenance-run' }], { home });
-
-    const globalCache = JSON.parse(readFileSync(globalPath, 'utf8'));
-    assert.ok(!('/a.md' in globalCache.files), 'the stamped file\'s stale global entry is pruned');
-    assert.ok(globalCache.files['/keep-me.md'], 'an unrelated global entry survives the prune');
-
-    const projectCache = JSON.parse(readFileSync(cachePath, 'utf8'));
-    assert.equal(projectCache.files['/a.md'].last_written_by, 'maintenance-run', 'the per-project stamp is the write of record');
+    const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const mod = pathToFileURL(join(repo, 'plugins/core/skills/core/scripts/state-cache.mjs')).href;
+    const code = `const { stampFiles } = await import(${JSON.stringify(mod)});
+      process.stdout.write(JSON.stringify(stampFiles(${JSON.stringify(project)}, [{ path: '/a.md', hash: 'abcdabcdabcdabcd', lastWrittenBy: 'probe' }])));`;
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(join(repo, 'tests/scripts/fs-confine.mjs')).href, '--input-type=module', '-e', code], {
+      env: { ...process.env, FS_CONFINE_ROOTS: [realpathSync(project), project, repo].join(delimiter) }, encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).stamped, true);
+    const v = JSON.parse(r.stderr.match(/FS_CONFINE_VIOLATIONS (.*)/)[1]);
+    // The one outside access left is the lock helper's ownership identity (file-lock.mjs
+    // localMachineId → ~/.core/install-id), an open one-folder item; no global cache read, write or lock.
+    assert.deepEqual(v, [{ call: 'readFileSync', path: join(userInfo().homedir, '.core', 'install-id') }], 'only the lock-identity read leaves the project');
+    assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).files['/a.md'].last_written_by, 'probe');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -216,13 +218,17 @@ test("race: 40 concurrent processes each stamping a distinct file all survive �
     const N = 40;
     const code = (i) => [
       `import { stampFile } from ${JSON.stringify(STATE_CACHE_SCRIPT)};`,
-      `stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)} });`,
+      `console.log(JSON.stringify(stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)}, lock: { retries: 400 } })));`,   // a generous wait: this proves nothing is lost, not how long a stamp may wait
     ].join('\n');
 
     const procs = await Promise.all(
       Array.from({ length: N }, (_, i) => spawnAsync(['--input-type=module', '-e', code(i)]))
     );
     for (const p of procs) assert.equal(p.status, 0, `stamp process ${p} exited 0 (stderr: ${p.stderr})`);
+    // A stamp that did not land says why in its return value (exit 0 either way): name every such reason, so a lost stamp is never only a count.
+    const unstamped = procs.map((p) => { try { return JSON.parse(p.stdout.trim().split('\n').pop()); } catch { return { stamped: false, reason: `unreadable output: ${p.stdout.slice(0, 200)} ${p.stderr.slice(0, 200)}` }; } })
+      .filter((r) => r.stamped !== true).map((r) => `${r.outcome || ''} ${r.reason || ''} ${r.primaryError?.message || ''}`.replace(/\S*state-cache-\w+/g, '<tmp>').trim());
+    assert.deepEqual(unstamped, [], `${unstamped.length} of ${N} stamps were refused: ${[...new Set(unstamped)].join(' || ')}`);
 
     const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
     const survived = Object.keys(cache.files).length;
@@ -247,4 +253,98 @@ test('an unreadable cache is not absent — only ENOENT is absence', async () =>
     assert.ok(r.error, 'the original evidence is preserved');
     assert.equal(r.baseline_trustworthy_hint, false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- The first write into a fresh project: many processes create _memories, _lib and its ignore file at once.
+// Each one checks "absent" and then creates; the losers used to throw EEXIST (or judge a half-written ignore file),
+// and a stamp lost that way still exited 0. Every process must now get the folder back, and the ignore file must be whole. ----
+test("race: 40 processes preparing the same fresh cache folder all succeed, over repeated rounds", async () => {
+  const ENSURE = new URL('../../plugins/core/skills/core/scripts/store-ignores.mjs', import.meta.url).href;
+  for (let round = 0; round < 12; round++) {
+    const { root, project } = setup();
+    try {
+      const code = `import { ensureLibDir } from ${JSON.stringify(ENSURE)}; console.log(ensureLibDir(${JSON.stringify(project)}));`;
+      const procs = await Promise.all(Array.from({ length: 40 }, () => spawnAsync(['--input-type=module', '-e', code])));
+      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().split('\n').filter((l) => /Error|refused/.test(l)).join(' | ').slice(0, 500)}`);
+      const ignore = readFileSync(join(project, '_memories', '_lib', '.gitignore'), 'utf8');
+      assert.ok(ignore.trimEnd().endsWith('*'), `round ${round}: the ignore file is whole`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+// Same race for the metrics folder: 40 processes preparing a fresh project's `_metrics/` at once.
+test("race: 40 processes preparing the same fresh metrics folder all succeed, over repeated rounds", async () => {
+  const LOG = new URL('../../plugins/core/skills/core/scripts/log-event.mjs', import.meta.url).href;
+  for (let round = 0; round < 12; round++) {
+    const { root, project } = setup();
+    try {
+      const code = `import { prepareStorageDir } from ${JSON.stringify(LOG)}; console.log(prepareStorageDir(${JSON.stringify(project)}));`;
+      const procs = await Promise.all(Array.from({ length: 40 }, () => spawnAsync(['--input-type=module', '-e', code])));
+      for (const p of procs) assert.equal(p.status, 0, `round ${round}: a process failed: ${p.stderr.trim().split('\n').filter((l) => /Error|refused/.test(l)).join(' | ').slice(0, 500)}`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+// The deterministic form of the race: the loser of a folder creation finds the folder already there.
+test("makeRealDir: a folder that appeared meanwhile is accepted; a link or file in its place is refused", async () => {
+  const { makeRealDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  const { root, project } = setup();
+  try {
+    mkdirSync(join(project, '_memories'));
+    makeRealDir(project, '_memories');                                  // already a real folder: no EEXIST
+    makeRealDir(project, '_memories/_lib', { mode: 0o700 });            // absent: created
+    makeRealDir(project, '_memories/_lib', { mode: 0o700 });            // and again: accepted
+    // The loser's mkdir finds the winner's entry already there: the winner is created first, then the loser's real mkdir throws EEXIST.
+    const winnerFirst = (make) => (p, o) => { make(p); return mkdirSync(p, o); };
+    makeRealDir(project, 'won-by-folder', undefined, winnerFirst((p) => mkdirSync(p)));                     // a real folder won: accepted
+    assert.throws(() => makeRealDir(project, 'won-by-file', undefined, winnerFirst((p) => writeFileSync(p, 'x'))), { code: 'cache-folder-unsafe' });
+    if (process.platform !== 'win32') assert.throws(() => makeRealDir(project, 'won-by-link', undefined, winnerFirst((p) => symlinkSync(root, p))), { code: 'cache-folder-unsafe' });
+    writeFileSync(join(project, 'a-file'), 'x');
+    assert.throws(() => makeRealDir(project, 'a-file'), { code: 'cache-folder-unsafe' });
+    if (process.platform !== 'win32') {
+      symlinkSync(join(root, 'elsewhere'), join(project, 'a-link'));
+      assert.throws(() => makeRealDir(project, 'a-link'), { code: 'cache-folder-unsafe' });
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// A rename onto the shared ignore file that fails (Windows refuses it under contention) must not lose the writer when another writer's file is already there.
+test("publishWhole: a failed rename is absorbed when the destination exists and rethrown when it does not; the temp file is dropped either way", async () => {
+  const { publishWhole } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  const { root } = setup();
+  try {
+    const dest = join(root, 'dest'), refuse = () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
+    const tmp1 = join(root, 'tmp1'); writeFileSync(tmp1, 'x'); writeFileSync(dest, 'theirs');
+    publishWhole(tmp1, dest, refuse);                                                   // another writer's file is there: absorbed
+    assert.equal(existsSync(tmp1), false); assert.equal(readFileSync(dest, 'utf8'), 'theirs');
+    const tmp2 = join(root, 'tmp2'); writeFileSync(tmp2, 'x'); rmSync(dest);
+    assert.throws(() => publishWhole(tmp2, dest, refuse), { code: 'EPERM' });           // nothing there: the failure stands
+    assert.equal(existsSync(tmp2), false);
+    const tmp3 = join(root, 'tmp3'); writeFileSync(tmp3, 'ok');
+    publishWhole(tmp3, dest);                                                           // the normal path still publishes
+    assert.equal(readFileSync(dest, 'utf8'), 'ok');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// The default wait for the cache lock is short on purpose; a stamp that runs out of it must say so, never report success, and leave the cache alone.
+test("a stamp that cannot take the cache lock in time returns stamped:false (LOCK_HELD) and changes nothing; it lands once the lock is free", async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { STAMP_LOCK_BUDGET } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  assert.deepEqual(STAMP_LOCK_BUDGET, { retries: 20, retryDelayMs: 50 }, 'the shipped default is unchanged');
+  const { root, project, cachePath } = setup();
+  try {
+    const lockPath = join(dirname(cachePath), '.state-cache.lock');
+    const held = acquireFileLock(lockPath);
+    assert.equal(held.ok, true);
+    const t0 = Date.now();
+    const r = stampFile(project, '/a.md', hashText('a'), 'lock-test', { now: '2026-07-22T00:00:00Z', lock: { retries: 2, retryDelayMs: 1 } });
+    assert.ok(Date.now() - t0 < 400, 'the caller\'s wait was used, not the one-second default');
+    assert.equal(r.stamped, false);
+    assert.equal(r.reason, 'LOCK_HELD');
+    assert.equal(r.recovery, 'recovery-required');
+    assert.equal(existsSync(cachePath), false, 'a refused stamp writes no cache');
+    releaseFileLock(lockPath, held.nonce);
+    assert.equal(stampFile(project, '/a.md', hashText('a'), 'lock-test', { now: '2026-07-22T00:00:00Z' }).stamped, true);
+    assert.ok(readProjectCache(project).files['/a.md']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

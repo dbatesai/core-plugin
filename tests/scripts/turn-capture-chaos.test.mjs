@@ -96,7 +96,8 @@ test('chaos: purge racing a live writer never tears a row or crashes either side
       for (let i = 0; i < 3; i++) {
         await new Promise((r) => setTimeout(r, 30));
         const res = purgeTurnCapture(project, { apply: true });
-        assert.ok(res.purged || /purge-failed|delete-unverified/.test(res.reason || ''), JSON.stringify(res));
+        // A purge racing the writer may honestly report what it could not finish; those are the purge's own two failure reports.
+        assert.ok(res.purged || /^(purge incomplete: |purge-lock-unavailable: )/.test(res.reason || ''), JSON.stringify(res));
       }
     })();
     const [code] = await Promise.all([writer, purger]);

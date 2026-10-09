@@ -21,20 +21,21 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
-import { containedPath } from './trusted-home.mjs';
-import { homedir } from 'node:os';
+import {  existsSync, readFileSync, realpathSync, lstatSync, openSync, writeFileSync, closeSync, constants as fsConstants } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
+import { containedPath, coreHome } from './trusted-home.mjs';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
+import { ensureStoreIgnores, ensureRealFolders, folderChain, makeRealDir, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
+import { STATE_DIRNAME } from './state-dirname.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
  * not pin storage. Returns the marker path when capture is disabled, null otherwise; the next
  * metrics-init clears it.
  */
-export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = process.env } = {}) {
+export function captureDisabledMarkerPath(projectDir, { home = coreHome(), env = process.env } = {}) {
   if (!projectDir) return null;
   const operationalMetaDir = trustedMetricsDir(projectDir, { home, env });
   for (const candidate of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
@@ -52,6 +53,17 @@ export function resolveStoragePath(projectDir) {
   return join(projectDir, '_metrics');
 }
 
+/** The project's `_metrics/`, made with its ignore file in place before any lock or data is written there. */
+export function prepareStorageDir(projectDir) {
+  const base = resolveStoragePath(projectDir);
+  const chain = folderChain(projectDir, '_metrics');
+  if (chain === 'absent') makeRealDir(projectDir, '_metrics');
+  // A linked or unreadable `_metrics` comes back as a problem here, before any lock or data is written.
+  const problems = ensureStoreIgnores(projectDir, { families: [METRICS_IGNORE], verify: false });
+  if (problems.length) throw Object.assign(new Error(`not stored: ${problems.join('; ')}`), { code: 'STORAGE_UNSAFE' });
+  return base;
+}
+
 /**
  * The folders outside the project that earlier versions wrote this project's captured rows to
  * (a Windows OneDrive redirect to AppData), read-only history now. Found from the project's
@@ -62,8 +74,29 @@ export function resolveStoragePath(projectDir) {
  *
  * @returns {{folder: string, foreign?: boolean}[]}
  */
-export function metricsHistoryFolders(projectDir, { home = homedir(), env = process.env } = {}) {
+export function metricsHistoryFolders(projectDir, { home = coreHome(), env = process.env } = {}) {
   return historyDiscovery(projectDir, { home, env }).folders;
+}
+
+/** Retired classified copies under this project's local key, across both harnesses.
+ * Read-only discovery: refuse unsafe parent chains and retain uncertainty for disclosure. */
+export function localClassifiedHistory(projectDir, { home = coreHome(), env = process.env } = {}) {
+  const folders = [], problems = [];
+  try {
+    const coreDir = join(home, '.core'), root = projectRootFor(projectDir, { home, coreDir });
+    const listing = stateHarnessesPartial({ root, coreDir, include: [detectStateHarness(env)] });
+    problems.push(...listing.problems);
+    for (const harness of listing.harnesses) {
+      const places = stateLocations({ root, harness, coreDir });
+      problems.push(...places.problems);
+      for (const loc of places.locations.filter(l => l.kind === 'local')) {
+        const folder = join(loc.dir, 'metrics', 'classified');
+        try { if (checkMetricsParentChain(home, folder)) folders.push(folder); }
+        catch (e) { problems.push({ what: folder, reason: e.code || e.message }); }
+      }
+    }
+  } catch (e) { problems.push({ what: projectDir, reason: e.code || e.message }); }
+  return { folders: [...new Set(folders)], problems };
 }
 
 /** The error code of the first path that can't be resolved for a reason other than absence, or null. */
@@ -137,7 +170,7 @@ function historyDiscovery(projectDir, { home, env }) {
  *
  * @returns {{what: string, reason: string}[]}
  */
-export function metricsHistoryHeld(projectDir, { home = homedir(), env = process.env } = {}) {
+export function metricsHistoryHeld(projectDir, { home = coreHome(), env = process.env } = {}) {
   const coreDir = join(home, '.core');
   const held = [];
   let root;
@@ -161,7 +194,7 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
       for (const p of problems) held.push({ what: p.what, reason: `${p.reason}, so any record of an older external folder in it is hidden; nothing was moved` });
       places.push(...locations);
     } catch (e) {
-      held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
+      held.push({ what: join(root, STATE_DIRNAME, harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
     }
   }
   const { folders, unknown, error } = historyDiscovery(projectDir, { home, env });
@@ -199,28 +232,55 @@ export function todayUTC() {
 /**
  * Operational-meta metrics dir for a project (spec §17.6): the derived,
  * regeneratable side of the split — classified/, detectors/, rollups/, etc.
- * It lives in the project's per-harness state (`.core/<harness>/metrics`), or
- * under ~/.core/local/ when the project is synced, read-only, or another
- * install's. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
+ * New data lives in the project's per-harness state (`_core/<harness>/metrics`).
+ * Unsupported state routes throw STATE_NO_PROJECT_PLACE; any older local copy
+ * is read-only history. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
  * Creates the directory (stamping new state) — use trustedMetricsDir for a pure read.
  */
-export function operationalMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+export function operationalMetricsDir(projectDir, { home = coreHome(), env = process.env, harness } = {}) {
   const coreDir = join(home, '.core');
   const root = projectRootFor(projectDir, { home, coreDir });
   const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, forWrite: true });
-  const dir = join(s.dir, 'metrics');
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  // stateDir checked `_core/<harness>`; `metrics` below it must be a real folder too (FOLDER_UNSAFE otherwise).
+  return ensureRealFolders(s.dir, 'metrics');
 }
 
-/** The metrics dir when trustworthy state already exists for this project; null otherwise. Never writes. */
-export function trustedMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+/** The metrics dir when trustworthy state already exists; null otherwise. Never writes.
+ * guardReadParents opts strict consumers into selected-parent checks and visible IO errors. */
+export function trustedMetricsDir(projectDir, { home = coreHome(), env = process.env, harness, guardReadParents = false } = {}) {
   try {
+    if (guardReadParents) home = realpathSync(home); // Account-root aliases are allowed.
     const coreDir = join(home, '.core');
+    if (guardReadParents) checkMetricsParentChain(home, coreDir);
     const root = projectRootFor(projectDir, { home, coreDir });
-    const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir });
-    return s ? join(s.dir, 'metrics') : null;
-  } catch { return null; }
+    const readDirectoryGuard = guardReadParents ? dir => {
+      const fromProject = relative(root, dir);
+      const anchor = fromProject !== '..' && !fromProject.startsWith('..' + sep) && !isAbsolute(fromProject) ? root : home;
+      return checkMetricsParentChain(anchor, dir);
+    } : undefined;
+    const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, readDirectoryGuard });
+    if (!s) return null;
+    const dir = join(s.dir, 'metrics');
+    if (readDirectoryGuard) readDirectoryGuard(dir);
+    return dir;
+  } catch (e) { if (guardReadParents) throw e; return null; }
+}
+
+// Walk from a canonical, caller-owned root without following a linked parent.
+// Genuine absence is empty evidence; all other IO errors stay distinguishable.
+function checkMetricsParentChain(anchor, dir) {
+  const rel = relative(anchor, dir);
+  if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel))
+    throw Object.assign(new Error('metrics directory escapes its selected root'), { code: 'METRICS_DIRECTORY_CUSTODY' });
+  let current = anchor;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    current = join(current, part);
+    let st;
+    try { st = lstatSync(current); } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
+    if (st.isSymbolicLink() || !st.isDirectory())
+      throw Object.assign(new Error('metrics parent is not a real directory'), { code: 'METRICS_DIRECTORY_CUSTODY' });
+  }
+  return true;
 }
 
 /**
@@ -241,7 +301,7 @@ export function trustedMetricsDir(projectDir, { home = homedir(), env = process.
  *      opt-in — re-enabling is fixing the pin (re-run metrics-init), not
  *      overriding the marker.
  *   3. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
- *   4. the project's trusted manifest (`.core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
+ *   4. the project's trusted manifest (`_core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
  *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
  *      A manifest whose stamp does not verify (planted by a clone) is not read.
  *   6. this harness's manifest says `"metrics_enabled": false` but doesn't verify → OFF,
@@ -249,26 +309,43 @@ export function trustedMetricsDir(projectDir, { home = homedir(), env = process.
  *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
  *      source can only ever switch capture off, never on.
  *   7. default → ON.
+ * A failure while reading the project list or manifest → OFF on the default path. The explicit
+ * environment opt-in (step 3) is the user's own word and is decided before those reads.
  */
-export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
+export function metricsEnabled({ project, env = process.env, home: homeIn } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
+  // Everything below reads the project list and the project's manifest. When one of those reads
+  // fails (an unreadable or malformed project list), whether this project opted out is unknown,
+  // and unknown is OFF: capture never proceeds on a guess.
+  // No account home to read the project's state from means whether it opted out is unknown, so OFF.
+  try { const home = homeIn ?? coreHome(); const on = metricsEnabledFromState({ project, env, home, flag }); metricsGateFailure = null; return on; }
+  catch (e) {
+    // OFF, and said once per process on stderr so the failure stays visible: a defect in this path
+    // must not look like an ordinary opt-out.
+    metricsGateFailure = String(e?.code || e?.name || 'error');
+    if (!gateFailureSaid) { gateFailureSaid = true; try { process.stderr.write(`CORE metrics gate: could not read project state (${metricsGateFailure}); capture is off for this run\n`); } catch { /* stderr closed */ } }
+    return false;
+  }
+}
+
+/** Why the most recent gate call failed to read project state, or null when that call read it. */
+export let metricsGateFailure = null;
+let gateFailureSaid = false;
+
+function metricsEnabledFromState({ project, env, home, flag }) {
   if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
-    let m = null;
-    try {
-      const coreDir = join(home, '.core');
-      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
-    } catch { m = null; }
+    const coreDir = join(home, '.core');
+    const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
+      harness: detectStateHarness(env), coreDir, throwReadErrors: true });
     if (m && m.metrics_enabled === false) return false; // per-project opt-out
     if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
     const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
-    if (!m && manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
-    try {
-      const rootManifest = JSON.parse(readFileSync(join(root, 'workspace.json'), 'utf8'));
-      if (rootManifest && rootManifest.metrics_enabled === false) return false;
-    } catch { /* absent or unreadable: no opt-out */ }
+    // Read even beside a trusted manifest: an older `.core` left in the project may still say off.
+    if (manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
+    if (readCaptureOptOuts(join(root, 'workspace.json')).metrics_enabled === false) return false;
   }
   return true; // default-ON: instrument by default; opt out via env or workspace flag
 }
@@ -334,19 +411,38 @@ export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, m
 // Returns a write outcome — {legacy, reason?} — so producers can tell a
 // delivered event from a silently-swallowed one. Still best-effort: never
 // throws, never blocks the host.
+// Appends only to a single-named regular file, or creates it; never through a link. O_NOFOLLOW where the
+// platform has it, and the lstat check everywhere.
+export function appendLeaf(file, text, mode = 0o644) {
+  let st = null;
+  try { st = lstatSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (st && (!st.isFile() || st.nlink !== 1)) throw Object.assign(new Error('log file is a link or not a regular file'), { code: 'LOG_UNSAFE' });
+  const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW || 0), mode);
+  // writeFileSync on a descriptor keeps writing until every byte is down, or throws.
+  try { writeFileSync(fd, text); } finally { closeSync(fd); }
+}
+
 export function logEvent(projectDir, filename, event, { today, now } = {}) {
   const outcome = { legacy: false };
   if (!existsSync(projectDir)) { outcome.reason = 'project-dir-missing'; return outcome; }
   const date = today || todayUTC();
   const sessionDir = join(projectDir, '_sessions', date);
-  try {
-    mkdirSync(sessionDir, { recursive: true });
-  } catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
+  // Machine telemetry stays out of git from its first line; the rest of `_sessions/` stays visible.
+  // A linked folder on the way, or an ignore file that couldn't be made, means nothing is appended.
+  const chain = folderChain(projectDir, '_sessions');
+  if (chain !== 'real' && chain !== 'absent') { outcome.reason = 'sessions-folder-unsafe'; return outcome; }
+  try { if (chain === 'absent') makeRealDir(projectDir, '_sessions'); }
+  catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
+  if (ensureStoreIgnores(projectDir, { families: [SESSIONS_IGNORE], verify: false }).length) { outcome.reason = 'ignore-policy-not-established'; return outcome; }
+  const dated = folderChain(projectDir, `_sessions/${date}`);
+  if (dated !== 'real' && dated !== 'absent') { outcome.reason = 'sessions-folder-unsafe'; return outcome; }
+  try { if (dated === 'absent') makeRealDir(projectDir, `_sessions/${date}`); }
+  catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };
 
   try {
-    appendFileSync(join(sessionDir, filename), JSON.stringify(record) + '\n');
+    appendLeaf(join(sessionDir, filename), JSON.stringify(record) + '\n');
     outcome.legacy = true;
   } catch {
     outcome.reason = 'legacy-append-failed'; // best-effort by design — reported, not thrown

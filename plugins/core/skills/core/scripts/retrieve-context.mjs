@@ -28,7 +28,7 @@ import { statSync, readFileSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { loadFreshIndex, loadSnapshot } from './generate-summary-index.mjs';
+import { loadFreshIndex, loadSnapshot, assertStoreBoundary } from './generate-summary-index.mjs';
 import { bm25DocumentScores, bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
@@ -37,6 +37,7 @@ export const ENRICHMENT_WEIGHT = 0.6;
 // existsSync also returns false on EACCES. Only ENOENT proves a missing store;
 // other errors must reach captureStore so health and the pack report incomplete.
 function hasMemoryStore(root) {
+  assertStoreBoundary(root);   // a linked store is refused before anything follows the link
   try { statSync(join(root, '_memories')); return true; }
   catch (error) { return error.code !== 'ENOENT'; }
 }
@@ -480,7 +481,13 @@ export function main(argv) {
   const storePath = args[0];
   const query = args[1] || '';
   if (!storePath) { process.stderr.write('usage: retrieve-context.mjs <storePath> "<query>" [--top N] [--pack]\n'); return 2; }
-  const trace = buildRetrievalTrace(query, storePath, { topN });
+  let trace;
+  try { trace = buildRetrievalTrace(query, storePath, { topN }); }
+  catch (e) {
+    // A refusal is not an empty result: it has its own exit code and says why.
+    if (e?.code === 'STORE_OUTSIDE_ROOT' || e?.code === 'STORE_BOUNDARY_UNVERIFIED') { process.stderr.write(`refused: ${e.message}\n`); return 3; }
+    throw e;
+  }
   const hits = trace.stages?.final || [];
   if (pack) {
     // --pack emits the EXACT delivered bytes: same function, same cap,

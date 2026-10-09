@@ -34,7 +34,7 @@ Entries get archived to keep PROJECT.md lean — but archived entries can become
 
 For each archive file not modified recently, extract decision/risk/assumption IDs and grep the current read surface (PROJECT.md, recent session summaries, protocols, skill references) for references beyond each entry's own stub line. Surface candidates above the match threshold to the user, who decides: promote the stub back to §D&R, reject, or suppress for N cycles.
 
-Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliation-state.json`. Narrate all outcomes in the pass's own report.
+Suppression state persists at `<durable>/archive-reconciliation-state.json` only after `index-registry.mjs path --kind durable --name archive-reconciliation-state.json` succeeds with a nonempty absolute path. On refusal, retain the findings in the project report, name suppression state as not stored, and do not create a substitute folder. Existing account-global suppression material remains read-only history. Narrate all outcomes in the pass's own report.
 
 **Calibration defaults** — starting points to tune after a few cycles, not fixed rules: 14-day recency gate (skip files modified too recently), ≥3 match threshold (below this is noise), top-10 candidates per cycle.
 
@@ -73,7 +73,7 @@ One firing cycle is a signal; two consecutive cycles is grounds to propose a DC 
 
 ## Phase 5: Agent Refresh
 
-Review agents that participated in recent swarms. Files at `~/.core/agents/<kebab-case-name>.md`. Check swarm effectiveness reports for patterns; update Identity, Analytical Lens, or Blind Spots for agents with consistent behavior. Retire underperformers to `~/.core/agents/retired/` rather than deleting — the config retains reference value. Annotate any `task-configs/` entries pointing at retired agents.
+Review agents that participated in recent swarms. Files at `<project>/_core/_agent/agents/<kebab-case-name>.md`. Check swarm effectiveness reports for patterns; update Identity, Analytical Lens, or Blind Spots for agents with consistent behavior. Retire underperformers to `<project>/_core/_agent/agents/retired/` rather than deleting — the config retains reference value. Annotate any `task-configs/` entries pointing at retired agents.
 
 ## Output
 

@@ -45,11 +45,12 @@ import { readRegisteredRoots, resolveProjectRoot, canonical } from './project-st
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock } from './file-lock.mjs';
+import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock, withAcquiredFileLock } from './file-lock.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { computeSourceSignature } from './generate-summary-index.mjs';
+import { ensureStoreIgnores } from './store-ignores.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous
 // enough for a manual close that renders and summarizes before finishing.
@@ -84,6 +85,7 @@ export function inspectLock(store, now = Date.now()) {
  */
 export function acquireLock(store, { sessionId = null, now = Date.now() } = {}) {
   mkdirSync(join(resolve(store), '_memories'), { recursive: true });
+  ensureStoreIgnores(resolve(store));
   return acquireFileLock(lockPath(store), {
     extra: { session_id: sessionId },
     now, staleMs: LOCK_STALE_MS, hardStaleMs: LOCK_HARD_STALE_MS,
@@ -125,8 +127,7 @@ export function beginClose(store, { sessionId, ops = [], storeSignature = null, 
   try {
     atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
   } catch (e) {
-    releaseLock(store, { sessionId });
-    throw e;
+    return withAcquiredFileLock(lockPath(store), lock.nonce, () => { throw e; });
   }
   return { ok: true, marker };
 }
@@ -185,7 +186,7 @@ export function finishClose(store, { sessionId = null, status = 'closed', storeS
   if (release && release.released === false && release.reason === 'release-failed') {
     marker.release_error = release.error || 'release-failed';
     try { atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n'); } catch { /* marker already closed */ }
-    logHookEvent({ hook: 'close-finish', action: 'error', reason: `lock release failed: ${marker.release_error}`, cwd: store });
+    logHookEvent({ hook: 'close-finish', action: 'error', reason: `lock release failed: ${marker.release_error}`, projectRoot: store, cwd: store });
   }
   return { ...marker, release };
 }
@@ -530,7 +531,7 @@ function extractTimestampRange(transcriptPath) {
 /**
  * Security gate: which registered CORE project, if any, does `store` belong to?
  * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one,
- * and neither is a `.core/` folder. The trust anchor is the ~/.core registry
+ * and neither is a `_core/` folder. The trust anchor is the ~/.core registry
  * (projects.json, plus the legacy index.json while older installs still register
  * there), which an attacker can't plant from inside a project dir. The store's
  * realpath resolves to its nearest registered ancestor, stopping at any `.git`

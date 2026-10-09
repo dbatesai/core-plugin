@@ -47,7 +47,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { loadSnapshot } from './generate-summary-index.mjs';
@@ -55,6 +55,7 @@ import { runHarness, validateGold } from './retrieval-harness.mjs';
 import { logEvent } from './log-event.mjs';
 import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality.mjs';
 import { producerIdentity } from './producer-identity.mjs';
+import { ensureStoreIgnores, folderChain } from './store-ignores.mjs';
 
 // A round directory holds the answer key, the frozen question set, and the
 // corpus snapshot they were registered against — owner-only, best-effort
@@ -64,9 +65,13 @@ const ROUND_FILE_MODE = 0o600;
 function harden(path, mode) {
   try { chmodSync(path, mode); } catch { /* mode is advisory here */ }
 }
-function makeRoundDir(dir) {
+function makeRoundDir(dir, project) {
+  // Nothing is created through a linked _tests or self-test folder.
+  const chain = folderChain(resolve(project), relative(resolve(project), dir).split(sep).join('/'));
+  if (chain !== 'real' && chain !== 'absent') throw Object.assign(new Error(`self-test folder refused: ${chain}`), { code: 'SELF_TEST_UNSAFE' });
   mkdirSync(dir, { recursive: true, mode: ROUND_DIR_MODE });
   harden(dir, ROUND_DIR_MODE);
+  ensureStoreIgnores(resolve(project));
 }
 function writeRoundFile(path, data) {
   writeFileSync(path, data, { mode: ROUND_FILE_MODE });
@@ -253,7 +258,7 @@ export function newRound(project, { quota } = {}) {
   }
   const round = (listRounds(project).slice(-1)[0] || 0) + 1;
   const dir = roundDir(project, round);
-  makeRoundDir(dir);
+  makeRoundDir(dir, project);
 
   const { identity } = captureCorpusIdentity(project);
   const { quota: resolvedQuota, adjustments } = quota
@@ -748,7 +753,7 @@ export function shouldAuthorFreshRound(project, { now = new Date().toISOString()
 /** Stamp the weekly-cap marker when a trigger is emitted. */
 export function markAutoAuthorTriggered(project, { now = new Date().toISOString() } = {}) {
   try {
-    makeRoundDir(selfTestDir(project));
+    makeRoundDir(selfTestDir(project), project);
     writeRoundFile(join(selfTestDir(project), AUTO_AUTHOR_STATE), JSON.stringify({ last_trigger_ts: now }) + '\n');
     return true;
   } catch { return false; }

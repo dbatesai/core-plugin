@@ -24,10 +24,10 @@ Resolve scope from the user's words: default is **active units only** (condition
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" <project-dir> \
-  --out <scratch-path>/core-memory-browse.html [--scope ...] [--exclude-topic ...]
+  --out <project-dir>/_core/_scratch/core-memory-browse.html [--scope ...] [--exclude-topic ...]
 ```
 
-`--out` goes to a scratch/temp location — **never inside the project, never inside `_memories/`** (the script refuses the latter itself). The store is read-only to this whole flow, unconditionally — generation never writes a byte under `_memories/`, not even the derived `_lib/` index cache on a cold store. One invariant, no mode, no flag. Passing `--metrics-cache` together with `--no-metrics` is refused loudly (exit 2) — the two flags contradict, and the script no longer picks a silent winner. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2. The snapshot id covers exactly the scoped population the page embeds: an `all-including-archive` render's id also covers the archive bytes it shows; an active render's id is the plain store snapshot id.
+`--out` goes to the project's own scratch folder, `_core/_scratch/` (the script makes it, git-ignored, when the path names it) — **never inside `_memories/`**: the script refuses that on the real target, links included, and the same for `--metrics-cache`. The store is read-only to this whole flow, unconditionally — generation never writes a byte under `_memories/`, not even the derived `_lib/` index cache on a cold store. One invariant, no mode, no flag. Passing `--metrics-cache` together with `--no-metrics` is refused loudly (exit 2) — the two flags contradict, and the script no longer picks a silent winner. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2. The snapshot id covers exactly the scoped population the page embeds: an `all-including-archive` render's id also covers the archive bytes it shows; an active render's id is the plain store snapshot id.
 
 ## Step 2 — the manifest, and consent per the user's mode (EVERY publish)
 
@@ -53,7 +53,7 @@ Required checks, stated because they are conditions, not habits (condition 3):
 
 ## Step 4 — record the outcome (every consent decision leaves a record)
 
-Two receipts, two different claims. The receipt written at generation time (`<project>/.core/<harness>/artifact-receipts/<timestamp>.json`) is the **preflight-generation receipt**: it records what was generated and offered for publish — it is **never** a record of what went up, because it is written before consent. If the script reported it failed to write, surface that and do not publish until one lands.
+Two receipts, two different claims. The receipt written at generation time (`<project>/_core/<harness>/artifact-receipts/<timestamp>.json`) is the **preflight-generation receipt**: it records what was generated and offered for publish — it is **never** a record of what went up, because it is written before consent. If the script reported it failed to write, surface that and do not publish until one lands.
 
 After the publish step resolves — published, **declined by the user, or failed** — you MUST record the outcome as a **publish receipt** (condition 4's actual audit trail):
 
@@ -79,7 +79,7 @@ Keeps the published page current while the session runs: the platform already up
 
 **Consent basis for the loop's republishes:** the per-republish consent basis is the standing-authorization mechanism this skill already documents in Step 2 — live mode is only available in standing-authorization mode, because an unattended loop cannot stop and ask. If this user has no standing authorization on record, say so and offer the normal one-shot flow instead; do not start the loop. The grant is **prospective and bounded**: it authorizes future republishes of this loop **only within the scope and exclusions recorded at start** (persisted in the loop-state record below, with the grant's basis in its `grant_basis` field) — it is never a blanket license for whatever the store comes to contain. **The boundary rule:** the user must stop live mode before sensitive or third-party content enters the store; and at every refresh, YOU re-check the same boundary — if you know another party's data or user-flagged sensitive content has entered the rendered scope, stop the loop and fall back to ask-first rather than republishing under the old grant. (This is your judgment at render time — the watcher never inspects content, and no classifier exists or should.) All of Step 2's language still binds every republish: narrated in the conversation where it happens, always-ask when another party's data or user-flagged sensitive content is involved, stop-and-record-declined if the user objects.
 
-**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Resolve the loop-state path through `node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" path --root <project> --kind hot --name memory-view-live.json`. Use the returned absolute path as `<live-state-path>` below and on every later read/write; do not construct `.core/<harness>/` yourself. Stop on resolver refusal or an unresolved path. Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
+**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Resolve the loop-state path through `node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" path --root <project> --kind hot --name memory-view-live.json`. Use the returned absolute path as `<live-state-path>` below and on every later read/write; do not construct `_core/<harness>/` yourself. Stop on resolver refusal, unsuccessful exit, or an empty/unresolved path; no live-state write or re-arm follows that refusal. An existing account-global live-state record remains history: do not overwrite its grant or budget, and do not infer a current publication grant from it. Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" --write-live-state \
@@ -131,6 +131,6 @@ On each wake:
 ## Self-healing rails
 
 - **No `_memories/` store here:** say so; offer `/core` to start one. Nothing to publish.
-- **No `workspace.json`:** the receipt falls back to `~/.core/artifact-receipts/` and the manifest flags it (`receipt_fallback: true`) — mention it, don't hide it.
+- **No project state to write to:** generation stops before anything is published and nothing is written outside the project; say why. Older receipts under `~/.core/artifact-receipts/` stay readable history.
 - **Store feels too big to publish whole:** that's what scope selection is for — suggest `--exclude-topic` or staying with the active-only default rather than skipping the preflight.
 - **Metrics gathering failed during generation:** the page carries an honest "metrics not gathered" line instead of the health section; the snapshot is still valid to publish.

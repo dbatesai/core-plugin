@@ -12,12 +12,8 @@ const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const CLOSE_PASS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
 
-// Isolate every hook test log (the first isolation pass missed this file): a
-// subprocess hook run that doesn't override CORE_HOOKS_LOG_FILE defaults to
-// the real machine-wide ~/.core/hooks-log.jsonl.
-// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
-// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
-// isn't auto-cleaned — every created dir is tracked and removed below.
+// Probe modules live in separately tracked test directories; receipts live in the
+// explicit fixture project. Foreign overrides cannot redirect a production receipt.
 const _isolatedLogDirs = [];
 function isolatedHooksLog() {
   const dir = mkdtempSync(join(trustedTestTmpRoot(), 'close-pass-hook-log-'));
@@ -26,30 +22,24 @@ function isolatedHooksLog() {
 }
 after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
-// SEPARATE leak: several tests below call
-// close-pass.mjs's runClose/beginClose IN-PROCESS via dynamic import — not a
-// subprocess — so the execFileSync-level CORE_HOOKS_LOG_FILE override above
-// never applies to them. logHookEvent() inside close-pass.mjs reads
-// process.env.CORE_HOOKS_LOG_FILE from THIS test-runner process directly.
-// Setting it once at module load (this file's tests don't assert on the
-// log's content, only that they never touch the real one) covers every
-// in-process call for the lifetime of this file.
+// A foreign override in this test process must not redirect in-process close receipts.
 process.env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
 
 // Run the real hook entry and record its exact skip receipt. Stub only the
 // child spawn boundary, so the registered positive control proves every prior
 // gate was reached without launching a detached writer into a removed fixture.
 function runHook(payload, env = {}) {
-  const log = isolatedHooksLog();
-  const probe = join(dirname(log), 'spawn-probe.mjs');
-  const spawned = join(dirname(log), 'spawned.json');
+  const log = join(payload.cwd, '_core', '_hooks', 'hooks-log.jsonl');
+  const probeDir = dirname(isolatedHooksLog());
+  const probe = join(probeDir, 'spawn-probe.mjs');
+  const spawned = join(probeDir, 'spawned.json');
   writeFileSync(probe, `
     import cp from 'node:child_process';
     import { writeFileSync } from 'node:fs';
     import { syncBuiltinESMExports } from 'node:module';
     cp.spawn = (command, args) => {
       writeFileSync(${JSON.stringify(spawned)}, JSON.stringify({ command, args }));
-      return { unref() {} };
+      return { unref() {}, once(ev, fn) { if (ev === 'spawn') queueMicrotask(fn); return this; } };
     };
     syncBuiltinESMExports();
   `);
@@ -65,9 +55,17 @@ function runHook(payload, env = {}) {
   return { out, code, events, spawned: existsSync(spawned) ? JSON.parse(readFileSync(spawned, 'utf8')) : null };
 }
 
+// The detached close the real-spawn tests start can still hold the folder for a moment; on Windows removal then fails
+// at once with EPERM (rmSync's own retry options do not apply to the native remove path), so retry here.
+function rmWhenReleased(dir) {
+  for (let i = 0; ; i++) {
+    try { rmSync(dir, { recursive: true, force: true }); return; }
+    catch (e) { if (i >= 50 || !['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code)) throw e; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100); }
+  }
+}
 function registeredFixture(t) {
   const store = mkdtempSync(join(tmpdir(), 'close-hook-registered-'));
-  t.after(() => rmSync(store, { recursive: true, force: true }));
+  t.after(() => rmWhenReleased(store));
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"registered-control"}');
   return {
@@ -96,7 +94,7 @@ test('registered positive control reaches the deterministic close spawn boundary
   const f = registeredFixture(t);
   const result = runHook(f.payload, f.env);
   assert.equal(result.code, 0);
-  assert.equal(result.spawned?.command, 'node');
+  assert.equal(result.spawned?.command, process.execPath, 'the runner is this Node binary by path, not a PATH lookup');
   assert.ok(result.spawned.args.includes('process-request'));
   assert.ok(result.spawned.args.includes('registered-session'));
   assert.ok(result.events.some(e => e.hook === 'session-end' && e.action === 'spawn'));
@@ -141,7 +139,7 @@ test('isRegisteredWorkspace: only a path in the ~/.core registry passes (securit
   const good = mkdtempSync(join(tmpdir(), 'reg-ws-'));
   const evil = mkdtempSync(join(tmpdir(), 'evil-ws-'));
   mkdirSync(join(evil, '_memories'), { recursive: true }); // attacker plants a _memories dir
-  mkdirSync(join(evil, '.core', 'claude-code'), { recursive: true }); // and a .core/ state folder
+  mkdirSync(join(evil, '_core', 'claude-code'), { recursive: true }); // and a .core/ state folder
   const idxPath = join(registry, 'projects.json');
   writeFileSync(idxPath, JSON.stringify([{ path: good }]));
   assert.equal(cp.isRegisteredWorkspace(good, { indexPath: idxPath }), true, 'a registered path passes');
@@ -179,4 +177,43 @@ test('always exits 0 even on garbage stdin (fail-open)', () => {
   } catch (e) {
     assert.fail('hook must never throw on bad input: ' + e.message);
   }
+});
+
+// The receipt must tell a launch that started from one that did not. These go through the REAL
+// spawn and its events; only the child's arguments (or its path) are swapped so nothing writes
+// into a fixture that is about to be removed.
+function runRealSpawn(t, rewrite, extraEnv = {}) {
+  const f = registeredFixture(t);
+  const log = join(f.store, '_core', '_hooks', 'hooks-log.jsonl');
+  const probeDir = dirname(isolatedHooksLog());
+  const probe = join(probeDir, 'real-spawn-probe.mjs');
+  writeFileSync(probe, `
+    import cp from 'node:child_process';
+    import { syncBuiltinESMExports } from 'node:module';
+    const real = cp.spawn;
+    cp.spawn = (command, args, opts) => { const [c, a] = (${rewrite})(command, args); return real(c, a, opts); };
+    syncBuiltinESMExports();
+  `);
+  execFileSync(process.execPath, ['--import', pathToFileURL(probe).href, HOOK], {
+    input: JSON.stringify(f.payload), encoding: 'utf8',
+    env: { ...process.env, CORE_CLOSE_PASS_ACTIVE: '0', CORE_AUTO_CLOSE: '1', CORE_HOOKS_LOG_FILE: log, ...f.env, ...extraEnv },
+  });
+  return readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.hook === 'session-end');
+}
+
+test('SessionEnd with no node on PATH still starts its close (its own binary, by path) and only then says spawn', t => {
+  const rows = runRealSpawn(t, `(command) => [command, ['-e', '']]`, { PATH: '' });
+  assert.equal(rows.at(-1).action, 'spawn');
+});
+
+test('SessionEnd whose close cannot be launched says spawn-failed with the reason, never spawn', t => {
+  // A missing executable fails asynchronously, after spawn() has returned.
+  const rows = runRealSpawn(t, `(command, args) => ['/nonexistent/core-test-binary', args]`);
+  assert.deepEqual([rows.at(-1).action, rows.at(-1).reason], ['spawn-failed', 'ENOENT']);
+  assert.ok(!rows.some((r) => r.action === 'spawn'), 'no row claims the close started');
+});
+
+test('pure resume helper returns its skip decision without caller receipt context', async () => {
+  const { decideCloseAction } = await import('../../plugins/core/skills/core/hooks/close-pass-hook.mjs');
+  assert.deepEqual(decideCloseAction({ reason: 'resume' }), { action: 'skip', reason: 'session-reason=resume' });
 });

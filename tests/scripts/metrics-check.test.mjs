@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 import {
   renderBar, computeRows, buildNarrative, renderReport, parseRecognitionSignal,
   checkCalibrationPool, checkGoldRegression, checkLiveRetrievalProxy, gatherMetrics,
@@ -195,12 +196,29 @@ test('computeRows: calibration pool is labeled_count/min_needed, direct trust, t
   assert.equal(cal.section, SECTION.READINESS);
 });
 
-test('computeRows: calibration unavailable falls back to 0/100 without crashing', () => {
-  const rows = computeRows(baseOut({ readiness: { recognition_signal: null, calibration: {} } }));
-  const cal = rows.find((r) => r.label === 'Calibration pool');
-  assert.equal(cal.value, '0/100 labeled');
-  assert.equal(cal.pct, 0);
+test('unavailable calibration stays unavailable in its row, narrative and full report', () => {
+  const out = baseOut({ readiness: { recognition_signal: null, calibration: { available: false, reason: 'synthetic calibration read denied' } } });
+  const cal = computeRows(out).find(r => r.label === 'Calibration pool');
+  assert.equal(cal.trust, TRUST.NOT_EVALUATED);
+  assert.equal(cal.noGauge, true);
+  assert.match(cal.value, /unavailable.*synthetic calibration read denied/i);
+  const narrative = buildNarrative(out);
+  assert.match(narrative, /calibration.*unavailable.*synthetic calibration read denied/i);
+  assert.doesNotMatch(narrative, /currently 0/);
+  const report = renderReport(out);
+  assert.match(report, /not-evaluated.*unavailable.*synthetic calibration read denied/);
+  assert.doesNotMatch(report, /0\/100 labeled|currently 0/);
 });
+
+test('genuine available zero calibration remains a direct measured zero', () => {
+  const out = baseOut({ readiness: { recognition_signal: null, calibration: { available: true, labeled_count: 0, min_needed: 100 } } });
+  const cal = computeRows(out).find(r => r.label === 'Calibration pool');
+  assert.equal(cal.trust, TRUST.DIRECT);
+  assert.equal(cal.value, '0/100 labeled');
+  assert.notEqual(cal.noGauge, true);
+  assert.match(buildNarrative(out), /currently 0/);
+});
+
 
 test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tagged readiness', () => {
   const out = baseOut({
@@ -448,7 +466,7 @@ test('renderReport: never claims retrieval regression or user benefit inside the
 // checkCalibrationPool — the integration point with calibrate-classifier.mjs.
 // ---------------------------------------------------------------------------
 
-test('checkCalibrationPool: a fresh project/home with no calibration state fails open to labeled_count 0', () => {
+test('checkCalibrationPool: a fresh project/home with no calibration state reports unavailable with labeled_count 0', () => {
   const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-cal-'));
   try {
     const project = join(root, 'proj');
@@ -456,7 +474,8 @@ test('checkCalibrationPool: a fresh project/home with no calibration state fails
     mkdirSync(project, { recursive: true });
     mkdirSync(home, { recursive: true });
     const r = checkCalibrationPool(project, { home });
-    assert.equal(r.available, true);
+    assert.equal(r.available, false);
+    assert.match(r.reason, /trusted calibration/);
     assert.equal(r.labeled_count, 0);
     assert.equal(r.min_needed, 100);
     assert.equal(r.is_calibrated, false);
@@ -651,7 +670,7 @@ test('computeRows: Telemetry capture row names the rejected-row count by schema 
 });
 
 test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered Telemetry capture row', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-gather-rejected-'));
+  const root = removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'core-metrics-check-gather-rejected-')));
   try {
     mkdirSync(join(root, '_memories'), { recursive: true }); // retrieval_log is only computed when a store is present
     const day = join(root, '_sessions', '2026-07-22');
@@ -685,7 +704,7 @@ test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered
 // ---------------------------------------------------------------------------
 
 test('CLI --json contract: exact four-class placement, identity stamp, old contradictory fields absent, renderer sources the same object', () => {
-  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-cli-contract-'));
+  const root = removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'core-metrics-check-cli-contract-')));
   try {
     mkdirSync(join(root, '_memories'), { recursive: true });
     const day = join(root, '_sessions', '2026-07-22');

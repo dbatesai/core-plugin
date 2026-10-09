@@ -298,8 +298,8 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 
 **During hygiene or after the relevant multi-agent run, outside `/finalize`:**
 
-2. Save effective agent configurations from multi-agent runs to `~/.core/agents/<name>.md` for future reuse.
-3. Save effective analysis-protocol configurations by task type to `~/.core/task-configs/<type>.md`. Check this folder before composing a new swarm.
+2. Save effective agent configurations from multi-agent runs to `<project>/_core/_agent/agents/<name>.md` for future reuse.
+3. Save effective analysis-protocol configurations by task type to `<project>/_core/_agent/task-configs/<type>.md`. Check this folder before composing a new swarm.
 4. Record strategy effectiveness per problem type.
 5. Sync cross-project learnings to `agent-profile.md` — user preferences, personality refinements, portfolio patterns. Never project-specific facts.
 6. Reconcile affected PROJECT.md sections and their source units during the hygiene pass. At `/finalize`, follow only its material-change gate for §State/§Moves and its bounded material-capture step.
@@ -320,7 +320,7 @@ Each entry captures: what this swarm revealed about agent effectiveness, what yo
 
 ### Analysis-protocol effectiveness report
 
-After every substantial multi-agent run, write a structured effectiveness report to `~/.core/swarm-effectiveness/<project-slug>-<YYYY-MM-DD>.md` (the slug is the project folder's name). Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
+After every substantial multi-agent run, write a structured effectiveness report to `<project>/_outputs/swarm-effectiveness/<YYYY-MM-DD>.md`. Preserve existing entries and append a separately identified run when a report already exists for that date; never replace an earlier run. Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
 
 | Section | What to cover |
 |---|---|
@@ -367,7 +367,7 @@ Former dream cycle phases mapped to v2 hygiene:
 | Phase 3d: edge integrity sweep | Index regeneration + edge-reconciliation pass — `INDEX-*.md` regenerates, broken edges flagged |
 | Phase 3e: session-log auto-prune | Retired without replacement — no automated session-log cleanup ships; `_sessions/` grows until the user prunes it |
 | Phase 4: pattern synthesis | Graduation reasoning — same operation, named for what it actually is |
-| Phase 5: agent roster refresh | §"Self-evolution — hygiene and post-analysis learning" above — effective agent configurations saved to `~/.core/agents/<name>.md`, driven by the effectiveness reports |
+| Phase 5: agent roster refresh | §"Self-evolution — hygiene and post-analysis learning" above — effective agent configurations saved to `<project>/_core/_agent/agents/<name>.md`, driven by the effectiveness reports |
 
 There's no separate dream-cycle ritual, and no retrospective file — a per-pass retrospective had no reader. What a hygiene pass learns lands where it gets read: durable lessons graduate into units, and the pass's own narration tells the user what happened.
 

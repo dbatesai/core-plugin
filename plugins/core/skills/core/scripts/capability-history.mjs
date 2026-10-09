@@ -5,8 +5,8 @@
  * session's capability rows so drift and regression can be detected across
  * sessions (analyze-capability-drift.mjs is the consumer).
  *
- * Storage: the project's per-harness state, `<project>/.core/<harness>/capability-history.jsonl`
- *   (or ~/.core/local/<slug>/<harness>/ for a synced, read-only or another install's project),
+ * Storage: the project's per-harness state, `<project>/_core/<harness>/capability-history.jsonl`
+ *   (older rows under ~/.core/local/<slug>/<harness>/ are read-only history),
  *   with a project fallback at `<project>/_metrics/capability-history/<harness>.jsonl`.
  *   One JSON object per line:
  *   { observed_at, runner_version, schema_version, harness,
@@ -26,11 +26,11 @@ import {
   readFileSync, existsSync, mkdirSync, chmodSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { stateDir, assertHarnessName } from './project-state.mjs';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { acquireFileLock, releaseFileLock } from './file-lock.mjs';
+import { acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
@@ -63,7 +63,7 @@ function resolveStorePaths(target, opts = {}, { forWrite = false } = {}) {
     return { file: projectHistoryPath(opts.project, harness), lock: projectLockPath(opts.project, harness) };
   }
   if (!root) throw new Error('capability-history: target.root is required');
-  const home = opts.home || homedir();
+  const home = opts.home || coreHome();
   const s = stateDir({ root, harness, kind: 'hot', coreDir: join(home, '.core'), forWrite });
   if (!s) return null;
   return { file: join(s.dir, 'capability-history.jsonl'), lock: join(s.dir, 'capability-history.lock') };
@@ -103,7 +103,9 @@ function sleepSync(ms) {
 
 /**
  * Acquire an advisory lock via exclusive file creation (wx flag).
- * Recovers stale locks (older than STALE_LOCK_MS). Returns a release function.
+ * Recovers stale locks (older than STALE_LOCK_MS). Returns a checked release function.
+ * The release function may take an operation callback, so appendRows can preserve
+ * its completed outcome and original error using the shared completion logic.
  * Throws if it can't acquire within timeoutMs — bounded retries with a
  * CPU-yielding sleep between attempts, never a busy-spin.
  */
@@ -117,7 +119,15 @@ export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT
   // retry/timeout loop and its injectable now/sleep test seams.
   for (;;) {
     const got = acquireFileLock(lockFile, { now: now(), staleMs, hardStaleMs: staleMs * 10 });
-    if (got.ok) return () => { releaseFileLock(lockFile, got.nonce); };
+    if (got.ok) {
+      let completed = false, failed = false, caught;
+      return (operation = () => undefined) => {
+        if (completed) { if (failed) throw caught; return; }
+        completed = true; // even a failed release must never replay the material operation
+        try { return withAcquiredFileLock(lockFile, got.nonce, operation); }
+        catch (e) { failed = true; caught = e; throw e; }
+      };
+    }
     if (now() >= deadline) {
       throw new Error(`capability-history: could not acquire lock ${lockFile} within ${timeoutMs}ms`);
     }
@@ -172,7 +182,7 @@ export function appendRows(target, rows, meta = {}, opts = {}) {
   try { chmodSync(dir, EVIDENCE_DIR_MODE); } catch { /* pre-existing dir, other owner */ }
 
   const release = acquireLock(lock, opts.lockOpts);
-  try {
+  return release(() => {
     const observedAt = now();
     const newLines = rows.map(row => JSON.stringify({
       observed_at: observedAt,
@@ -196,9 +206,7 @@ export function appendRows(target, rows, meta = {}, opts = {}) {
     try { chmodSync(file, EVIDENCE_FILE_MODE); } catch { /* filesystem without POSIX modes */ }
 
     return { appended: newLines.length, truncated, path: file };
-  } finally {
-    release();
-  }
+  });
 }
 
 /**

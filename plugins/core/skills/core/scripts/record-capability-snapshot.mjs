@@ -3,7 +3,7 @@
  *
  * The wire between the producer and the store: startup runs the capability probe
  * and writes capability-state.json; this script runs runStartup() and appends the
- * rows to the project's `.core/<harness>/capability-history.jsonl` via appendRows(), which
+ * rows to the project's `_core/<harness>/capability-history.jsonl` via appendRows(), which
  * is what gives drift/regression analysis something to read across sessions.
  *
  * Used by protocols/startup.md (once per session, fail-open) so each session
@@ -11,12 +11,12 @@
  * accumulated history in /finalize and /process-memory.
  *
  * CLI: node record-capability-snapshot.mjs [--cwd <path>] [--harness <h>]
- *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]
+ *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>] [--from <probe json>]
  *
  * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
-import { statSync } from 'node:fs';
+import { statSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
@@ -65,7 +65,17 @@ export async function recordSnapshot(opts = {}) {
   const target = { root, harness: opts.stateHarness || harness || detectStateHarness(opts.env || process.env) };
   const sessionId = resolveSessionId(opts);
 
-  const startup = await runStartup({ harness, cwd });
+  // The startup probe already ran this session: its saved result is recorded, not a second probe.
+  const startup = opts.from ? JSON.parse(readFileSync(opts.from, 'utf8')) : await (opts._runStartup || runStartup)({ harness, cwd, env: opts.env, home: opts.home, nativeHome: opts.nativeHome });
+  if (opts.from) {
+    // A saved result is recorded only if it is a startup probe for the harness whose history it goes
+    // into, and an explicit --harness that names another harness is a conflict, not a choice.
+    const want = target.harness;
+    if (harness && harness !== want) throw new Error(`--harness ${harness} conflicts with the history it would be recorded in (${want})`);
+    if (startup?.mode !== 'startup' || startup.harness !== want) throw new Error(`${opts.from} is not a startup probe result for ${want}`);
+    const STATUSES = new Set(['PASS', 'DEGRADED', 'NOT-YET', 'UNKNOWN']);
+    if (!Array.isArray(startup.rows) || !startup.rows.length || !startup.rows.every((r) => r && typeof r.capability_id === 'string' && r.capability_id.trim() && STATUSES.has(r.identity_status))) throw new Error(`no probe rows in ${opts.from}`);
+  }
   const rows = startup.rows || [];
 
   const appendOpts = {};
@@ -83,6 +93,11 @@ export async function recordSnapshot(opts = {}) {
       appendOpts,
     );
   } catch (err) {
+    if (err.code === 'STATE_NO_PROJECT_PLACE') {
+      return { root, harness: startup.harness, session_id: sessionId,
+        complete: startup.complete === true, appended: 0, path: null, storage: 'none',
+        status: 'NOT_STORED', reason: err.reason, error_code: err.code, summary: startup.summary };
+    }
     const project = resolveFallbackProject(opts, root);
     if (!project || !isStoreUnavailable(err)) throw err;
     primaryError = err.message;
@@ -111,15 +126,16 @@ export async function recordSnapshot(opts = {}) {
 }
 
 export async function main(argv) {
-  let harness = null, cwd = null, sessionId = null, project = null;
+  let harness = null, cwd = null, sessionId = null, project = null, from = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--harness') harness = argv[++i];
     else if (argv[i] === '--cwd') cwd = argv[++i];
     else if (argv[i] === '--session-id') sessionId = argv[++i];
     else if (argv[i] === '--project') project = argv[++i];
+    else if (argv[i] === '--from') from = argv[++i];
   }
   try {
-    const r = await recordSnapshot({ harness, cwd, sessionId, project });
+    const r = await recordSnapshot({ harness, cwd, sessionId, project, from });
     console.log(JSON.stringify(r));
     return 0;
   } catch (e) {

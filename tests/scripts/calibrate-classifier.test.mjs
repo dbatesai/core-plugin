@@ -471,8 +471,79 @@ test('worksheetDir keeps raw turn text in the project hot state, not the project
   const home = mkdtempSync(join(tmpdir(), 'cal-ws-home-'));
   const project = mkdtempSync(join(tmpdir(), 'cal-ws-proj-'));
   try {
+    mkdirSync(join(home,'.core'));
+    writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
     const dir = worksheetDir(project, { home, env: { CORE_HARNESS: 'claude-code' } });
     assert.ok(!dir.startsWith(join(project, '_metrics')), `worksheet dir ${dir} must not sit in the project's _metrics folder`);
     assert.ok(dir.endsWith(join('metrics', 'calibration')), 'beside the classified rows');
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
+});
+
+test('two harnesses each importing qualifying labels into their own state reach a calibrated readiness; one alone does not', async () => {
+  const { operationalMetricsDir } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { readinessReport, aggregateCalibration } = await import('../../plugins/core/skills/core/scripts/calibrate-classifier.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'cal-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'cal-proj-'));
+  try {
+    mkdirSync(join(home, '.core'));
+    writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
+    const env = { CORE_METRICS_ENABLED: '1' };
+    const importFor = (harness) => {
+      const metaDir = operationalMetricsDir(project, { home, harness });
+      const exported = writeBlindLabels(metaDir, { harness });
+      const r = importLabels({ worksheetFile: exported.jsonl_path, metaDir, expectedHarness: harness });
+      assert.equal(r.status, 'OK', harness); assert.equal(r.is_calibrated, true, `${harness} clears on its own evidence`);
+    };
+    importFor('claude-code');
+    assert.equal(aggregateCalibration(project, { home, env }).is_calibrated, false, 'one harness is not the gate');
+    assert.equal(readinessReport({ project, home, env, harness: 'claude-code' }).is_calibrated, false);
+    importFor('codex');
+    const gate = aggregateCalibration(project, { home, env });
+    assert.equal(gate.is_calibrated, true, gate.notes);
+    for (const harness of ['claude-code', 'codex']) {
+      const r = readinessReport({ project, home, env, harness });
+      assert.equal(r.is_calibrated, true, `${harness} readiness reaches the final state`);
+      assert.equal(r.provisional, false);
+      assert.ok(Number.isFinite(r.overall_precision) && r.overall_precision > 0, `${harness} reports its own measured precision`);
+    }
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
+});
+
+test('the import command in --json reports the cross-harness result, and the package takes each harness row only from its own state', async () => {
+  const { operationalMetricsDir } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { workspaceMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const cli = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/calibrate-classifier.mjs', import.meta.url));
+  const home = mkdtempSync(join(tmpdir(), 'cal-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'cal-proj-'));
+  try {
+    mkdirSync(join(home, '.core'));
+    writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
+    const patch = `import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';os.userInfo=()=>({homedir:${JSON.stringify(home)}});os.homedir=()=>${JSON.stringify(home)};syncBuiltinESMExports();`;
+    const runImport = (harness) => {
+      const metaDir = operationalMetricsDir(project, { home, harness });
+      const exported = writeBlindLabels(metaDir, { harness });
+      const r = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(patch), cli, project, '--harness', harness, '--import-labels', exported.jsonl_path, '--json'],
+        { encoding: 'utf8', timeout: 60000, env: { ...process.env, CORE_HARNESS: harness, CORE_METRICS_ENABLED: '1' } });
+      assert.equal(r.status, 0, r.stderr + r.stdout);
+      return JSON.parse(r.stdout);
+    };
+    assert.equal(runImport('claude-code').all_harnesses_calibrated, false, 'one harness: not the overall gate');
+    // the package: claude-code's own file claims codex cleared, but codex has no state of its own yet
+    const ccDir = operationalMetricsDir(project, { home, harness: 'claude-code' });
+    const forged = JSON.parse(readFileSync(join(ccDir, 'calibration-state.json'), 'utf8'));
+    forged.by_harness.codex = { ...forged.by_harness['claude-code'] };
+    writeFileSync(join(ccDir, 'calibration-state.json'), JSON.stringify(forged));
+    // The package reads the selected harness's metrics; pin it so the test doesn't depend on the machine running it.
+    const ambient = process.env.CORE_HARNESS;
+    process.env.CORE_HARNESS = 'claude-code';
+    let ws;
+    try { ws = workspaceMetrics(home, project); } finally { if (ambient === undefined) delete process.env.CORE_HARNESS; else process.env.CORE_HARNESS = ambient; }
+    assert.equal(ws.calibration.by_harness.codex.is_calibrated, false, 'a harness with no state of its own inherits no claim');
+    assert.equal(ws.calibration.is_calibrated, false);
+    const second = runImport('codex');
+    assert.equal(second.all_harnesses_calibrated, true, 'both harnesses: the --json result says so');
+    assert.equal(second.is_calibrated, true, "and keeps this harness's own verdict");
   } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });

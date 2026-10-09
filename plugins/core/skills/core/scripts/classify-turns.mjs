@@ -31,12 +31,14 @@
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
 
-import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { ensureRealFolders, assertOrdinaryLeaf } from './store-ignores.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { coreHome } from './trusted-home.mjs';
 
 // Version stamp for classification BEHAVIOR. Any behavior-affecting change
 // (predicates, matching rules, discriminators — anything that shifts the state
@@ -262,13 +264,17 @@ function unitHeadTerms(path) {
 
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
-export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, env }) {
+export function runClassification({ project, harness = 'claude-code', cwd, home: homeIn, nativeHome, sessionId, today, env }) {
+  // `home` is CORE authority (default: the OS account home). `nativeHome` is where the harness keeps its own
+  // transcripts; it defaults to the user's home, or to an explicit `home` (the single-root test seam).
+  const home = homeIn ?? coreHome();
+  const nativeRoot = nativeHome ?? homeIn ?? homedir();
   // Capture gate (spec §18, metrics policy): default-on, opt-out. Captures nothing
   // — reads no transcript content, writes no records — when the user has opted out.
   if (!metricsEnabled({ project, env, home })) {
     return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
   }
-  const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
+  const t = readTranscript({ harness, cwd: cwd || project, home: nativeRoot, sessionId, env });
   if (!t.available) {
     return { status: 'UNAVAILABLE', reason: 'transcript unavailable', provisional: true };
   }
@@ -303,15 +309,20 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   let writtenRecords = 0;
   // Write to the operational-meta classified store (derived, regeneratable; §17.6).
   try {
-    const dir = join(operationalMetricsDir(project, { home, env }), 'classified');
-    mkdirSync(dir, { recursive: true });
+    // Every folder down to `classified` is a real folder and the day file an ordinary one (never a link).
+    const dir = ensureRealFolders(operationalMetricsDir(project, { home, env }), 'classified');
     const file = join(dir, `${date}.jsonl`);
+    assertOrdinaryLeaf(file);
     for (const r of records) {
       appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 });
       writtenRecords += 1;
     }
     chmodSync(file, 0o600);
   } catch (e) {
+    if (e?.code === 'STATE_NO_PROJECT_PLACE') {
+      return { status: 'NOT_STORED', written: false, written_records: writtenRecords,
+        reason: e.reason, error_code: e.code, ...result };
+    }
     return { status: 'WRITE_FAILED', written: false, written_records: writtenRecords,
       reason: 'classified-write-failed', error_code: e?.code || 'UNKNOWN', ...result };
   }
@@ -327,7 +338,7 @@ export const CLASSIFIED_RETENTION_DAYS = 30;
  * carries turn text, so it gets the same retention bound the capture stream
  * has. The window is validated before any deletion arithmetic runs.
  */
-export function runClassifiedRetention(projectDir, { home = homedir(), env = process.env, windowDays = CLASSIFIED_RETENTION_DAYS, now = new Date() } = {}) {
+export function runClassifiedRetention(projectDir, { home = coreHome(), env = process.env, windowDays = CLASSIFIED_RETENTION_DAYS, now = new Date() } = {}) {
   if (!Number.isInteger(windowDays) || windowDays <= 0) {
     return { ran: false, reason: 'invalid-window', windowDays };
   }
