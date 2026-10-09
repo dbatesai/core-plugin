@@ -124,7 +124,7 @@ test('CLI refuses same-day labeled worksheet unless --replace-existing is explic
   const resolved = run(['--input-type=module', '-e', `import {operationalMetricsDir} from ${JSON.stringify(METRICS_URL)}; console.log(operationalMetricsDir(${JSON.stringify(project)}));`]);
   assert.equal(resolved.status, 0, resolved.stderr);
   const meta = resolved.stdout.trim();
-  assert.ok(meta.startsWith(realpathSync(root)), 'CLI data stays within the disposable fixture');
+  assert.ok(meta.startsWith(realpathSync.native(root)), 'CLI data stays within the disposable fixture');
   const classifiedDir = join(meta, 'classified');
   mkdirSync(classifiedDir);
   writeFileSync(join(classifiedDir, '2026-10-02.jsonl'), JSON.stringify(row('codex')) + '\n');
@@ -169,7 +169,7 @@ test('an unreadable existing worksheet fails closed without rotating its predict
 
 
 for (const harness of ['claude-code', 'codex']) test(`CLI --harness ${harness} binds export, readiness and label import despite the opposite ambient harness`, t => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'calibration-explicit-harness-')));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'calibration-explicit-harness-')));
   t.after(() => rmSync(root, {recursive:true, force:true}));
   const home=join(root,'home'), project=join(root,'project');
   mkdirSync(join(home,'.core'),{recursive:true}); mkdirSync(project);

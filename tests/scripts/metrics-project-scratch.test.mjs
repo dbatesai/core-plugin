@@ -14,7 +14,7 @@ const scripts = new URL('../../plugins/core/skills/core/scripts/', import.meta.u
 const check = new URL('metrics-check.mjs', scripts).href, pack = new URL('metrics-package.mjs', scripts).href;
 const gate = fileURLToPath(new URL('./fs-confine.mjs', import.meta.url));
 function fixture() {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'metrics-project-scratch-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(),'metrics-project-scratch-')));
   const root=join(base,'project'), other=join(base,'other'), home=join(base,'home'), out=join(base,'exports');
   for(const p of [root,other,home,out])fs.mkdirSync(p);
   for(const p of [root,other]){

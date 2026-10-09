@@ -49,7 +49,7 @@ test('recordSnapshot appends to the project history rather than clobbering it', 
     assert.equal(r1.storage, 'state');
     assert.ok(r1.appended > 0, 'startup probes produced rows');
     assert.ok(existsSync(r1.path), 'history file created under the temp home');
-    assert.ok(r1.path.startsWith(realpathSync(home)), 'writes stay inside the temp home');
+    assert.ok(r1.path.startsWith(realpathSync.native(home)), 'writes stay inside the temp home');
     const lines1 = readFileSync(r1.path, 'utf8').trim().split('\n');
     assert.equal(lines1.length, r1.appended);
 

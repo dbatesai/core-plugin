@@ -13,7 +13,7 @@ const hookBase = new URL('../../plugins/core/skills/core/hooks/', import.meta.ur
 const gate = new URL('./fs-confine.mjs', import.meta.url).href;   // --import takes a URL; a bare Windows path fails
 const logger = new URL('hook-log.mjs', hookBase).href;
 function fixture() {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'project-hook-log-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(), 'project-hook-log-')));
   const root = join(base, 'project'), home = join(base, 'home'), wrong = join(base, 'wrong-cwd');
   for (const p of [root, home, wrong]) fs.mkdirSync(p);
   fs.mkdirSync(join(home, '.core'));

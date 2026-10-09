@@ -37,7 +37,7 @@
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
-  mkdtempSync, rmSync, chmodSync,  cpSync, openSync, writeSync, closeSync,
+  mkdtempSync, rmSync, chmodSync,  cpSync, openSync, writeSync, closeSync, realpathSync,
   constants as fsConstants } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
@@ -1452,7 +1452,8 @@ export function runPackage(argv, { homeOverride } = {}) {
   let scratchProject, scratchDir;
   try {
     scratchProject = projectArtifactRoot(flagsIn.scratchProject || projectDirs[0]);
-    if (!projectDirs.some(p => projectArtifactRoot(p) === scratchProject)) {
+    // Compare the true on-disk spelling, so one folder named two ways (case, 8.3) still counts as the same project.
+    if (!projectDirs.some(p => realpathSync.native(projectArtifactRoot(p)) === realpathSync.native(scratchProject))) {
       return { exit: 2, error: '--scratch-project must name an exported project' };
     }
     scratchDir = ensureProjectArtifactDir(scratchProject, '_scratch');

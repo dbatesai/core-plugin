@@ -23,7 +23,7 @@ import {initMetrics} from '../../plugins/core/skills/core/scripts/metrics-init.m
 const routes=['registered','unregistered','not-a-project-root','root-not-writable','migrating','migrating-dangling','foreign-install','ask'];
 function snapshot(root){const out={};if(!fs.existsSync(root))return out;const walk=d=>{for(const name of fs.readdirSync(d)){const p=join(d,name),s=fs.lstatSync(p);out[p.slice(root.length)]={type:s.isDirectory()?'dir':'file',hash:s.isFile()?createHash('sha256').update(fs.readFileSync(p)).digest('hex'):null};if(s.isDirectory())walk(p);}};walk(root);return out;}
 function fixture(route,harness){
- const base=fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'core-no-place-'))),home=join(base,'home'),coreDir=join(home,'.core');fs.mkdirSync(coreDir,{recursive:true});let root=join(base,'project');fs.mkdirSync(root);
+ const base=fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(),'core-no-place-'))),home=join(base,'home'),coreDir=join(home,'.core');fs.mkdirSync(coreDir,{recursive:true});let root=join(base,'project');fs.mkdirSync(root);
  if(route==='not-a-project-root')root=home;
  if(route==='ask'){
   const old=join(base,'external','project');fs.mkdirSync(old,{recursive:true});writeStamp({root:old,harness,coreDir});fs.rmdirSync(root);fs.renameSync(old,root);fs.rmdirSync(dirname(old));assert.equal(classifyStamp({root,harness,coreDir}).status,'ask');

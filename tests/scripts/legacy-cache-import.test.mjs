@@ -12,7 +12,7 @@ const isWin = process.platform === 'win32';
 const canLink = (() => { const d = fs.mkdtempSync(join(tmpdir(), 'legacy-link-probe-')); try { fs.symlinkSync(d, join(d, 'p')); return true; } catch { return false; } finally { fs.rmSync(d, { recursive: true, force: true }); } })();
 const original = '---\nid: decision\ntype: decision\nstatus: active\n---\n\n# Decision\n\nOriginal owner decision.\n';
 function fixture() {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'legacy-cache-import-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(), 'legacy-cache-import-')));
   const root = join(base, 'project'), home = join(base, 'home');
   fs.mkdirSync(join(root, '_memories'), { recursive: true });
   fs.mkdirSync(join(home, '.core'), { recursive: true });

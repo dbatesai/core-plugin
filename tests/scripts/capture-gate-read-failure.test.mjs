@@ -13,7 +13,7 @@ import * as capture from '../../plugins/core/skills/core/scripts/turn-capture.mj
 // Every path and installation identity in these controls is synthetic.
 useNoMachineIdentity();
 function fixture(fields, registered = true) {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'capture-gate-read-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(), 'capture-gate-read-')));
   const root = join(base, 'project'), home = join(base, 'home'), coreDir = join(home, '.core');
   fs.mkdirSync(root); fs.mkdirSync(coreDir, { recursive: true });
   assert.equal(spawnSync('git', ['init', '-q', root]).status, 0);

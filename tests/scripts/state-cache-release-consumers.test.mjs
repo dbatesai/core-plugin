@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 const scripts = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/', import.meta.url));
 
 function fixture() {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'stamp-release-consumer-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(), 'stamp-release-consumer-')));
   const root = join(base, 'project'), home = join(base, 'home');
   fs.mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
   fs.mkdirSync(home);

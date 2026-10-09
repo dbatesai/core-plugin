@@ -19,7 +19,7 @@ const isWin = process.platform === 'win32';
 const isRoot = process.getuid?.() === 0;
 
 function project({ withUnits = true } = {}) {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'project-only-')));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'project-only-')));
   const root = join(base, 'proj');
   mkdirSync(root);
   if (withUnits) {

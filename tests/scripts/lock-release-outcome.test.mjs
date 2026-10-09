@@ -14,7 +14,7 @@ import { beginClose } from '../../plugins/core/skills/core/scripts/close-pass.mj
 
 useNoMachineIdentity();
 function sandbox() {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'lock-release-outcome-')));
+  const base = fs.realpathSync.native(fs.mkdtempSync(join(tmpdir(), 'lock-release-outcome-')));
   const root = join(base, 'project'), coreDir = join(base, 'home/.core');
   fs.mkdirSync(root); fs.mkdirSync(coreDir, { recursive: true });
   assert.equal(spawnSync('git', ['init', '-q', root]).status, 0);
