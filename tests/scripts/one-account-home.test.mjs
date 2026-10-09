@@ -106,6 +106,8 @@ test('with nothing passed, CORE authority is the account home and transcripts co
   } finally { for (const d of [B, C, proj]) rmSync(d, { recursive: true, force: true }); }
 });
 
+// Probes report Windows paths with forward slashes, and JSON.stringify doubles any backslash: compare with both spelled with '/'.
+const inJson = (text, path) => text.replaceAll('\\\\', '/').includes(path.replaceAll('\\', '/'));
 test('the startup delegates read the harness\'s own files from nativeHome, and the recorder and connector probe forward the selected context', async () => {
   const { probe: autoMem } = await import('../../plugins/core/skills/core/scripts/capability/auto-memory-injection-probe.mjs');
   const { probe: instr } = await import('../../plugins/core/skills/core/scripts/capability/instruction-surface-resolution-probe.mjs');
@@ -115,10 +117,10 @@ test('the startup delegates read the harness\'s own files from nativeHome, and t
     mkdirSync(join(native, '.claude'), { recursive: true });
     writeFileSync(join(native, '.claude', 'CLAUDE.md'), 'native instructions\n');
     const seen = JSON.stringify(await instr({ cwd: proj, home: core, nativeHome: native, env: {} }));
-    assert.ok(seen.includes(native), 'the instruction chain was read under nativeHome');
-    assert.ok(!seen.includes(core), 'the CORE account home was not used for it');
+    assert.ok(inJson(seen, native), 'the instruction chain was read under nativeHome');
+    assert.ok(!inJson(seen, core), 'the CORE account home was not used for it');
     const mem = JSON.stringify(await autoMem({ cwd: proj, home: core, nativeHome: native, env: {} }));
-    assert.ok(!mem.includes(core), 'auto-memory does not look under the CORE account home');
+    assert.ok(!inJson(mem, core), 'auto-memory does not look under the CORE account home');
     let got = null;
     await probeForHarness({ harness: 'claude-code', cwd: proj, env: { A: '1' }, home: core, nativeHome: native }, { load: async () => ({ runStartup: async (o) => { got = o; return { rows: [] }; } }) });
     assert.deepEqual([got.cwd, got.env.A, got.home, got.nativeHome], [proj, '1', core, native]);

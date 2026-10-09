@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const url = (name) => pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts', name)).href;
+const isWin = process.platform === 'win32';
+const canLink = (() => { const d = fs.mkdtempSync(join(tmpdir(), 'legacy-link-probe-')); try { fs.symlinkSync(d, join(d, 'p')); return true; } catch { return false; } finally { fs.rmSync(d, { recursive: true, force: true }); } })();
 const original = '---\nid: decision\ntype: decision\nstatus: active\n---\n\n# Decision\n\nOriginal owner decision.\n';
 function fixture() {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'legacy-cache-import-')));
@@ -21,14 +23,14 @@ function fixture() {
   const run = (body, extraPreload = '') => {
     const preload = `import fs from 'node:fs';import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';
       os.userInfo=()=>({homedir:${JSON.stringify(home)}});os.homedir=()=>${JSON.stringify(home)};${extraPreload};syncBuiltinESMExports();`;
-    const code = `import fs from 'node:fs';import assert from 'node:assert/strict';import {syncBuiltinESMExports} from 'node:module';
+    const code = `import fs from 'node:fs';import {join,sep} from 'node:path';const nx=(p)=>String(p).replaceAll(String.fromCharCode(92),'/');import assert from 'node:assert/strict';import {syncBuiltinESMExports} from 'node:module';
       const sc=await import(${JSON.stringify(url('state-cache.mjs'))});
       const ld=await import(${JSON.stringify(url('lifecycle-detect.mjs'))});
       const dg=await import(${JSON.stringify(url('decorate-graph.mjs'))});
       const root=${JSON.stringify(root)},unit=${JSON.stringify(unit)},home=${JSON.stringify(home)},source=${JSON.stringify(source)},cache=${JSON.stringify(cache)},original=${JSON.stringify(original)};
       const oldStamp={last_hash:sc.hashText(original),outside_hash:dg.hashOutsideEdgesBlock(original),last_written:'2026-10-01T00:00:00Z',last_written_by:'decorate-graph',last_section_written:'Decision'};
       const writeSource=(files)=>fs.writeFileSync(source,JSON.stringify({files}));
-      const writeLocal=(data)=>{fs.mkdirSync(root+'/_memories/_lib',{recursive:true});fs.writeFileSync(cache,JSON.stringify(data));};
+      const writeLocal=(data)=>{fs.mkdirSync(join(root,'_memories/_lib'),{recursive:true});fs.writeFileSync(cache,JSON.stringify(data));};
       const importOld=(opts={})=>sc.importLegacyProjectCache(root,opts);
       ${body}`;
     const r = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), '--input-type=module', '-e', code], {
@@ -39,16 +41,16 @@ function fixture() {
   };
   return { base, root, home, source, cache, unit, run, clean: () => fs.rmSync(base, { recursive: true, force: true }) };
 }
-function control(name, body) {
-  test(name, () => {
+function control(name, body, opts = {}) {
+  test(name, opts, () => {
     const s = fixture();
     try { s.run(body); } finally { s.clean(); }
   });
 }
 
 control('review dotted local key is retained without shadowing; independent transfer proceeds', `
-  const dotted=root+'/_memories/./decision.md',local={...oldStamp,last_hash:sc.hashText('local authority'),last_written_by:'local-authority'};
-  const other=root+'/_memories/other.md';fs.writeFileSync(other,original);writeLocal({files:{[dotted]:local}});writeSource({[unit]:oldStamp,[other]:oldStamp});
+  const dotted=[root,'_memories','.','decision.md'].join(sep),local={...oldStamp,last_hash:sc.hashText('local authority'),last_written_by:'local-authority'};
+  const other=join(root,'_memories/other.md');fs.writeFileSync(other,original);writeLocal({files:{[dotted]:local}});writeSource({[unit]:oldStamp,[other]:oldStamp});
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.imported_count,1);
   const c=JSON.parse(fs.readFileSync(cache,'utf8'));assert.deepEqual(c.files[dotted],local);assert.equal(Object.hasOwn(c.files,unit),false);assert.deepEqual(c.files[other],oldStamp);
 `);
@@ -69,29 +71,29 @@ control('review recovery binds receipt digest and attribution to selected preser
 
 control('review returned refusal survives simultaneous checked mutex release failure', `
   writeSource({[unit]:oldStamp});const link=fs.linkSync,rename=fs.renameSync;let injected=null;
-  fs.linkSync=(from,to,...a)=>{const r=link(from,to,...a);if(String(to).startsWith(root+'/_memories/_lib/.state-cache.lock.g')){injected=JSON.stringify({files:{},legacy_baseline_import:{broken:true}});fs.writeFileSync(cache,injected);}return r;};
-  fs.renameSync=(from,to,...a)=>{if(String(to).includes('/.state-cache.lock.')&&String(to).endsWith('.done'))throw Object.assign(new Error('release failed after refusal'),{code:'EACCES'});return rename(from,to,...a);};syncBuiltinESMExports();
+  fs.linkSync=(from,to,...a)=>{const r=link(from,to,...a);if(String(to).startsWith(join(root,'_memories/_lib/.state-cache.lock.g'))){injected=JSON.stringify({files:{},legacy_baseline_import:{broken:true}});fs.writeFileSync(cache,injected);}return r;};
+  fs.renameSync=(from,to,...a)=>{if(nx(to).includes('/.state-cache.lock.')&&String(to).endsWith('.done'))throw Object.assign(new Error('release failed after refusal'),{code:'EACCES'});return rename(from,to,...a);};syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.reason,'LOCK_RELEASE_FAILED');assert.equal(r.operationResult?.status,'held');assert.equal(r.operationResult?.reason,'import-receipt-invalid');assert.equal(r.lockReleaseFailures.length,1);assert.equal(fs.readFileSync(cache,'utf8'),injected);
 `);
 
 control('review shared tracking guard keeps broken Git metadata unknown when index is missing', `
   const ps=await import(${JSON.stringify(url('project-state.mjs'))}),pa=await import(${JSON.stringify(url('project-artifacts.mjs'))});
-  fs.writeFileSync(root+'/.git','gitdir: missing-git-dir\\n');
-  assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),true);assert.throws(()=>pa.ensureProjectArtifactDir(root,'_hooks'));assert.equal(fs.existsSync(root+'/.core'),false);
-  fs.unlinkSync(root+'/.git');fs.mkdirSync(root+'/.git');assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),true);assert.throws(()=>pa.ensureProjectArtifactDir(root,'_scratch'));assert.equal(fs.existsSync(root+'/.core'),false);
+  fs.writeFileSync(join(root,'.git'),'gitdir: missing-git-dir\\n');
+  assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),true);assert.throws(()=>pa.ensureProjectArtifactDir(root,'_hooks'));assert.equal(fs.existsSync(join(root,'.core')),false);
+  fs.unlinkSync(join(root,'.git'));fs.mkdirSync(join(root,'.git'));assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),true);assert.throws(()=>pa.ensureProjectArtifactDir(root,'_scratch'));assert.equal(fs.existsSync(join(root,'.core')),false);
 `);
 
 control('review shared tracking guard accepts a valid unborn Git repository without an index', `
   const {spawnSync}=await import('node:child_process');const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('GIT_')));Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'});
-  assert.equal(spawnSync('git',['-C',root,'init','--quiet'],{env,encoding:'utf8'}).status,0);assert.equal(fs.existsSync(root+'/.git/index'),false);
-  const ps=await import(${JSON.stringify(url('project-state.mjs'))}),pa=await import(${JSON.stringify(url('project-artifacts.mjs'))});assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),false);assert.equal(ps.trackedStateFiles(root,'codex').size,0);assert.ok(pa.ensureProjectArtifactDir(root,'_hooks').endsWith('/_core/_hooks'));
+  assert.equal(spawnSync('git',['-C',root,'init','--quiet'],{env,encoding:'utf8'}).status,0);assert.equal(fs.existsSync(join(root,'.git/index')),false);
+  const ps=await import(${JSON.stringify(url('project-state.mjs'))}),pa=await import(${JSON.stringify(url('project-artifacts.mjs'))});assert.equal(ps.trackedStateFiles(root,'codex').has('workspace.json'),false);assert.equal(ps.trackedStateFiles(root,'codex').size,0);assert.ok(nx(pa.ensureProjectArtifactDir(root,'_hooks')).endsWith('/_core/_hooks'));
 `);
 
 control('invalid transfer timestamp is refused before producing an invalid receipt', `
   writeSource({[unit]:oldStamp});const bytes=fs.readFileSync(source,'utf8');
   for(const now of ['not-a-date',null,42]){
     const r=importOld({apply:true,now});assert.equal(r.status,'held');assert.equal(r.reason,'invalid-import-timestamp');
-    assert.equal(fs.existsSync(root+'/_memories/_lib'),false);assert.equal(fs.readFileSync(source,'utf8'),bytes);
+    assert.equal(fs.existsSync(join(root,'_memories/_lib')),false);assert.equal(fs.readFileSync(source,'utf8'),bytes);
   }
 `);
 
@@ -107,7 +109,7 @@ control('import preserves old baseline and attribution; later owner edit stays p
 control('dry-run plans old evidence without cache, directory, receipt or source changes', `
   writeSource({[unit]:oldStamp});const bytes=fs.readFileSync(source,'utf8');
   const r=importOld();assert.equal(r.status,'planned');assert.equal(r.eligible_count,1);
-  assert.equal(fs.existsSync(root+'/_memories/_lib'),false);assert.equal(fs.readFileSync(source,'utf8'),bytes);
+  assert.equal(fs.existsSync(join(root,'_memories/_lib')),false);assert.equal(fs.readFileSync(source,'utf8'),bytes);
 `);
 
 control('local own key beats newer, older and tied legacy timestamps without modifying its evidence', `
@@ -126,7 +128,7 @@ control('null local own key is held, never replaced by a valid legacy entry', `
 
 control('corrupt source and corrupt local cache do not become absence or trigger adoption', `
   fs.writeFileSync(source,'{broken');const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.existsSync(cache),false);
-  writeSource({[unit]:oldStamp});fs.mkdirSync(root+'/_memories/_lib',{recursive:true});fs.writeFileSync(cache,'{damaged');
+  writeSource({[unit]:oldStamp});fs.mkdirSync(join(root,'_memories/_lib'),{recursive:true});fs.writeFileSync(cache,'{damaged');
   const again=importOld({apply:true});assert.equal(again.status,'held');assert.equal(fs.readFileSync(cache,'utf8'),'{damaged');
 `);
 
@@ -134,14 +136,14 @@ control('verified repeat is a local-only no-op and retains a newer local stamp a
   writeSource({[unit]:oldStamp});assert.equal(importOld({apply:true}).status,'verified');
   assert.equal(sc.stampFile(root,unit,sc.hashText('new stamp'),'later-writer',{now:'2026-10-02T00:00:00Z',extra:{outside_hash:sc.hashText('new stamp')}}).stamped,true);
   const before=fs.readFileSync(cache,'utf8');let attempts=0;const read=fs.readFileSync,stat=fs.lstatSync,dir=fs.readdirSync;
-  const block=(fn)=>(p,...a)=>{if(String(p)===source||String(p).startsWith(home+'/.core/')){attempts++;throw Object.assign(new Error('legacy access denied'),{code:'EACCES'});}return fn(p,...a);};
+  const block=(fn)=>(p,...a)=>{if(String(p)===source||nx(p).startsWith(nx(home)+'/.core/')){attempts++;throw Object.assign(new Error('legacy access denied'),{code:'EACCES'});}return fn(p,...a);};
   fs.readFileSync=block(read);fs.lstatSync=block(stat);fs.readdirSync=block(dir);syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,'verified');assert.equal(r.noop,true);assert.equal(attempts,0);
   assert.equal(fs.readFileSync(cache,'utf8'),before);assert.equal(JSON.parse(before).files[unit].last_written_by,'later-writer');
 `);
 
 control('missing project candidate retains held coverage while valid old evidence transfers', `
-  writeSource({[unit]:oldStamp,[root+'/_memories/missing.md']:oldStamp});
+  writeSource({[unit]:oldStamp,[join(root,'_memories/missing.md')]:oldStamp});
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.imported_count,1);
   assert.deepEqual(sc.readProjectCache(root).files[unit],oldStamp);
   const before=fs.readFileSync(cache,'utf8');let attempts=0;const read=fs.readFileSync;
@@ -201,7 +203,7 @@ control('clean legacy envelope with no matching keys is held, never reported as 
 
 control('new generated cache has local ignore policy before the first cache or mutex write', `
   writeSource({[unit]:oldStamp});const open=fs.openSync,write=fs.writeFileSync;
-  const check=(p)=>{if(String(p).startsWith(root+'/_memories/_lib/')&&!String(p).endsWith('/.gitignore'))assert.equal(fs.readFileSync(root+'/_memories/_lib/.gitignore','utf8').trim(),'*');};
+  const check=(p)=>{if(String(p).startsWith(join(root,'_memories/_lib/'))&&!nx(p).endsWith('/.gitignore'))assert.equal(fs.readFileSync(join(root,'_memories/_lib/.gitignore'),'utf8').trim(),'*');};
   fs.openSync=(p,...a)=>{check(p);return open(p,...a);};fs.writeFileSync=(p,...a)=>{check(p);return write(p,...a);};syncBuiltinESMExports();
   assert.equal(importOld({apply:true}).status,'verified');
 `);
@@ -210,18 +212,18 @@ control('tracked generated cache is retained, not overwritten despite ignore pol
   const {spawnSync}=await import('node:child_process');const env={...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
   assert.equal(spawnSync('git',['-C',root,'init','--quiet'],{env,encoding:'utf8'}).status,0);
   writeLocal({files:{},retained:'tracked'});assert.equal(spawnSync('git',['-C',root,'add','--force','_memories/_lib/state-cache.json'],{env,encoding:'utf8'}).status,0);
-  const before=fs.readFileSync(cache,'utf8');writeSource({[unit]:oldStamp});const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.readFileSync(cache,'utf8'),before);assert.equal(fs.existsSync(root+'/_memories/_lib/.state-cache.lock'),false);
+  const before=fs.readFileSync(cache,'utf8');writeSource({[unit]:oldStamp});const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.readFileSync(cache,'utf8'),before);assert.equal(fs.existsSync(join(root,'_memories/_lib/.state-cache.lock')),false);
 `);
 
 control('existing incompatible ignore policy is preserved and prevents importer writes', `
-  writeSource({[unit]:oldStamp});fs.mkdirSync(root+'/_memories/_lib',{recursive:true});const ignore=root+'/_memories/_lib/.gitignore';fs.writeFileSync(ignore,'*\\n!state-cache.json\\n');
-  const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.readFileSync(ignore,'utf8'),'*\\n!state-cache.json\\n');assert.equal(fs.existsSync(cache),false);assert.equal(fs.existsSync(root+'/_memories/_lib/.state-cache.lock'),false);
+  writeSource({[unit]:oldStamp});fs.mkdirSync(join(root,'_memories/_lib'),{recursive:true});const ignore=join(root,'_memories/_lib/.gitignore');fs.writeFileSync(ignore,'*\\n!state-cache.json\\n');
+  const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.readFileSync(ignore,'utf8'),'*\\n!state-cache.json\\n');assert.equal(fs.existsSync(cache),false);assert.equal(fs.existsSync(join(root,'_memories/_lib/.state-cache.lock')),false);
 `);
 
 control('unknown project Git metadata cannot be treated as no tracked generated files', `
   writeSource({[unit]:oldStamp});const stat=fs.lstatSync;let checks=0;
-  fs.lstatSync=(p,...a)=>{if(String(p)===root+'/.git'){checks++;throw Object.assign(new Error('metadata unavailable'),{code:'EACCES'});}return stat(p,...a);};syncBuiltinESMExports();
-  const r=importOld({apply:true});assert.equal(r.status,'held');assert.ok(checks>0);assert.equal(fs.existsSync(cache),false);assert.equal(fs.existsSync(root+'/_memories/_lib/.state-cache.lock'),false);
+  fs.lstatSync=(p,...a)=>{if(String(p)===join(root,'.git')){checks++;throw Object.assign(new Error('metadata unavailable'),{code:'EACCES'});}return stat(p,...a);};syncBuiltinESMExports();
+  const r=importOld({apply:true});assert.equal(r.status,'held');assert.ok(checks>0);assert.equal(fs.existsSync(cache),false);assert.equal(fs.existsSync(join(root,'_memories/_lib/.state-cache.lock')),false);
 `);
 
 control('unresolved local alternate key is retained without shadowing it with a new exact key', `
@@ -266,7 +268,7 @@ control('unrelated normal stamp after interruption survives per-key recovery and
   writeSource({[unit]:oldStamp});const rename=fs.renameSync;let commits=0;
   fs.renameSync=(from,to,...a)=>{const r=rename(from,to,...a);if(String(to)===cache&&++commits===1)throw Object.assign(new Error('first image landed'),{code:'EIO'});return r;};syncBuiltinESMExports();
   assert.equal(importOld({apply:true}).status,'held');fs.renameSync=rename;syncBuiltinESMExports();
-  const other=root+'/_memories/other.md';fs.writeFileSync(other,original);
+  const other=join(root,'_memories/other.md');fs.writeFileSync(other,original);
   assert.equal(ld.stampCreatedBaseline(root,other,{kind:'unit',now:'2026-10-03T00:00:00Z',lastWrittenBy:'unrelated-writer'}).stamped,true);
   const stamp=JSON.parse(fs.readFileSync(cache,'utf8')).files[other];
   const r=importOld({apply:true,recover:true});assert.equal(r.status,'verified');
@@ -281,7 +283,7 @@ control('damaged receipt is held locally without fallback or cache replacement',
 `);
 
 control('actual import CLI is dry-run/apply; held coverage stays nonzero in JSON and text', `
-  const {spawnSync}=await import('node:child_process');writeSource({[unit]:oldStamp,[root+'/_memories/missing.md']:oldStamp});
+  const {spawnSync}=await import('node:child_process');writeSource({[unit]:oldStamp,[join(root,'_memories/missing.md')]:oldStamp});
   const preload='data:text/javascript,'+encodeURIComponent('import os from "node:os";import {syncBuiltinESMExports} from "node:module";os.userInfo=()=>({homedir:'+JSON.stringify(home)+'});syncBuiltinESMExports();');
   const script=${JSON.stringify(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/lifecycle-detect.mjs', import.meta.url)))};
   const run=(args)=>spawnSync(process.execPath,['--import',preload,script,root,'--import-legacy-cache',...args],{encoding:'utf8',timeout:5000,env:{...process.env,NODE_OPTIONS:'',CORE_HOOKS_LOG_FILE:'/dev/null'}});
@@ -300,7 +302,7 @@ for (const kind of ['parent-link','leaf-link','leaf-hardlink','leaf-fifo']) cont
   let reads=0;const read=fs.readFileSync;fs.readFileSync=(p,...a)=>{if(String(p)===source){reads++;throw new Error('unsafe source selected');}return read(p,...a);};syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(reads,0);assert.equal(fs.existsSync(cache),false);
   const retained=kind==='parent-link'?home+'/foreign-core/state-cache.json':foreign;assert.equal(read(kind==='leaf-hardlink'?source:retained,'utf8'),before);
-`);
+`, { skip: kind === 'leaf-fifo' ? (isWin && 'mkfifo is POSIX') : (kind !== 'leaf-hardlink' && !canLink && 'symlinks need a privilege this account lacks') });
 
 for (const errno of ['EACCES','EIO']) control('legacy metadata '+errno+' is unknown rather than absent', `
   writeSource({[unit]:oldStamp});const before=fs.readFileSync(source,'utf8');const stat=fs.lstatSync,read=fs.readFileSync;let reads=0;
@@ -324,14 +326,14 @@ control('failed cache write before first rename leaves no imported evidence or c
 
 control('verified transfer retains checked lock-release failure alongside its material result', `
   writeSource({[unit]:oldStamp});const before=fs.readFileSync(source,'utf8');const rename=fs.renameSync;
-  fs.renameSync=(from,to,...a)=>{if(String(to).includes('/.state-cache.lock.')&&String(to).endsWith('.done'))throw Object.assign(new Error('lock release refused'),{code:'EACCES'});return rename(from,to,...a);};syncBuiltinESMExports();
+  fs.renameSync=(from,to,...a)=>{if(nx(to).includes('/.state-cache.lock.')&&String(to).endsWith('.done'))throw Object.assign(new Error('lock release refused'),{code:'EACCES'});return rename(from,to,...a);};syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.reason,'LOCK_RELEASE_FAILED');assert.equal(r.phase,'verified');assert.equal(r.imported_count,1);assert.equal(r.lockReleaseFailures.length,1);
   assert.deepEqual(JSON.parse(fs.readFileSync(cache,'utf8')).files[unit],oldStamp);assert.equal(fs.readFileSync(source,'utf8'),before);
 `);
 
 control('local-only rerun exposes surviving mutex without reopening global source or claiming clean completion', `
   writeSource({[unit]:oldStamp});const rename=fs.renameSync;
-  fs.renameSync=(from,to,...a)=>{if(String(to).includes('/.state-cache.lock.')&&String(to).endsWith('.done'))throw Object.assign(new Error('lock release refused'),{code:'EACCES'});return rename(from,to,...a);};syncBuiltinESMExports();
+  fs.renameSync=(from,to,...a)=>{if(nx(to).includes('/.state-cache.lock.')&&String(to).endsWith('.done'))throw Object.assign(new Error('lock release refused'),{code:'EACCES'});return rename(from,to,...a);};syncBuiltinESMExports();
   assert.equal(importOld({apply:true}).status,'held');fs.renameSync=rename;syncBuiltinESMExports();
   const read=fs.readFileSync;let reads=0;fs.readFileSync=(p,...a)=>{if(String(p)===source){reads++;throw new Error('no global reopen');}return read(p,...a);};syncBuiltinESMExports();
   const before=fs.readFileSync(cache,'utf8');const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.reason,'local-cache-mutex-unsettled');assert.equal(r.phase,'verified');assert.equal(reads,0);assert.equal(fs.readFileSync(cache,'utf8'),before);
@@ -358,15 +360,15 @@ for (const [name,mutation] of [
 `);
 
 control('nested project boundary is held without inheriting its old baseline', `
-  const nested=root+'/_memories/observations/nested';fs.mkdirSync(nested,{recursive:true});fs.writeFileSync(nested+'/PROJECT.md','# Different project');const target=nested+'/decision.md';fs.writeFileSync(target,original);writeSource({[unit]:oldStamp,[target]:oldStamp});
+  const nested=join(root,'_memories/observations/nested');fs.mkdirSync(nested,{recursive:true});fs.writeFileSync(nested+'/PROJECT.md','# Different project');const target=join(nested,'decision.md');fs.writeFileSync(target,original);writeSource({[unit]:oldStamp,[target]:oldStamp});
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.imported_count,1);const c=JSON.parse(fs.readFileSync(cache,'utf8'));assert.deepEqual(c.files[unit],oldStamp);assert.equal(Object.hasOwn(c.files,target),false);assert.ok(r.held.some(x=>x.path===target));
 `);
 
 control('malformed Git index is unknown even when its raw bytes omit the generated cache prefix', `
   const {spawnSync}=await import('node:child_process');const env={...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
   assert.equal(spawnSync('git',['-C',root,'init','--quiet'],{env,encoding:'utf8'}).status,0);
-  const invalid=Buffer.alloc(12);invalid.write('DIRC');invalid.writeUInt32BE(2,4);fs.writeFileSync(root+'/.git/index',invalid);writeSource({[unit]:oldStamp});
-  const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.existsSync(cache),false);assert.equal(fs.existsSync(root+'/_memories/_lib/.state-cache.lock'),false);
+  const invalid=Buffer.alloc(12);invalid.write('DIRC');invalid.writeUInt32BE(2,4);fs.writeFileSync(join(root,'.git/index'),invalid);writeSource({[unit]:oldStamp});
+  const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.existsSync(cache),false);assert.equal(fs.existsSync(join(root,'_memories/_lib/.state-cache.lock')),false);
 `);
 
 control('verified local receipt cannot clear a cache subsequently forced into the Git index', `
@@ -378,7 +380,7 @@ control('verified local receipt cannot clear a cache subsequently forced into th
 `);
 
 control('local-only rerun detects broken ignore policy without rewriting it or accessing the source', `
-  writeSource({[unit]:oldStamp});assert.equal(importOld({apply:true}).status,'verified');const ignore=root+'/_memories/_lib/.gitignore';fs.writeFileSync(ignore,'!state-cache.json\\n');const before=fs.readFileSync(cache,'utf8');
+  writeSource({[unit]:oldStamp});assert.equal(importOld({apply:true}).status,'verified');const ignore=join(root,'_memories/_lib/.gitignore');fs.writeFileSync(ignore,'!state-cache.json\\n');const before=fs.readFileSync(cache,'utf8');
   const read=fs.readFileSync;let reads=0;fs.readFileSync=(p,...a)=>{if(String(p)===source){reads++;throw new Error('no legacy read');}return read(p,...a);};syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(reads,0);assert.equal(fs.readFileSync(cache,'utf8'),before);assert.equal(fs.readFileSync(ignore,'utf8'),'!state-cache.json\\n');
 `);
@@ -413,14 +415,14 @@ control('interrupted recovery dry-run stays held and leaves both images untouche
 
 control('ordinary real detection after import never opens or probes the legacy cache', `
   writeSource({[unit]:oldStamp});assert.equal(importOld({apply:true}).status,'verified');
-  const read=fs.readFileSync,stat=fs.lstatSync;let attempts=0;const block=fn=>(p,...a)=>{if(String(p).startsWith(home+'/.core/')){attempts++;throw Object.assign(new Error('no legacy access'),{code:'EACCES'});}return fn(p,...a);};fs.readFileSync=block(read);fs.lstatSync=block(stat);syncBuiltinESMExports();
+  const read=fs.readFileSync,stat=fs.lstatSync;let attempts=0;const block=fn=>(p,...a)=>{if(nx(p).startsWith(nx(home)+'/.core/')){attempts++;throw Object.assign(new Error('no legacy access'),{code:'EACCES'});}return fn(p,...a);};fs.readFileSync=block(read);fs.lstatSync=block(stat);syncBuiltinESMExports();
   assert.equal(ld.detectStore(root).files[0].classification,'clean');fs.writeFileSync(unit,original.replace('Original owner decision.','Later ordinary detection edit.'));assert.equal(ld.detectStore(root).files[0].classification,'pending-edit');assert.equal(attempts,0);
 `);
 
 control('PROJECT and declared generated index keys retain old evidence without target-content adoption', `
-  const hot=await import(${JSON.stringify(url('hot-section.mjs'))});const project=root+'/PROJECT.md';fs.writeFileSync(project,original);
+  const hot=await import(${JSON.stringify(url('hot-section.mjs'))});const project=join(root,'PROJECT.md');fs.writeFileSync(project,original);
   const projectStamp={...oldStamp,last_written_by:'hot-section',outside_hash:hot.hashOutsideHotBlock(original)};
-  const index=root+'/_memories/INDEX-decisions.md',summaries=root+'/_memories/_lib/unit-summaries.json';fs.mkdirSync(root+'/_memories/_lib',{recursive:true});fs.writeFileSync(index,'old generated index');fs.writeFileSync(summaries,'{}');
+  const index=join(root,'_memories/INDEX-decisions.md'),summaries=join(root,'_memories/_lib/unit-summaries.json');fs.mkdirSync(join(root,'_memories/_lib'),{recursive:true});fs.writeFileSync(index,'old generated index');fs.writeFileSync(summaries,'{}');
   const indexStamp={...oldStamp,last_hash:sc.hashText('old generated index'),last_written_by:'maintenance-run'};delete indexStamp.outside_hash;
   const summaryStamp={...indexStamp,last_hash:sc.hashText('{}')};writeSource({[unit]:oldStamp,[project]:projectStamp,[index]:indexStamp,[summaries]:summaryStamp});
   let reads=0;const read=fs.readFileSync;fs.readFileSync=(p,...a)=>{if([unit,project,index,summaries].includes(String(p))){reads++;throw new Error('import must not adopt selected target bytes');}return read(p,...a);};syncBuiltinESMExports();
@@ -430,16 +432,16 @@ control('PROJECT and declared generated index keys retain old evidence without t
 `);
 
 for(const kind of ['link','hardlink','directory']) control('ignore policy '+kind+' is held before importer mutex/cache writes', `
-  writeSource({[unit]:oldStamp});fs.mkdirSync(root+'/_memories/_lib',{recursive:true});const ignore=root+'/_memories/_lib/.gitignore',foreign=root+'/foreign-policy';fs.writeFileSync(foreign,'*\\n');
+  writeSource({[unit]:oldStamp});fs.mkdirSync(join(root,'_memories/_lib'),{recursive:true});const ignore=join(root,'_memories/_lib/.gitignore'),foreign=join(root,'foreign-policy');fs.writeFileSync(foreign,'*\\n');
   const kind=${JSON.stringify(kind)};if(kind==='link')fs.symlinkSync(foreign,ignore);if(kind==='hardlink')fs.linkSync(foreign,ignore);if(kind==='directory')fs.mkdirSync(ignore);
-  const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.existsSync(cache),false);assert.equal(fs.readFileSync(foreign,'utf8'),'*\\n');assert.ok(!fs.readdirSync(root+'/_memories/_lib').some(n=>n.startsWith('.state-cache.lock')));
-`);
+  const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.existsSync(cache),false);assert.equal(fs.readFileSync(foreign,'utf8'),'*\\n');assert.ok(!fs.readdirSync(join(root,'_memories/_lib')).some(n=>n.startsWith('.state-cache.lock')));
+`, { skip: kind === 'link' && !canLink && 'symlinks need a privilege this account lacks' });
 
 control('linked candidate parent holds before target probes while independent old stamp transfers', `
-  const parent=root+'/_memories/observations',foreign=root+'/foreign';fs.mkdirSync(foreign);const target=parent+'/foreign.md';fs.writeFileSync(foreign+'/foreign.md',original);fs.symlinkSync(foreign,parent);writeSource({[unit]:oldStamp,[target]:oldStamp});
+  const parent=join(root,'_memories/observations'),foreign=join(root,'foreign');fs.mkdirSync(foreign);const target=join(parent,'foreign.md');fs.writeFileSync(foreign+'/foreign.md',original);fs.symlinkSync(foreign,parent);writeSource({[unit]:oldStamp,[target]:oldStamp});
   const read=fs.readFileSync,stat=fs.lstatSync;let targetReads=0,targetStats=0;fs.readFileSync=(p,...a)=>{if(String(p)===target){targetReads++;throw new Error('target bytes must not be selected');}return read(p,...a);};fs.lstatSync=(p,...a)=>{if(String(p)===target){targetStats++;throw new Error('parent must be checked first');}return stat(p,...a);};syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(r.imported_count,1);assert.equal(targetReads,0);assert.equal(targetStats,0);assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(cache,'utf8')).files,target),false);
-`);
+`, { skip: !canLink && 'symlinks need a privilege this account lacks' });
 
 control('source envelope and selected stamp field damage remain held, source bytes retained', `
   for(const damaged of ['null','{"files":[]}','{"files":"unknown"}']){fs.writeFileSync(source,damaged);const r=importOld({apply:true});assert.equal(r.status,'held');assert.equal(fs.readFileSync(source,'utf8'),damaged);assert.equal(fs.existsSync(cache),false);}
@@ -453,14 +455,14 @@ control('recovery without a recorded transfer is held locally and never initiate
 
 for (const fault of [false,true]) control('Git worktree-style pointer '+(fault?'observed presence then unreadable remains unknown':'supports a normal import'), `
   const {spawnSync}=await import('node:child_process');const env={...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};assert.equal(spawnSync('git',['-C',root,'init','--quiet'],{env,encoding:'utf8'}).status,0);
-  fs.renameSync(root+'/.git',root+'/.git-store');fs.writeFileSync(root+'/.git','gitdir: .git-store\\n');writeSource({[unit]:oldStamp});
-  const fault=${JSON.stringify(fault)};const read=fs.readFileSync;let faults=0;fs.readFileSync=(p,...a)=>{if(fault&&String(p)===root+'/.git'){faults++;throw Object.assign(new Error('observed pointer became unreadable'),{code:'ENOENT'});}return read(p,...a);};syncBuiltinESMExports();
+  fs.renameSync(join(root,'.git'),join(root,'.git-store'));fs.writeFileSync(join(root,'.git'),'gitdir: .git-store\\n');writeSource({[unit]:oldStamp});
+  const fault=${JSON.stringify(fault)};const read=fs.readFileSync;let faults=0;fs.readFileSync=(p,...a)=>{if(fault&&String(p)===join(root,'.git')){faults++;throw Object.assign(new Error('observed pointer became unreadable'),{code:'ENOENT'});}return read(p,...a);};syncBuiltinESMExports();
   const r=importOld({apply:true});assert.equal(r.status,fault?'held':'verified');if(fault){assert.ok(faults>0);assert.equal(fs.existsSync(cache),false);}else assert.deepEqual(JSON.parse(fs.readFileSync(cache,'utf8')).files[unit],oldStamp);
 `);
 
 control('recovery rechecks receipt presence under the mutex and cannot restart a disappeared transfer', `
   writeSource({[unit]:oldStamp});const rename=fs.renameSync;let commits=0;
   fs.renameSync=(from,to,...a)=>{const r=rename(from,to,...a);if(String(to)===cache&&++commits===1)throw Object.assign(new Error('interrupted'),{code:'EIO'});return r;};syncBuiltinESMExports();assert.equal(importOld({apply:true}).status,'held');fs.renameSync=rename;syncBuiltinESMExports();
-  const link=fs.linkSync;let afterRemoval=null;fs.linkSync=(from,to,...a)=>{const r=link(from,to,...a);if(String(to).startsWith(root+'/_memories/_lib/.state-cache.lock.g')){const c=JSON.parse(fs.readFileSync(cache,'utf8'));delete c.legacy_baseline_import;afterRemoval=JSON.stringify(c);fs.writeFileSync(cache,afterRemoval);}return r;};syncBuiltinESMExports();
+  const link=fs.linkSync;let afterRemoval=null;fs.linkSync=(from,to,...a)=>{const r=link(from,to,...a);if(String(to).startsWith(join(root,'_memories/_lib/.state-cache.lock.g'))){const c=JSON.parse(fs.readFileSync(cache,'utf8'));delete c.legacy_baseline_import;afterRemoval=JSON.stringify(c);fs.writeFileSync(cache,afterRemoval);}return r;};syncBuiltinESMExports();
   const r=importOld({apply:true,recover:true});assert.equal(r.status,'held');assert.equal(r.reason,'no-import-to-recover');assert.ok(afterRemoval);assert.equal(fs.readFileSync(cache,'utf8'),afterRemoval);assert.deepEqual(JSON.parse(afterRemoval).files[unit],oldStamp);
 `);

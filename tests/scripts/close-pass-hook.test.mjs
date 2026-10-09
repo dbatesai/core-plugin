@@ -55,9 +55,17 @@ function runHook(payload, env = {}) {
   return { out, code, events, spawned: existsSync(spawned) ? JSON.parse(readFileSync(spawned, 'utf8')) : null };
 }
 
+// The detached close the real-spawn tests start can still hold the folder for a moment; on Windows removal then fails
+// at once with EPERM (rmSync's own retry options do not apply to the native remove path), so retry here.
+function rmWhenReleased(dir) {
+  for (let i = 0; ; i++) {
+    try { rmSync(dir, { recursive: true, force: true }); return; }
+    catch (e) { if (i >= 50 || !['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code)) throw e; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100); }
+  }
+}
 function registeredFixture(t) {
   const store = mkdtempSync(join(tmpdir(), 'close-hook-registered-'));
-  t.after(() => rmSync(store, { recursive: true, force: true }));
+  t.after(() => rmWhenReleased(store));
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"registered-control"}');
   return {
