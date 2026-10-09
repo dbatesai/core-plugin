@@ -6,7 +6,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, readdirSyn
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { accountHomeArgs } from '../helpers/account-home.mjs';
 
 // A file:// URL, not a path: on Windows a bare `D:\\...` import reads the drive letter as a URL scheme.

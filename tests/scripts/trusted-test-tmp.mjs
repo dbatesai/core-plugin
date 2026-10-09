@@ -72,7 +72,9 @@ export function removeLocalStateOnExit(project) {
 }
 
 export function trustedTestTmpRoot() {
-  const dir = join(trustedHome(), '.core', '.test-tmp');   // the account record: that is the root CORE trusts
+  // Under the isolated runner, its disposable account (CORE_TEST_ACCOUNT_HOME) even in a child that dropped the
+  // preload: such a child would otherwise read the real account record and create .test-tmp in the real ~/.core.
+  const dir = join(process.env.CORE_TEST_ACCOUNT_HOME || trustedHome(), '.core', '.test-tmp');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
