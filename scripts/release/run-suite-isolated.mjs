@@ -61,8 +61,15 @@ try {
   const code = denied.stdout.trim();
   let refusal = `write refused with ${code}`;
   if (!['EACCES', 'EPERM'].includes(code) || existsSync(join(core, 'stray.txt'))) {
-    // A hosted runner's administrator account is not bound by the folder deny. Only with this explicit
-    // switch does the run go on, on the disposable account alone, saying so; the after-run entry check still applies.
+    // Some accounts are not bound by the folder deny (seen on the hosted Windows runner; the cause is what the
+    // evidence below records). Only with this explicit switch does the run go on, on the disposable account alone,
+    // saying so; the after-run entry check still applies.
+    if (win) {
+      for (const [cmd, args] of [['whoami', ['/groups', '/fo', 'list']], ['whoami', ['/priv', '/fo', 'list']], ['icacls', [core]]]) {
+        const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 15000 });
+        process.stdout.write(`isolated suite: deny evidence \`${cmd} ${args.join(' ')}\` (exit ${r.status}):\n${(r.stdout || r.stderr || '').trim()}\n`);
+      }
+    }
     if (process.env.CORE_SUITE_ALLOW_UNENFORCED_DENY !== '1') { fail(`control 2: a write into the protected ~/.core gave '${code}' (running as a user the folder mode cannot bind, such as root?)`); throw STOP; }
     rmSync(join(core, 'stray.txt'), { force: true });
     refusal = `write deny NOT enforceable for this account (gave '${code}'); disposable account only`;

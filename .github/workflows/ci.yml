@@ -295,9 +295,9 @@ jobs:
 
       # Both platforms: the suite runs against a disposable, seeded account home whose ~/.core takes no new
       # entries, after controls that prove the account resolved, a write refused, and the test root writable.
-      # On Windows the refusal is a folder-only ACL deny the runner adds and removes itself; the hosted
-      # runner's administrator account is not bound by it, so there the run says so and relies on the
-      # disposable account plus the real-home check below.
+      # On Windows the refusal is a folder-only ACL deny the runner adds and removes itself. The hosted
+      # runner's account is not bound by it (the runner prints its groups, privileges and the folder ACL);
+      # there the run says so and relies on the disposable account plus the real-home check below.
       - name: Run node test suite (isolated account home)
         shell: bash
         env:
