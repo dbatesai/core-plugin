@@ -300,7 +300,7 @@ export function main(argv) {
 
       atomicWriteFileSync(projectMd, newText);
       wrote = true;
-      const outcome = recordProjectMdWrite(projectMd);
+      const outcome = recordProjectMdWrite(projectMd, { written: newText });
       if (outcome && outcome.stamped === false) attributionFailed = outcome;
     });
   }

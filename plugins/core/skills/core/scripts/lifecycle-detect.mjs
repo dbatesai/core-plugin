@@ -185,9 +185,14 @@ export function recordSessionStart(projectDir, { sessionId = null, now = new Dat
  * stamp failure surfaces as attribution-unknown/recovery-required, per the
  * review requirement) — it never throws into the creator.
  */
-export function stampCreatedBaseline(projectDir, absPath, { kind = 'unit', lastWrittenBy, now, home } = {}) {
+export function stampCreatedBaseline(projectDir, absPath, { kind = 'unit', lastWrittenBy, now, home, written } = {}) {
   const abs = resolve(absPath);
   const text = readFileSync(abs, 'utf8');
+  // With `written`, only the bytes the creator wrote can become its baseline; without it (the
+  // --stamp-created command), the current bytes are adopted as they stand.
+  if (typeof written === 'string' && text !== written) {
+    return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'changed-since-write' };
+  }
   const outsideHash = kind === 'project' ? hashOutsideHotBlock(text) : hashOutsideEdgesBlock(text);
   const by = lastWrittenBy || (kind === 'project' ? 'project-create' : 'unit-create');
   return stampFile(projectDir, abs, hashText(text), by, { now, home, extra: { outside_hash: outsideHash } });
@@ -205,7 +210,7 @@ export function createFile(projectDir, absPath, content, { kind = 'unit', lastWr
   const abs = resolve(absPath);
   mkdirSync(dirname(abs), { recursive: true });
   atomicWriteFileSync(abs, content);
-  return stampCreatedBaseline(projectDir, abs, { kind, lastWrittenBy, now, home });
+  return stampCreatedBaseline(projectDir, abs, { kind, lastWrittenBy, now, home, written: content });
 }
 
 // ---------- per-file classification (reporting) ----------
