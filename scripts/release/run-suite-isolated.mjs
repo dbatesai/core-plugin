@@ -65,7 +65,8 @@ try {
     // evidence below records). Only with this explicit switch does the run go on, on the disposable account alone,
     // saying so; the after-run entry check still applies.
     if (win) {
-      for (const [cmd, args] of [['whoami', ['/groups', '/fo', 'list']], ['whoami', ['/priv', '/fo', 'list']], ['icacls', [core]]]) {
+      const whoami = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'whoami.exe');   // Git Bash puts GNU whoami first on PATH
+      for (const [cmd, args] of [[whoami, ['/groups', '/fo', 'list']], [whoami, ['/priv', '/fo', 'list']], ['icacls', [core]]]) {
         const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 15000 });
         process.stdout.write(`isolated suite: deny evidence \`${cmd} ${args.join(' ')}\` (exit ${r.status}):\n${(r.stdout || r.stderr || '').trim()}\n`);
       }
