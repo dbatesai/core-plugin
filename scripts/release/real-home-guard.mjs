@@ -56,7 +56,12 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split(/[\\/]/).p
   if (cmd === 'snapshot' && file) { writeFileSync(file, JSON.stringify(snapshot(home))); process.exit(0); }
   if (cmd === 'check' && file) {
     const problems = diff(JSON.parse(readFileSync(file, 'utf8')), snapshot(home));
-    if (problems.length) { process.stderr.write(`the test suite changed the real account ~/.core (${home}):\n  ${problems.join('\n  ')}\n`); process.exit(1); }
+    if (problems.length) {
+      // ~/.core that did not exist before can come back holding only names the snapshot skips: name everything in it.
+      let made = '';
+      if (problems.includes('removed: .')) { try { made = `\n  ~/.core now exists, holding: ${readdirSync(join(home, '.core')).join(', ') || '(nothing)'}`; } catch { /* still absent */ } }
+      process.stderr.write(`the test suite changed the real account ~/.core (${home}):\n  ${problems.join('\n  ')}${made}\n`); process.exit(1);
+    }
     process.stdout.write('real ~/.core untouched\n'); process.exit(0);
   }
   process.stderr.write('usage: real-home-guard.mjs snapshot|check <file> [--home <dir>]\n'); process.exit(2);
