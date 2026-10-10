@@ -224,14 +224,15 @@ export function classifyProjectMdChange(cachedStamp, currentText) {
 }
 
 export function recordProjectMdWrite(projectMdPath, { now = null, home = null, written } = {}) {
-  const currentText = (() => {
-    try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
-  })();
+  let currentText = '';
+  let readFailed = false;
+  try { currentText = readFileSync(projectMdPath, 'utf8'); } catch { readFailed = true; }
   // A writer passes the exact text it wrote. If the file no longer holds those bytes (someone edited it
   // between the write and this stamp), nothing is stamped: the previous baseline stays, so the change
-  // reads as the user's, never as CORE's.
-  if (typeof written === 'string' && currentText !== written) {
-    return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'changed-since-write' };
+  // reads as the user's, never as CORE's. A read that fails is not an empty file, so it never matches.
+  if (typeof written === 'string') {
+    if (readFailed) return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'unreadable-after-write' };
+    if (currentText !== written) return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'changed-since-write' };
   }
   const projectDir = dirname(resolve(projectMdPath));
   // Shared locked-stamp plumbing lives in state-cache.mjs (shared with

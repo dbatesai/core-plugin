@@ -49,6 +49,28 @@ test('when the file still holds the written bytes, the stamp lands and names COR
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('an unreadable file never matches written bytes, even when the writer wrote an empty string', () => {
+  const { root, pm, entry } = setup();
+  try {
+    const before = entry(pm);
+    rmSync(pm); // the read after the write fails
+    const out = recordProjectMdWrite(pm, { now: '2026-10-02T00:00:00Z', written: '' });
+    assert.equal(out.stamped, false);
+    assert.equal(out.reason, 'unreadable-after-write');
+    assert.deepEqual(entry(pm), before, 'the previous baseline is untouched');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a file that really holds the empty string written is still stamped (a read that succeeds is not a read failure)', () => {
+  const { root, pm } = setup();
+  try {
+    writeFileSync(pm, '');
+    const out = recordProjectMdWrite(pm, { now: '2026-10-02T00:00:00Z', written: '' });
+    assert.notEqual(out.stamped, false);
+    assert.notEqual(out.reason, 'unreadable-after-write');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a creation baseline is refused when the file changed after it was created', () => {
   const { root, project, entry } = setup();
   try {
