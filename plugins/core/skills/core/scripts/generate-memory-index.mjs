@@ -196,6 +196,29 @@ export function projectIdentityMismatch(memoriesDir, memoryMdPath) {
   return { projectRoot, expectedMapped, actualMapped };
 }
 
+/**
+ * Compute-and-replace for a file another writer may also touch (the harness's own memory
+ * writer, another close). The text is re-read immediately before the write; if it changed
+ * since the read the new text is recomputed from the fresh bytes instead of replacing them.
+ * ponytail: not atomic. A change landing between the final re-read and the rename is still
+ * overwritten. A lock was rejected: it would leave lock files in a folder the harness reads.
+ * `beforeWrite` is a test seam that runs between the read and the re-read.
+ * @returns {{status: 'written'|'current'|'dry-run'|'changing'}}
+ */
+export function replaceIfUnchanged(path, compute, { attempts = 3, dryRun = false, beforeWrite = null } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    const oldText = readFileSync(path, 'utf8');
+    const newText = compute(oldText);
+    if (newText === oldText) return { status: 'current' };
+    if (dryRun) return { status: 'dry-run' };
+    if (beforeWrite) beforeWrite(i);
+    if (readFileSync(path, 'utf8') !== oldText) continue;
+    atomicWriteFileSync(path, newText);
+    return { status: 'written' };
+  }
+  return { status: 'changing' };
+}
+
 export function main(argv) {
   let memoriesDirArg = null;
   let memoryMdPath = null;
@@ -275,27 +298,29 @@ export function main(argv) {
     process.stderr.write(`error: --memory-md target does not exist: ${memoryMdPath}\n`);
     return 2;
   }
-  const oldText = readFileSync(memoryMdPath, 'utf8');
   // Canary removal is a write too: do it only after ownership/shared-file
   // guards and input validation, in the same atomic write as the index.
-  const cleanedText = stripCanaryLines(oldText);
-  const existingDescriptions = parseExistingDescriptions(cleanedText);
-  const newSection = renderPriorityBlock({
-    memoriesDir, topN, today, existingDescriptions,
-  });
-  const newText = spliceSection(cleanedText, newSection);
+  const result = replaceIfUnchanged(memoryMdPath, (oldText) => {
+    const cleanedText = stripCanaryLines(oldText);
+    const existingDescriptions = parseExistingDescriptions(cleanedText);
+    const newSection = renderPriorityBlock({
+      memoriesDir, topN, today, existingDescriptions,
+    });
+    return spliceSection(cleanedText, newSection);
+  }, { dryRun });
 
-  if (newText === oldText) {
+  if (result.status === 'current') {
     process.stderr.write(`No change: priority block already current (${topN} units, ${today.toISOString().slice(0, 10)})\n`);
     return 0;
   }
-
-  if (dryRun) {
+  if (result.status === 'dry-run') {
     process.stderr.write(`Dry run: would rewrite priority block in ${memoryMdPath} (${topN} units) — nothing written\n`);
     return 0;
   }
-
-  atomicWriteFileSync(memoryMdPath, newText);
+  if (result.status === 'changing') {
+    process.stderr.write(`error: ${memoryMdPath} kept changing while the priority block was being written; nothing written, run again\n`);
+    return 4;
+  }
   process.stderr.write(`Rewrote priority block in ${memoryMdPath} (${topN} units)\n`);
   return 0;
 }

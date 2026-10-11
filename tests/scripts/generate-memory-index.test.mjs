@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { main, spliceSection, stripCanaryLines } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
+import { main, spliceSection, stripCanaryLines, replaceIfUnchanged } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 
 const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/generate-memory-index.mjs'),
@@ -132,8 +132,10 @@ test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write',
   // fault injection (fs-atomic.test.mjs covers the helper itself), so this is a
   // static guard that the consumer uses the safe writer.
   assert.match(SRC, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
-  assert.match(SRC, /atomicWriteFileSync\(memoryMdPath/, 'writes MEMORY.md atomically');
+  assert.match(SRC, /atomicWriteFileSync\(path, newText\)/, 'the replacement helper writes atomically');
+  assert.match(SRC, /replaceIfUnchanged\(memoryMdPath/, 'MEMORY.md goes through the re-read-before-write helper');
   assert.doesNotMatch(SRC, /\bwriteFileSync\(memoryMdPath/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
+  assert.doesNotMatch(SRC, /\bwriteFileSync\(path,/, 'no bare writeFileSync inside the helper either');
 });
 
 test('--dry-run computes the change but writes nothing (was previously a documented no-op flag)', () => {
@@ -224,4 +226,55 @@ test('main() strips a leftover canary line on disk, leaves it under --dry-run, a
     assert.ok(!readFileSync(md, 'utf8').includes('vcan-'), 'the canary line is gone from disk');
     assert.equal(main([mem, '--memory-md', join(home, 'missing.md')]), 2, 'a missing MEMORY.md is refused cleanly, not thrown');
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// ---- the write is computed from the bytes that are on disk when it lands ----
+
+function scratchFile(text) {
+  const dir = mkdtempSync(join(tmpdir(), 'gmi-replace-'));
+  const file = join(dir, 'MEMORY.md');
+  writeFileSync(file, text);
+  return { dir, file };
+}
+
+test('replaceIfUnchanged: an unchanged file is replaced with the computed text', () => {
+  const { dir, file } = scratchFile('a\n');
+  try {
+    const r = replaceIfUnchanged(file, (t) => t + 'b\n');
+    assert.equal(r.status, 'written');
+    assert.equal(readFileSync(file, 'utf8'), 'a\nb\n');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('replaceIfUnchanged: a change by another writer between read and write is recomputed from, not overwritten', () => {
+  const { dir, file } = scratchFile('a\n');
+  try {
+    let injected = false;
+    const r = replaceIfUnchanged(file, (t) => t + 'b\n', {
+      beforeWrite: () => { if (!injected) { injected = true; writeFileSync(file, 'a\nother-writer\n'); } },
+    });
+    assert.equal(r.status, 'written');
+    assert.equal(readFileSync(file, 'utf8'), 'a\nother-writer\nb\n', "the other writer's line survives");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('replaceIfUnchanged: a file that keeps changing is left as the other writer wrote it and reports it', () => {
+  const { dir, file } = scratchFile('a\n');
+  try {
+    let n = 0;
+    const r = replaceIfUnchanged(file, (t) => t + 'b\n', {
+      beforeWrite: () => { writeFileSync(file, `other-${++n}\n`); },
+    });
+    assert.equal(r.status, 'changing');
+    assert.equal(readFileSync(file, 'utf8'), 'other-3\n', 'nothing of ours was written');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('replaceIfUnchanged: dry run and an already-current file write nothing', () => {
+  const { dir, file } = scratchFile('a\n');
+  try {
+    assert.equal(replaceIfUnchanged(file, (t) => t + 'b\n', { dryRun: true }).status, 'dry-run');
+    assert.equal(replaceIfUnchanged(file, (t) => t).status, 'current');
+    assert.equal(readFileSync(file, 'utf8'), 'a\n');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
