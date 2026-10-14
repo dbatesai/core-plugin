@@ -498,11 +498,11 @@ node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
 
 **Per-turn retrieval (default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**, and it injects only for a project registered in `~/.core` (a folder's own `_memories/` authorizes nothing, so a cloned repo's planted store is never injected; before the first `/core` registers the project, automatic retrieval stays off); opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the metrics opt-out). When the keyword result is empty or thin for a question, the hook also injects an escalation pack — the first two candidate shards as `id — summary` rows, capped at 32 KB — so the agent reasons over them in the same turn; `CORE_ESCALATION=0` turns that off (`references/retrieval.md` §Tier 3 has the trigger and the other switches). Known limit: lexical matching can still inject a topical-but-irrelevant unit on an abstract query the trigger doesn't catch — bounded (byte-capped, advisory, fail-open).
 
-Read the output. When **any row is non-PASS**, narrate in plain voice:
+Read the output. When **any row is non-PASS**, say so once, in plain and calm words: name the check that came back short, what that means for this session, and what the user can do about it, if anything. Do not call the session "ready" or "certified" on a degraded row, and do not turn the row's code name into a headline. For example:
 
-> *"Continuing with degraded capability evidence. plugin-root-resolution: DEGRADED (harness split-brain). Identity is best-effort this session."*
+> *"One check came back short: CORE couldn't confirm which plugin copy this session is running, so treat my notes about who I am here as best-effort until that's sorted."*
 
-Use the phrase **"continuing with degraded capability evidence"** verbatim — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
+When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
 
 If `$CORE_ROOT` was not resolved (script unavailable), skip the capability probe silently — the probe itself is best-effort at startup, never a blocker.
 
