@@ -3,7 +3,7 @@
  *
  * Local metrics are on by default for every install: from a user's first `/core`
  * invocation, turns get classified into `_metrics`/workspace metrics dirs, and that
- * classified log keeps the typed text. The fuller per-turn evidence record (the prompt
+ * classified log keeps the typed text, CORE's replies and its tool activity. The fuller per-turn evidence record (the prompt
  * and the delivered context) is opt-in. That
  * call was reasoned about for a small set of known, controlled installs; the
  * plugin has since gone public on the marketplace with no user-facing disclosure
@@ -52,7 +52,7 @@ export const HISTORY_NOTICE_VERSION = 8;
 export const NOTICE_TEXT = [
   "One thing worth knowing about this project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `_core/<harness>/workspace.json`.",
-  "Two things are kept locally from what you type. The classified turn log, which the recognition classifier writes as part of that metrics log, keeps the text of each of your turns so the classifier can be checked; it stays in the project, CORE never exports it, and `CORE_METRICS_ENABLED=0` turns it off. A fuller evidence record, each turn's prompt and the memory context CORE delivered, is off unless you turn it on, with `CORE_TURN_CAPTURE=1` in your environment or `turn_capture: true` in this project's `_core/<harness>/workspace.json`. Earlier versions kept that fuller record on by default; anything they already saved stays in the project until you purge it, and you can purge everything saved at any time.",
+  "Two things are kept locally from what you type. The classified turn log, which the recognition classifier writes as part of that metrics log, keeps the text of each of your turns, CORE's replies and its tool activity, so the classifier can be checked; it stays in the project, CORE never exports it, and `CORE_METRICS_ENABLED=0` turns it off. A fuller evidence record, each turn's prompt and the memory context CORE delivered, is off unless you turn it on, with `CORE_TURN_CAPTURE=1` in your environment or `turn_capture: true` in this project's `_core/<harness>/workspace.json`. Earlier versions kept that fuller record on by default; anything they already saved stays in the project until you purge it, and you can purge everything saved at any time.",
 ].join('\n\n');
 
 /**
