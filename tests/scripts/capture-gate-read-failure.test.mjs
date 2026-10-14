@@ -69,12 +69,12 @@ for (const code of ['EACCES', 'EIO']) {
   });
 }
 
-test('absent state remains default ON and creates no installation identity', () => {
+test('absent state: metrics stay default ON, turn capture is default OFF, and nothing creates an installation identity', () => {
   const f = fixture();
   try {
     const before = snapshot(f.base);
     assert.equal(metrics.metricsEnabled(f.options), true);
-    assert.equal(capture.turnCaptureEnabled(f.options), true);
+    assert.equal(capture.turnCaptureEnabled(f.options), false);
     assert.deepEqual(snapshot(f.base), before);
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
 });
@@ -118,15 +118,16 @@ test('readable untrusted opt-outs survive; malformed readable data retains its e
     assert.deepEqual(snapshot(f.base), before);
     fs.writeFileSync(f.manifest, '{malformed');
     assert.equal(metrics.metricsEnabled(f.options), true);
-    assert.equal(capture.turnCaptureEnabled(f.options), true);
+    assert.equal(capture.turnCaptureEnabled(f.options), false); // capture's default is off
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
 });
 
-for (const [name, gate, env] of [
-  ['metrics', metrics.metricsEnabled, {}],
-  ['turn capture', capture.turnCaptureEnabled, { CORE_METRICS_ENABLED: '1' }],
-]) test(`${name}: an unreadable legacy root manifest is OFF, an absent one stays ON`, () => {
-  const f = fixture();
+for (const [name, gate, env, manifest] of [
+  ['metrics', metrics.metricsEnabled, {}, undefined],
+  // Capture is opt-in, so its "on" state is the signed manifest's explicit opt-in.
+  ['turn capture', capture.turnCaptureEnabled, { CORE_METRICS_ENABLED: '1' }, { turn_capture: true }],
+]) test(`${name}: an unreadable legacy root manifest is OFF, an absent one leaves the enabled state alone`, () => {
+  const f = fixture(manifest);
   try {
     const opt = { ...f.options, env: { ...f.options.env, ...env } };
     const file = join(f.root, 'workspace.json');

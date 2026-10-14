@@ -222,7 +222,7 @@ test('judge op: unjudged evidence rows get judged in the pass, and the scorecard
     pack_text: 'pack', delivered: [{ id: 'dc-1-foo', score: 1, source_stage: 'ranked' }],
     rejected_top: [], truncation: { byte_cap_applied: false, prompt_tokens_used: 5 },
     store_signature: computeStoreSignature(root), producer_version: 'v', producer_sha: 'sha',
-  }, { env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_TURN_CAPTURE: '' } });
+  }, { env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_TURN_CAPTURE: '1' } });
   assert.equal(cap.written, true, cap.reason);
   const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
   assert.ok(res.ranOps.includes('hindsight-judge'), 'unjudged evidence → judge op ran');

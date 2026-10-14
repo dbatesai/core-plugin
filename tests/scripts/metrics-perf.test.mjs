@@ -34,7 +34,7 @@ function makeStore(root, units) {
 function cleanEnv() {
   const env = { ...process.env };
   delete env.CORE_METRICS_ENABLED;
-  delete env.CORE_TURN_CAPTURE;
+  env.CORE_TURN_CAPTURE = '1'; // capture is opt-in; these fixtures judge captured rows
   return env;
 }
 

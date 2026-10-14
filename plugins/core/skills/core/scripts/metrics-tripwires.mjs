@@ -159,11 +159,12 @@ export function evaluateTripwires(projectDir, { thresholds = TRIPWIRE_THRESHOLDS
     ? retrievedWindow > 0 && capturedWindow === 0
     : (vol.retrieval_rows || 0) > 0 && (vol.turns_captured || 0) === 0;
   if (deadNow && !captureEnabled) {
-    // The same absence, told truthfully: an opt-out, plus whatever failure
-    // count the recorder logged before it was switched off. Reported only where
-    // the absence would otherwise be read as a measurement.
+    // The same absence, told truthfully: capture is off, plus whatever failure
+    // count the recorder logged before it was switched off. Capture is opt-in, so a project
+    // that never recorded a turn has nothing to caveat and stays silent; the line is for the
+    // project whose earlier numbers would otherwise be read as covering today.
     const failures = (health && health.failures) || 0;
-    tripped.push({
+    if ((vol.turns_captured || 0) > 0) tripped.push({
       kind: 'capture-disabled',
       message: `Turn evidence capture is off for this project, so the memory-quality numbers cover only what was recorded before it was turned off${failures ? ` (${failures} recorded write failure${failures === 1 ? '' : 's'} from before that)` : ''} — your opt-out, not a fault.`,
     });
