@@ -759,10 +759,14 @@ function fullMigration({ root, harness, coreDir, table, now, seen }) {
       // pseudonym continuity) and the pointer's opt-outs.
       const pointer = readJson(join(real, 'workspace.json'), {});
       const carry = {};
-      for (const k of ['metrics_enabled', 'turn_capture']) if (typeof pointer[k] === 'boolean') carry[k] = pointer[k];
+      if (typeof pointer.metrics_enabled === 'boolean') carry.metrics_enabled = pointer.metrics_enabled;
+      // Turn capture is opt-in and only the signed manifest can switch it on, so a copied or legacy
+      // file may carry only the opt-out; a `true` here would otherwise travel with the project.
+      if (pointer.turn_capture === false) carry.turn_capture = false;
       if (live) {
         const legacy = readJson(join(coreDir, 'workspaces', live.workspace_id, 'workspace.json'), {});
         const { workspace_id: _id, path: _path, project_path: _pp, ...kept } = legacy && typeof legacy === 'object' ? legacy : {};
+        if (kept.turn_capture !== false) delete kept.turn_capture; // an opt-in does not migrate; the person re-enables it
         updateManifest({ root: real, harness, coreDir, fields: { ...kept, ...carry, project_id: live.workspace_id, harness, migrated_from: live.workspace_id } });
       }
 

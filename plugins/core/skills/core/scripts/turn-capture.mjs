@@ -23,7 +23,8 @@
  *      `"turn_capture": true` → ON. Only the signed manifest can switch capture ON. An unverified or
  *      copied manifest, and a project-root `workspace.json`, can only switch it OFF, so a sensitive
  *      enable never travels with a copied project.
- *   4. default → OFF. Nothing stores a prompt unless a person or the environment asked it to.
+ *   4. default → OFF. This record is not written unless a person or the environment asked for it.
+ *      (The classified turn log is a separate stream under the metrics gate; it is not gated here.)
  *
  * PROTECTIONS (inherited from the rich-context design wholesale):
  *   - storage under `resolveStoragePath()` (`metrics-init` pin file; honors the

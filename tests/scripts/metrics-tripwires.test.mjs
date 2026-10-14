@@ -33,6 +33,7 @@ function card(ts, over = {}) {
     self_test: { headline: 0.85, round_id: 1 },
     volumes: { turns_captured: 20, retrieval_rows: 20 },
     capture_health: { attempts: 20, failures: 0, consecutive_failures: 0 },
+    capture_enabled: true, // capture is opt-in; these cards describe a project that opted in
     ...over,
   };
 }
