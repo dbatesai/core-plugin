@@ -894,6 +894,21 @@ test('a project-root turn_capture:false still turns capture off when the signed 
   } finally { s.cleanup(); }
 });
 
+test('migration carries a turn_capture opt-OUT but never an opt-in: a legacy or copied true does not enable capture', async () => {
+  const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { s, p, table } = migrationFixture();
+  try {
+    // Both the project-root pointer and the legacy workspace manifest say capture is ON.
+    writeFileSync(join(p, 'workspace.json'), JSON.stringify({ workspace_id: 'legacy', turn_capture: true }));
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'workspace.json'),
+      JSON.stringify({ workspace_id: 'legacy', agent_name: 'Plover', turn_capture: true }));
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const m = readManifest({ root: p, harness: H, coreDir: s.coreDir });
+    assert.notEqual(m.turn_capture, true, 'an opt-in is not carried into the signed manifest');
+    assert.equal(turnCaptureEnabled({ project: p, env: { CORE_HARNESS: H }, home: s.home }), false);
+  } finally { s.cleanup(); }
+});
+
 test('a workspace an older install registers after the receipt is copied as a kept duplicate before anything is marked or released', () => {
   const { s, p, table } = migrationFixture();
   try {

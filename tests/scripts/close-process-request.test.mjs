@@ -52,6 +52,9 @@ function runDecisionArgv(decision) {
 
 test('[oracle 1] the real hook argv, run through the real subprocess boundary, certifies a closed receipt', () => {
   const store = freshStore();
+  // The record's file list and opening prompt follow the capture gate, which is opt-in.
+  const savedCapture = process.env.CORE_TURN_CAPTURE;
+  process.env.CORE_TURN_CAPTURE = '1';
   try {
     const transcriptPath = fixtureTranscript(store);
     const decision = decideCloseAction(
@@ -74,7 +77,35 @@ test('[oracle 1] the real hook argv, run through the real subprocess boundary, c
     assert.equal(receipt.record.started_at, '2026-07-27T20:00:00.000Z');
     assert.equal(receipt.record.ended_at, '2026-07-27T20:10:00.000Z');
     assert.ok(receipt.record.files_touched.includes('/repo/close-pass.mjs'));
-  } finally { rmSync(store, { recursive: true, force: true }); }
+    assert.equal(receipt.record.capture_content, true);
+  } finally {
+    if (savedCapture === undefined) delete process.env.CORE_TURN_CAPTURE; else process.env.CORE_TURN_CAPTURE = savedCapture;
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test('[oracle 1b] by default the close record has counts, tools and times but no prompt text and no file paths', () => {
+  const store = freshStore();
+  const savedCapture = process.env.CORE_TURN_CAPTURE;
+  delete process.env.CORE_TURN_CAPTURE;
+  try {
+    const transcriptPath = fixtureTranscript(store);
+    const decision = decideCloseAction(
+      { session_id: SESSION_A, reason: 'other', cwd: store, transcript_path: transcriptPath },
+      { store },
+    );
+    const res = runDecisionArgv(decision);
+    assert.equal(res.status, 0, res.stderr);
+    const receipt = readCloseReceipt(store, SESSION_A);
+    assert.ok(receipt, 'a receipt must exist');
+    assert.equal(receipt.status, 'recorded');
+    assert.equal(receipt.record.capture_content, false);
+    assert.deepEqual(receipt.record.files_touched, [], 'no file paths unless capture is opted in');
+    assert.ok(receipt.record.counts.events > 0, 'counts and tools are still recorded');
+  } finally {
+    if (savedCapture !== undefined) process.env.CORE_TURN_CAPTURE = savedCapture;
+    rmSync(store, { recursive: true, force: true });
+  }
 });
 
 test('[oracle 2] the identical argv run twice for the same session does not duplicate work', () => {

@@ -66,7 +66,7 @@ for(const harness of ['claude-code','codex'])for(const route of routes)test(`${h
   run('disclosure',()=>checkMetricsDisclosure({projectDir:root,home,env}));
   const scripts=fileURLToPath(new URL('../../plugins/core/skills/core/scripts/',import.meta.url));
   const preload=`import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';os.userInfo=()=>({homedir:${JSON.stringify(home)}});os.homedir=()=>${JSON.stringify(home)};syncBuiltinESMExports();`;
-  const cli=(name,args,{input}={})=>spawnSync(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(preload),join(scripts,name),...args],{cwd:root,env:{...process.env,...env,NODE_OPTIONS:'',CORE_HOOKS_LOG_FILE:process.platform==='win32'?'NUL':'/dev/null'},input,encoding:'utf8',timeout:15000});
+  const cli=(name,args,{input}={})=>spawnSync(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(preload),join(scripts,name),...args],{cwd:root,env:{...process.env,CORE_TURN_CAPTURE:'1',...env,NODE_OPTIONS:'',CORE_HOOKS_LOG_FILE:process.platform==='win32'?'NUL':'/dev/null'},input,encoding:'utf8',timeout:15000});
   for(const verb of ['path','bootstrap','touch']){
    const child=cli('index-registry.mjs',[verb,'--root',root,'--harness',harness,'--core-dir',coreDir,...(verb==='path'?['--kind','durable','--name','drafts/probe.md']:[])]);
    assert.equal(child.error,undefined,child.stderr);
