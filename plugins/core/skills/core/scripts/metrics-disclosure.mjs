@@ -1,9 +1,9 @@
 /**
  * metrics-disclosure.mjs — one-time first-run metrics disclosure.
  *
- * Local metrics capture is default-on by design for every install: from a user's
- * first `/core` invocation, turns get classified into `_metrics`/workspace metrics
- * dirs, including a `user_text` field with real excerpts of what they typed. That
+ * Local metrics are on by default for every install: from a user's first `/core`
+ * invocation, turns get classified into `_metrics`/workspace metrics dirs. The fuller
+ * per-turn evidence record (the prompt text and delivered context) is opt-in. That
  * call was reasoned about for a small set of known, controlled installs; the
  * plugin has since gone public on the marketplace with no user-facing disclosure
  * that any of this happens.
@@ -51,7 +51,7 @@ export const HISTORY_NOTICE_VERSION = 8;
 export const NOTICE_TEXT = [
   "One thing worth knowing about this project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `_core/<harness>/workspace.json`.",
-  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved with the project (CORE never exports them, and they are kept until you purge them) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `_core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
+  "A fuller local evidence record, each turn's prompt and the memory context CORE delivered, is off unless you turn it on, with `CORE_TURN_CAPTURE=1` in your environment or `turn_capture: true` in this project's `_core/<harness>/workspace.json`. CORE never exports it. Earlier versions kept it on by default; anything they already saved stays in the project until you purge it, and you can purge everything it has saved at any time.",
 ].join('\n\n');
 
 /**

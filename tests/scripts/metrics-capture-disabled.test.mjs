@@ -24,19 +24,20 @@ function writeManifestFlags(project, fields) {
 }
 
 
-function makeProject(root, { captureOff = false } = {}) {
+function makeProject(root, { captureOff = false, captureOn = false } = {}) {
   const project = join(root, 'proj');
   mkdirSync(join(project, '_memories'), { recursive: true });
   if (captureOff) writeManifestFlags(project, { turn_capture: false });
+  if (captureOn) writeManifestFlags(project, { turn_capture: true }); // capture is opt-in
   return project;
 }
 
 /** A pinned card whose window saw retrieval happen and nothing captured. */
-function pinSilentCard(project, { captureEnabled, failures = 0 }) {
+function pinSilentCard(project, { captureEnabled, failures = 0, earlier = 0 }) {
   const card = {
     ...computeScorecard(project, { now: '2026-07-28T00:00:00.000Z' }),
     volumes: {
-      turns_captured: 0, retrieval_rows: 12,
+      turns_captured: earlier, retrieval_rows: 12,
       turns_captured_window: 0, retrieval_rows_window: 12,
       hook_retrieval_rows_window: 12,
     },
@@ -50,9 +51,23 @@ function pinSilentCard(project, { captureEnabled, failures = 0 }) {
 test('a scorecard records whether capture was on, so a silent window is attributable later', () => {
   const root = mkdtempSync(join(tmpdir(), 'cap-card-'));
   try {
-    assert.equal(computeScorecard(makeProject(join(root, 'a'))).capture_enabled, true);
+    // Capture is opt-in: the environment's opt-in is the on-state here.
+    const saved = process.env.CORE_TURN_CAPTURE;
+    process.env.CORE_TURN_CAPTURE = '1';
+    try { assert.equal(computeScorecard(makeProject(join(root, 'a'))).capture_enabled, true); }
+    finally { if (saved === undefined) delete process.env.CORE_TURN_CAPTURE; else process.env.CORE_TURN_CAPTURE = saved; }
     mkdirSync(join(root, 'b'), { recursive: true });
     assert.equal(computeScorecard(makeProject(join(root, 'b'), { captureOff: true })).capture_enabled, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('capture that never ran stays silent: opt-in capture is not a fault and has no earlier numbers to caveat', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cap-never-'));
+  try {
+    const project = makeProject(root);
+    pinSilentCard(project, { captureEnabled: false, earlier: 0 });
+    const res = evaluateTripwires(project, { now: new Date('2026-07-28T01:00:00Z') });
+    assert.equal(res.tripped.some((x) => x.kind === 'capture-disabled' || x.kind === 'capture-dead'), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -60,7 +75,7 @@ test('capture turned OFF reports a disabled marker, never "the recorder is silen
   const root = mkdtempSync(join(tmpdir(), 'cap-off-'));
   try {
     const project = makeProject(root, { captureOff: true });
-    pinSilentCard(project, { captureEnabled: false });
+    pinSilentCard(project, { captureEnabled: false, earlier: 40 });
     const res = evaluateTripwires(project, { now: new Date('2026-07-28T01:00:00Z') });
     const kinds = res.tripped.map((t) => t.kind);
     assert.ok(kinds.includes('capture-disabled'), `disabled marker present (${kinds.join(', ')})`);
@@ -88,7 +103,7 @@ test('the disabled marker still names write failures recorded before the opt-out
   const root = mkdtempSync(join(tmpdir(), 'cap-off-fail-'));
   try {
     const project = makeProject(root, { captureOff: true });
-    pinSilentCard(project, { captureEnabled: false, failures: 4 });
+    pinSilentCard(project, { captureEnabled: false, failures: 4, earlier: 40 });
     const res = evaluateTripwires(project, { now: new Date('2026-07-28T01:00:00Z') });
     const marker = res.tripped.find((t) => t.kind === 'capture-disabled');
     assert.ok(marker, 'disabled marker present');

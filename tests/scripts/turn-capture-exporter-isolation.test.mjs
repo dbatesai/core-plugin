@@ -67,7 +67,7 @@ test('exporter never emits turn-capture evidence content (planted canary tripwir
     // (default-ON stream — no force flag needed).
     const env = { ...process.env };
     delete env.CORE_METRICS_ENABLED;
-    delete env.CORE_TURN_CAPTURE;
+    env.CORE_TURN_CAPTURE = '1'; // capture is opt-in; this test exercises the capture path
     const cap = captureTurnEvidence(project, {
       retrieval_id: 'rid-x',
       session_id: 's',

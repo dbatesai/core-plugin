@@ -44,7 +44,7 @@ test('the hindsight judgment log is owner-only', { skip: IS_WIN && 'POSIX modes'
     const project = makeProject(root, { units: 2 });
     const env = { ...process.env };
     delete env.CORE_METRICS_ENABLED;
-    delete env.CORE_TURN_CAPTURE;
+    env.CORE_TURN_CAPTURE = '1'; // capture is opt-in; this test exercises the capture path
     captureTurnEvidence(project, {
       retrieval_id: 'rid-perm-1',
       prompt_text: 'how does retrieval quality grading work',

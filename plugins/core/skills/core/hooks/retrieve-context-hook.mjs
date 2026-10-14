@@ -285,7 +285,7 @@ export async function main() {
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
-      // EVERY-TURN evidence capture (Link 1 of the evidence chain), default-ON
+      // EVERY-TURN evidence capture (Link 1 of the evidence chain), opt-in (default OFF)
       // with opt-outs. Written in the same moment as the numbers row above, joined
       // by the same retrieval_id: the full prompt, the combined delivered pack
       // text, per-unit ids+scores, the top rejected candidates, a store

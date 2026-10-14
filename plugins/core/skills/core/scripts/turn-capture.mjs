@@ -15,15 +15,15 @@
  * zero-hit has no delivered context by definition) and the hidden
  * CORE_RETRIEVAL_TRACE env stream (content in the repo tree, no reader).
  *
- * DEFAULT-ON with opt-outs:
+ * DEFAULT-OFF, opt-in:
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
- *   2. `CORE_TURN_CAPTURE` env false → OFF (its own hard switch).
- *   3. the project's trusted manifest (`_core/<harness>/workspace.json`) `"turn_capture": false` → OFF. Unlike
- *      rich-context's opt-IN (machine-local only, so a sensitive enable could
- *      never travel with a copied project), an opt-OUT travelling with a copied
- *      project is privacy-safe — the flag lives with the project on purpose.
- *   4. default → ON. An off-by-default flight recorder records nothing.
+ *   2. `CORE_TURN_CAPTURE` env false → OFF; env true → ON (its own hard switch).
+ *   3. the project's signed manifest (`_core/<harness>/workspace.json`) `"turn_capture": false` → OFF;
+ *      `"turn_capture": true` → ON. Only the signed manifest can switch capture ON. An unverified or
+ *      copied manifest, and a project-root `workspace.json`, can only switch it OFF, so a sensitive
+ *      enable never travels with a copied project.
+ *   4. default → OFF. Nothing stores a prompt unless a person or the environment asked it to.
  *
  * PROTECTIONS (inherited from the rich-context design wholesale):
  *   - storage under `resolveStoragePath()` (`metrics-init` pin file; honors the
@@ -98,9 +98,10 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  * Precedence (first match wins):
  *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
- *   3. the project's trusted manifest (`_core/<harness>/workspace.json`), or the project-root
- *      `workspace.json`, says `"turn_capture": false` → OFF.
- *   4. default → ON.
+ *   3. the project's signed manifest (`_core/<harness>/workspace.json`) says `"turn_capture": false` → OFF,
+ *      or `"turn_capture": true` → ON; an unverified manifest or the project-root `workspace.json`
+ *      can only say false.
+ *   4. default → OFF (opt-in).
  */
 export let turnCaptureGateFailure = null;
 let gateFailureSaid = false;
@@ -126,6 +127,8 @@ export function turnCaptureEnabled({ project, env = process.env, home: homeIn } 
       // An older or copied project's root manifest may only switch capture off,
       // and has the same read-failure rule until the signed manifest carries it.
       if (readCaptureOptOuts(join(root, 'workspace.json')).turn_capture === false) return false;
+      // Opt-in: only the signed manifest, read above with throwReadErrors, can switch capture on.
+      return !!(m && m.turn_capture === true);
     } catch (e) {
       turnCaptureGateFailure = String(e?.code || e?.name || 'error');
       if (!gateFailureSaid) {
@@ -135,7 +138,7 @@ export function turnCaptureEnabled({ project, env = process.env, home: homeIn } 
       return false;
     }
   }
-  return true;
+  return false; // default OFF: no project resolved, or nothing opted in
 }
 
 /** Absolute dir for this project's evidence stream. */

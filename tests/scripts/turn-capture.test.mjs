@@ -70,8 +70,8 @@ const goodRow = (extra = {}) => ({
   ...extra,
 });
 
-function cleanEnv(extra = {}) {
-  // Isolated env so the runner's real CORE_* settings can't leak in.
+function defaultEnv(extra = {}) {
+  // Isolated env so the runner's real CORE_* settings can't leak in; nothing about capture is set.
   const env = { ...process.env, ...extra };
   delete env.CORE_METRICS_ENABLED;
   delete env.CORE_TURN_CAPTURE;
@@ -79,13 +79,38 @@ function cleanEnv(extra = {}) {
   return env;
 }
 
+// Capture is opt-in: tests that exercise the capture path say so explicitly.
+function cleanEnv(extra = {}) {
+  return defaultEnv({ CORE_TURN_CAPTURE: '1', ...extra });
+}
+
 // ---------- gating ----------
 
-test('default ON: no flags → enabled', () => {
-  const root = mkdtempSync(join(tmpdir(), 'tc-on-'));
+test('default OFF: no flags → disabled, and nothing is written', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-default-off-'));
   try {
     const project = makeProject(root);
-    assert.equal(turnCaptureEnabled({ project, env: cleanEnv() }), true);
+    assert.equal(turnCaptureEnabled({ project, env: defaultEnv() }), false);
+    const res = captureTurnEvidence(project, goodRow(), { env: defaultEnv() });
+    assert.equal(res.written, false);
+    assert.equal(res.reason, 'disabled');
+    assert.equal(existsSync(turnCaptureDir(project)), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('opt-in: CORE_TURN_CAPTURE=1 enables', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-env-on-'));
+  try {
+    const project = makeProject(root);
+    assert.equal(turnCaptureEnabled({ project, env: defaultEnv({ CORE_TURN_CAPTURE: '1' }) }), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('opt-in: the signed project manifest turn_capture:true enables with nothing in the environment', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-ws-on-'));
+  try {
+    const project = makeProject(root, { turnCaptureFlag: true });
+    assert.equal(turnCaptureEnabled({ project, env: defaultEnv() }), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -106,7 +131,7 @@ test('project manifest turn_capture:false disables', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-ws-off-'));
   try {
     const project = makeProject(root, { turnCaptureFlag: false });
-    assert.equal(turnCaptureEnabled({ project, env: cleanEnv() }), false);
+    assert.equal(turnCaptureEnabled({ project, env: defaultEnv() }), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

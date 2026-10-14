@@ -54,7 +54,7 @@ test('chaos: two concurrent OS processes append 50 large rows each — every lin
     writeFileSync(workerFile, WORKER);
     const env = { ...process.env };
     delete env.CORE_METRICS_ENABLED;
-    delete env.CORE_TURN_CAPTURE;
+    env.CORE_TURN_CAPTURE = '1'; // capture is opt-in; this test exercises the capture path
     const run = (tag) => new Promise((resolveP) => {
       const p = spawn('node', [workerFile, project, tag, '50'], { env });
       p.on('exit', (code) => resolveP(code));
@@ -85,7 +85,7 @@ test('chaos: purge racing a live writer never tears a row or crashes either side
     writeFileSync(workerFile, WORKER);
     const env = { ...process.env };
     delete env.CORE_METRICS_ENABLED;
-    delete env.CORE_TURN_CAPTURE;
+    env.CORE_TURN_CAPTURE = '1'; // capture is opt-in; this test exercises the capture path
     const writer = new Promise((resolveP) => {
       const p = spawn('node', [workerFile, project, 'gamma', '40'], { env });
       p.on('exit', (code) => resolveP(code));

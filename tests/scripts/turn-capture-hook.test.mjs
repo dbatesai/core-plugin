@@ -40,7 +40,7 @@ function runHook(prompt, env, cwd) {
     env: {
       ...process.env,
       CORE_METRICS_ENABLED: '1',
-      CORE_TURN_CAPTURE: '',
+      CORE_TURN_CAPTURE: '1', // capture is opt-in; the hook tests exercise the capture path
       CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
       ...registryEnvFor(cwd),
       ...env,
@@ -179,7 +179,7 @@ test('every metrics-on invocation stamps a turn_capture status on its receipt', 
   }
 });
 
-test('DEFAULT-ON through the real hook: a clean environment still captures', () => {
+test('DEFAULT-OFF through the real hook: a clean environment records no evidence rows', () => {
   const store = tempStore();
   const env = { ...process.env };
   for (const k of Object.keys(env)) if (k.startsWith('CORE_') && k !== 'CORE_TEST_ACCOUNT_HOME') delete env[k];   // the suite runner's account home is not a CORE tuning switch
@@ -189,6 +189,6 @@ test('DEFAULT-ON through the real hook: a clean environment still captures', () 
     input: JSON.stringify({ prompt: 'omega speedmaster on sale', cwd: store, session_id: 'tc-clean-env' }),
     env, encoding: 'utf8',
   });
-  assert.equal(evidenceRows(store).length, 1,
-    'default-ON must not depend on CORE_METRICS_ENABLED being set by hand');
+  assert.equal(evidenceRows(store).length, 0,
+    'capture is opt-in: with nothing set, the hook stores no prompt');
 });

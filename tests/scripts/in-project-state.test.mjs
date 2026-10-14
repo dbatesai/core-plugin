@@ -886,11 +886,11 @@ test('a project-root turn_capture:false still turns capture off when the signed 
   try {
     const p = signedProject(s);
     const env = { CORE_HARNESS: H };
-    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'default is on');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'default is off');
     writeFileSync(join(p, 'workspace.json'), JSON.stringify({ turn_capture: false }));
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
     writeFileSync(join(p, 'workspace.json'), JSON.stringify({ turn_capture: true }));
-    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'the root file can only switch it off');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'the root file can never switch it on');
   } finally { s.cleanup(); }
 });
 
@@ -1089,7 +1089,7 @@ test('a legacy AppData pin routes no writes in either upgrade window, and the no
   try {
     process.env.HOME = s.home;
     process.env.USERPROFILE = s.home;
-    const env = { CORE_HARNESS: H };
+    const env = { CORE_HARNESS: H, CORE_TURN_CAPTURE: '1' }; // capture is opt-in; this test exercises where rows are written
     const old = join(s.home, 'AppData', 'Local', 'core-metrics', 'legacy-id');
     mkdirSync(old, { recursive: true });
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), old);
@@ -1859,10 +1859,10 @@ test('an opt-out in an older .core beside a trusted _core manifest still switche
   try {
     const p = s.mk('Projects', 'Leftover');
     registerProject(s.coreDir, p);
-    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover', turn_capture: true } });
     const env = { CORE_HARNESS: H };
     assert.equal(metricsEnabled({ project: p, env, home: s.home }), true, 'control: on by default');
-    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true);
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'control: on by the signed manifest opt-in');
     mkdirSync(join(p, '.core', H), { recursive: true });
     writeFileSync(join(p, '.core', H, 'workspace.json'), '{"turn_capture":false}');
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'capture off');

@@ -20,6 +20,9 @@ process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state;
 // unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
 // redirected for this file's process.
 const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
+// Capture is opt-in; these views describe a project that opted in. The tests that want the
+// opted-out or never-on state remove it for their own duration.
+process.env.CORE_TURN_CAPTURE = '1';
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
@@ -47,6 +50,7 @@ function card(ts, over = {}) {
     self_test: { headline: 0.82, round_id: 2 },
     volumes: { turns_captured: 100, retrieval_rows: 100 },
     capture_health: { attempts: 100, failures: 0, consecutive_failures: 0 },
+    capture_enabled: true, // capture is opt-in; these pinned cards describe a project that opted in
     ...over,
   };
 }
@@ -86,8 +90,12 @@ test('capture opted out → storing/loading lines say so instead of pretending',
     const project = join(root, 'proj');
     mkdirSync(join(project, '_memories'), { recursive: true });
     writeManifestFlags(project, { turn_capture: false });
-    const view = renderAnswerView(gatherAnswers(project));
-    assert.match(view, /turn capture is off/i);
+    const saved = process.env.CORE_TURN_CAPTURE;
+    delete process.env.CORE_TURN_CAPTURE; // the environment decides first, so remove the opt-in for this test
+    try {
+      const view = renderAnswerView(gatherAnswers(project));
+      assert.match(view, /turn capture is off/i);
+    } finally { if (saved !== undefined) process.env.CORE_TURN_CAPTURE = saved; }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
