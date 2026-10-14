@@ -98,6 +98,11 @@ test('default OFF: no flags → disabled, and nothing is written', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('no project resolved: default OFF; the environment opt-in still decides first', () => {
+  assert.equal(turnCaptureEnabled({ env: defaultEnv() }), false);
+  assert.equal(turnCaptureEnabled({ env: defaultEnv({ CORE_TURN_CAPTURE: '1' }) }), true);
+});
+
 test('opt-in: CORE_TURN_CAPTURE=1 enables', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-env-on-'));
   try {

@@ -909,6 +909,17 @@ test('migration carries a turn_capture opt-OUT but never an opt-in: a legacy or 
   } finally { s.cleanup(); }
 });
 
+test('migration still carries a turn_capture opt-OUT, from the pointer and from the legacy manifest', async () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    writeFileSync(join(p, 'workspace.json'), JSON.stringify({ workspace_id: 'legacy', turn_capture: false }));
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'workspace.json'),
+      JSON.stringify({ workspace_id: 'legacy', agent_name: 'Plover', turn_capture: false }));
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).turn_capture, false, 'an opt-out travels with the project');
+  } finally { s.cleanup(); }
+});
+
 test('a workspace an older install registers after the receipt is copied as a kept duplicate before anything is marked or released', () => {
   const { s, p, table } = migrationFixture();
   try {
