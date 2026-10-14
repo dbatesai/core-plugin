@@ -1,7 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -146,7 +146,7 @@ test('Codex wrapper: when the shared module will not load, a receipt names the f
 });
 
 test('retrieval receipts carry the harness that invoked the hook, from the explicit signal first', async () => {
-  const { resolveHookHarness, RETRIEVAL_REASONS } = await import(join(HOOKS_DIR, 'retrieve-context-hook.mjs'));
+  const { resolveHookHarness, RETRIEVAL_REASONS } = await import(pathToFileURL(join(HOOKS_DIR, 'retrieve-context-hook.mjs')).href);
   assert.equal(resolveHookHarness({ CORE_HOOK_HARNESS: 'codex' }), 'codex');
   assert.equal(resolveHookHarness({ CORE_HOOK_HARNESS: 'claude-code', CODEX_SESSION_ID: 'x' }), 'claude-code', 'explicit beats ambient');
   assert.equal(resolveHookHarness({ CLAUDECODE: '1' }), 'claude-code');
