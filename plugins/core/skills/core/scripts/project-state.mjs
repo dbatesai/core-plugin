@@ -32,6 +32,7 @@ import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
+import { repointMovedCache } from './state-cache.mjs';
 
 export { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
@@ -550,7 +551,8 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
       }
       if (!forWrite) return { dir: target.dir, location: 'project', status: 'moved', trusted: true };
       writeStamp({ root: real, harness, coreDir });
-      note({ kind: 'state-moved', oldPath: verdict.oldPath });
+      const repointed = repointMovedState({ root: real, harness, coreDir, oldPath: verdict.oldPath });
+      note({ kind: 'state-moved', oldPath: verdict.oldPath, repointed });
       return { dir: target.dir, location: 'project', status: 'moved', trusted: true, oldPath: verdict.oldPath };
     }
     case 'planted':
@@ -730,6 +732,55 @@ export function readPinSigned({ dir, root, coreDir = defaultCoreDir() }) {
     if (j && typeof j.path === 'string' && typeof j.root === 'string' && canonical(j.root) === canonical(root)) return j.path.trim() || null;
   } catch { /* not a pin this code wrote */ }
   return null;
+}
+
+/** The spellings an old root may have been recorded under: as given, and with its parent resolved when it is gone. */
+function oldRootSpellings(oldPath) {
+  const out = new Set([resolve(oldPath)]);
+  out.add(canonical(oldPath));
+  try { out.add(join(realpathSync.native(dirname(resolve(oldPath))), basename(oldPath))); } catch { /* parent gone too */ }
+  return [...out];
+}
+
+/**
+ * After a move that was verified (the stamp is this install's and the old folder is gone), carry
+ * the two records that name the old path to the new one: the file baseline keyed by absolute path,
+ * and the signed metrics storage pin. Hashes and times are kept as they were, so nothing is
+ * re-baselined. A pin that names somewhere other than under the old root is left as it was and
+ * reported. Never throws; the caller's stamp and registry move have already landed.
+ *
+ * @returns {{cache: object, pins: {folder: string, status: string}[]}}
+ */
+export function repointMovedState({ root, harness, coreDir = defaultCoreDir(), oldPath }) {
+  const result = { cache: { status: 'nothing-to-do', count: 0 }, pins: [] };
+  if (typeof oldPath !== 'string' || !isAbsolute(oldPath)) return result;
+  const real = canonical(root);
+  const olds = oldRootSpellings(oldPath).filter((o) => o !== real);
+  if (!olds.length) return result;
+  try { result.cache = repointMovedCache(real, olds); }
+  catch (e) { result.cache = { status: 'held', count: 0, reason: String(e?.code || e?.message || e) }; }
+  try {
+    for (const { dir } of stateLocations({ root: real, harness, coreDir }).locations) {
+      const meta = join(dir, 'metrics');
+      if (readPinSigned({ dir: meta, root: real, coreDir }) !== null) { result.pins.push({ folder: meta, status: 'already-current' }); continue; }
+      let moved = false;
+      for (const old of olds) {
+        const pinned = readPinSigned({ dir: meta, root: old, coreDir });
+        if (pinned === null) continue;
+        if (!isInside(pinned, old)) { result.pins.push({ folder: meta, status: 'left-outside-old-root' }); moved = true; break; }
+        const next = join(real, pinned.slice(old.length + 1));
+        if (!metricsStorageAllowed(next, { projectDir: real, home: defaultHome() })) { result.pins.push({ folder: meta, status: 'refused-target' }); moved = true; break; }
+        writePinSigned({ dir: meta, path: next, root: real, coreDir });
+        result.pins.push({ folder: meta, status: 'repointed' });
+        moved = true;
+        break;
+      }
+      if (!moved) result.pins.push({ folder: meta, status: 'no-pin-for-old-root' });
+    }
+  } catch (e) {
+    result.pins.push({ folder: null, status: `held: ${String(e?.code || e?.message || e)}` });
+  }
+  return result;
 }
 
 /**

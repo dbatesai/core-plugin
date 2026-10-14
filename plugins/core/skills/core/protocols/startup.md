@@ -174,7 +174,7 @@ Echo any line after the first verbatim into the readiness summary, then add one 
 
 - `state-unverified … set aside unread at …` — state in `_core/` didn't carry this install's valid stamp (it came with a clone, a download, or was damaged). It was moved aside unread; nothing was deleted.
 - `state-copied` — this folder is a copy of another project. It starts with fresh state; the original is untouched.
-- `state-moved` — the project was moved here; its history and registration followed.
+- `state-moved` — the project was moved here; its history, registration, file baseline and metrics storage pin followed, with every recorded hash and time kept. A copied folder never gets this: it starts without the original's baseline.
 - `not stored: foreign-install` — another machine's state is in this synced or shared folder. It is left alone; new operational state is not written until a writable project-owned route is available. Any existing `~/.core/local/` copy remains read-only history.
 - `state-ask` — the state names an old location that no longer exists, parent folder included. Ask: *"This project's CORE history says it used to be at <old path>. Did you move it here, or is this a new project?"* Then run `index-registry.mjs state --accept-move --root <root>` or `state --fresh --root <root>`.
 

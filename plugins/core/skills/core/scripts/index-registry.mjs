@@ -47,7 +47,7 @@ import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest, writeBootstrap, readBootstrap,
-  classifyStamp, writeStamp, STATE_DIRNAME, settleStateFolderName, adoptionCandidate, adoptForeignState, projectMigrationFence, insideMigration,
+  classifyStamp, writeStamp, STATE_DIRNAME, settleStateFolderName, adoptionCandidate, adoptForeignState, projectMigrationFence, insideMigration, repointMovedState,
 } from './project-state.mjs';
 
 /**
@@ -200,8 +200,9 @@ export function settleState(coreDir, { root, harness = detectStateHarness(), dec
   if (fence) return { root: r, status: 'held', reason: fence, changed: false };
   if (decision === 'accept-move') {
     writeStamp({ root: r, harness, coreDir: core });
+    const repointed = repointMovedState({ root: r, harness, coreDir: core, oldPath: verdict.oldPath });
     recordMove(core, verdict.oldPath, r);
-    return { root: r, status: 'moved', oldPath: verdict.oldPath, changed: true };
+    return { root: r, status: 'moved', oldPath: verdict.oldPath, changed: true, repointed };
   }
   if (decision === 'fresh') {
     const dir = join(r, STATE_DIRNAME, harness);
