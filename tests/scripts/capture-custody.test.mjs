@@ -174,23 +174,41 @@ test('a lock generation that is a FIFO, or whose metadata cannot be read, is ref
   }
 });
 
-test('a folder a purge removes mid-check is judged absent, never refused as unverifiable', async () => {
-  const s = setup();
-  const { Worker } = await import('node:worker_threads');
-  try {
-    const metrics = join(s.root, '_metrics'); const stream = join(metrics, 'turn-capture');
+// A purge holds the capture lock, not the custody check, so a folder can vanish between the check's lstat and
+// its realpath. Faults are injected into that realpath in a child process: a vanished folder is looked at
+// again (at most three looks in all), and only a valid second look lets the row through.
+{
+  const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const mod = pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts/turn-capture.mjs')).href;
+  const run = (s, plan) => {
+    const stream = resolve(s.root, '_metrics', 'turn-capture');
     mkdirSync(stream, { recursive: true });
-    // Removes the capture folders and leaves them gone for a moment, then a writer recreates them: a purge
-    // racing the check, over and over.
-    const worker = new Worker(`const { workerData: [metrics, stream] } = require('node:worker_threads'); const fs = require('node:fs');
-      const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-      for (;;) { fs.rmSync(metrics, { recursive: true, force: true }); pause(1); fs.mkdirSync(stream, { recursive: true }); pause(1); }`,
-      { eval: true, workerData: [metrics, stream] });
-    await new Promise((r) => worker.once('online', r));
-    const problems = new Set();
-    const until = Date.now() + 1500;
-    while (Date.now() < until) { const p = captureCustodyProblem(s.root); if (p) problems.add(p); }
-    await worker.terminate();
-    assert.deepEqual([...problems], [], 'only real custody problems refuse; a vanished folder is absent');
-  } finally { s.cleanup(); }
-});
+    const home = join(s.base, 'home'); mkdirSync(join(home, '.core'), { recursive: true }); writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: s.root }]));
+    // Each realpath of the stream folder takes the next step of the plan: 'enoent' or 'eacces' throws that code,
+    // 'link' swaps the folder for a link to the foreign folder and then throws ENOENT, and past the plan it passes.
+    const preload = `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { syncBuiltinESMExports } from 'node:module';
+      globalThis.calls = 0; const plan = ${JSON.stringify(plan)}; const real = fs.realpathSync;
+      fs.realpathSync = (p, ...a) => { if (path.resolve(String(p)) === ${JSON.stringify(stream)}) { const step = plan[globalThis.calls++];
+        if (step === 'link') { fs.rmSync(${JSON.stringify(stream)}, { recursive: true }); fs.symlinkSync(${JSON.stringify(s.foreign)}, ${JSON.stringify(stream)}); }
+        if (step) throw Object.assign(new Error('injected'), { code: step === 'eacces' ? 'EACCES' : 'ENOENT' }); }
+        return real(p, ...a); };
+      os.userInfo = () => ({ homedir: ${JSON.stringify(home)} }); os.homedir = () => ${JSON.stringify(home)}; syncBuiltinESMExports();`;
+    const script = `const { captureTurnEvidence } = await import(${JSON.stringify(mod)}); const r = captureTurnEvidence(${JSON.stringify(s.root)}, ${JSON.stringify(ROW)}, { now: ${JSON.stringify(NOW)}, env: ${JSON.stringify(ENV)} }); console.log(JSON.stringify({ r, calls: globalThis.calls }));`;
+    const r = spawnSync(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), '--input-type=module', '-e', script], { cwd: s.root, encoding: 'utf8', timeout: 8000, env: { ...process.env, CORE_HOOKS_LOG_FILE: '/dev/null' } });
+    assert.equal(r.status, 0, r.stderr);
+    return { ...JSON.parse(r.stdout), row: join(s.root, '_metrics', 'turn-capture', '2026-10-05.jsonl') };
+  };
+  const cases = [
+    ['one vanish, then a valid look: the row is written', ['enoent'], (x) => { assert.equal(x.r.written, true, JSON.stringify(x.r)); assert.ok(x.calls >= 2); assert.ok(existsSync(x.row)); }],
+    ['still vanishing on every look: refused after exactly three, nothing written', ['enoent', 'enoent', 'enoent', 'enoent'], (x) => { assert.equal(x.r.refused, true); assert.equal(x.r.reason, 'capture-refused: capture location could not be checked (ENOENT)'); assert.equal(x.calls, 3); assert.equal(existsSync(x.row), false); }],
+    ['another error is not looked at again: refused on the first, nothing written', ['eacces'], (x) => { assert.equal(x.r.refused, true); assert.equal(x.r.reason, 'capture-refused: capture location could not be checked (EACCES)'); assert.equal(x.calls, 1); assert.equal(existsSync(x.row), false); }],
+    ['vanished and came back as a link: refused as a link, foreign folder untouched', ['link'], (x) => { assert.equal(x.r.refused, true); assert.match(x.r.reason, /turn-capture is a link or not a folder/); assert.equal(x.calls, 1); }],
+  ];
+  for (const [name, plan, check] of cases) {
+    test(`a folder that vanishes mid-check: ${name}`, { skip: plan.includes('link') && skip }, () => {
+      const s = setup();
+      try { const before = s.snapshot(); check(run(s, plan)); assert.deepEqual(s.snapshot(), before, 'foreign bytes unchanged'); }
+      finally { s.cleanup(); }
+    });
+  }
+}
