@@ -173,3 +173,24 @@ test('a lock generation that is a FIFO, or whose metadata cannot be read, is ref
     }
   }
 });
+
+test('a folder a purge removes mid-check is judged absent, never refused as unverifiable', async () => {
+  const s = setup();
+  const { Worker } = await import('node:worker_threads');
+  try {
+    const metrics = join(s.root, '_metrics'); const stream = join(metrics, 'turn-capture');
+    mkdirSync(stream, { recursive: true });
+    // Removes the capture folders and leaves them gone for a moment, then a writer recreates them: a purge
+    // racing the check, over and over.
+    const worker = new Worker(`const { workerData: [metrics, stream] } = require('node:worker_threads'); const fs = require('node:fs');
+      const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      for (;;) { fs.rmSync(metrics, { recursive: true, force: true }); pause(1); fs.mkdirSync(stream, { recursive: true }); pause(1); }`,
+      { eval: true, workerData: [metrics, stream] });
+    await new Promise((r) => worker.once('online', r));
+    const problems = new Set();
+    const until = Date.now() + 1500;
+    while (Date.now() < until) { const p = captureCustodyProblem(s.root); if (p) problems.add(p); }
+    await worker.terminate();
+    assert.deepEqual([...problems], [], 'only real custody problems refuse; a vanished folder is absent');
+  } finally { s.cleanup(); }
+});

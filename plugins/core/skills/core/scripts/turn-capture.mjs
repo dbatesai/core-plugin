@@ -275,8 +275,23 @@ export function computeStoreSignature(storeDir) {
  * must be regular files with a single name (a link, or a second hard link, is the same bytes living
  * somewhere else). Checked with lstat, before anything is created, read or appended. A path inside the
  * project is not proof of this; that is what the check is for.
+ *
+ * A purge holds the capture lock, not this check, so it can remove a folder between the check's lstat
+ * and its next look. A path that vanished is judged again from the top, where it reads as absent; a
+ * path that changed into something else is refused as usual. Still vanishing after three looks, or
+ * any other error, refuses.
  */
-export function captureCustodyProblem(projectDir, { rowFile = null, healthOnly = false } = {}) {
+export function captureCustodyProblem(projectDir, options = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const problem = custodyProblemOnce(projectDir, options);
+    if (problem !== VANISHED) return problem;
+    if (attempt === 3) return 'capture location could not be checked (ENOENT)';
+  }
+}
+
+const VANISHED = Symbol('vanished');
+
+function custodyProblemOnce(projectDir, { rowFile = null, healthOnly = false }) {
   let root;
   // The project may itself be reached through a link; custody is judged against where it really is.
   try { root = realpathSync(resolve(projectDir)); if (!statSync(root).isDirectory()) throw new Error('not a directory'); } catch { return 'project root is not a real directory'; }
@@ -305,7 +320,10 @@ export function captureCustodyProblem(projectDir, { rowFile = null, healthOnly =
       const lock = foreignLockArtifact(turnCaptureLockPath(projectDir));
       if (lock) return `${rel(join(base, lock))} is a link or has a name outside this folder`;
     }
-  } catch (e) { return `capture location could not be checked (${e.code || e.message})`; }
+  } catch (e) {
+    if (e.code === 'ENOENT') return VANISHED;
+    return `capture location could not be checked (${e.code || e.message})`;
+  }
   return null;
 }
 
