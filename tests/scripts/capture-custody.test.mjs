@@ -185,11 +185,11 @@ test('a lock generation that is a FIFO, or whose metadata cannot be read, is ref
     mkdirSync(stream, { recursive: true });
     const home = join(s.base, 'home'); mkdirSync(join(home, '.core'), { recursive: true }); writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: s.root }]));
     // Each realpath of the stream folder takes the next step of the plan: 'enoent' or 'eacces' throws that code,
-    // 'link' swaps the folder for a link to the foreign folder and then throws ENOENT, and past the plan it passes.
+    // 'link' swaps the folder for a link to the foreign folder (a junction on Windows, which needs no privilege; the type is ignored elsewhere) and then throws ENOENT, and past the plan it passes.
     const preload = `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { syncBuiltinESMExports } from 'node:module';
       globalThis.calls = 0; const plan = ${JSON.stringify(plan)}; const real = fs.realpathSync;
       fs.realpathSync = (p, ...a) => { if (path.resolve(String(p)) === ${JSON.stringify(stream)}) { const step = plan[globalThis.calls++];
-        if (step === 'link') { fs.rmSync(${JSON.stringify(stream)}, { recursive: true }); fs.symlinkSync(${JSON.stringify(s.foreign)}, ${JSON.stringify(stream)}); }
+        if (step === 'link') { fs.rmSync(${JSON.stringify(stream)}, { recursive: true }); fs.symlinkSync(${JSON.stringify(s.foreign)}, ${JSON.stringify(stream)}, 'junction'); }
         if (step) throw Object.assign(new Error('injected'), { code: step === 'eacces' ? 'EACCES' : 'ENOENT' }); }
         return real(p, ...a); };
       os.userInfo = () => ({ homedir: ${JSON.stringify(home)} }); os.homedir = () => ${JSON.stringify(home)}; syncBuiltinESMExports();`;
@@ -205,7 +205,7 @@ test('a lock generation that is a FIFO, or whose metadata cannot be read, is ref
     ['vanished and came back as a link: refused as a link, foreign folder untouched', ['link'], (x) => { assert.equal(x.r.refused, true); assert.match(x.r.reason, /turn-capture is a link or not a folder/); assert.equal(x.calls, 1); }],
   ];
   for (const [name, plan, check] of cases) {
-    test(`a folder that vanishes mid-check: ${name}`, { skip: plan.includes('link') && skip }, () => {
+    test(`a folder that vanishes mid-check: ${name}`, () => {
       const s = setup();
       try { const before = s.snapshot(); check(run(s, plan)); assert.deepEqual(s.snapshot(), before, 'foreign bytes unchanged'); }
       finally { s.cleanup(); }
