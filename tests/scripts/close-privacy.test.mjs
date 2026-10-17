@@ -1,4 +1,5 @@
 import { registerFixtureProject } from './registered-project-fixture.mjs';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 /** Production-path privacy boundaries. Synthetic data and isolated OS home only. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -250,7 +251,7 @@ test('writer and purge refuse a linked generated directory', t => {
   assert.equal(JSON.parse(purge.stdout).purged, false);
 });
 
-test('purge preserves a linked file in a generated directory', { skip: process.platform === 'win32' ? 'file symlink creation may require elevated Windows privileges' : false }, t => {
+test('purge preserves a linked file in a generated directory', { skip: symlinkCapable() ? false : 'this account cannot create symlinks (Windows without Developer Mode or elevation)' }, t => {
   const f = fixture(t);
   const outside = join(f.root, 'outside');
   mkdirSync(outside);

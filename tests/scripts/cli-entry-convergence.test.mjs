@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -61,7 +62,7 @@ for (const name of REPRESENTATIVES) {
   });
 
   test(`${name} — a symlinked spelling still runs the CLI main (diagnostic + nonzero)`, {
-    skip: process.platform === 'win32' ? 'symlink creation is privilege-dependent on Windows' : false,
+    skip: symlinkCapable() ? false : 'this account cannot create symlinks (Windows without Developer Mode or elevation)',
   }, () => {
     const base = mkdtempSync(join(tmpdir(), 'cli-entry-link-'));
     try {
