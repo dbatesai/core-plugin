@@ -223,10 +223,17 @@ export function classifyProjectMdChange(cachedStamp, currentText) {
   return hashOutsideHotBlock(currentText) === cachedStamp.outside_hash ? 'hot-block-only' : 'outside-changed';
 }
 
-export function recordProjectMdWrite(projectMdPath, { now = null, home = null } = {}) {
-  const currentText = (() => {
-    try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
-  })();
+export function recordProjectMdWrite(projectMdPath, { now = null, home = null, written } = {}) {
+  let currentText = '';
+  let readFailed = false;
+  try { currentText = readFileSync(projectMdPath, 'utf8'); } catch { readFailed = true; }
+  // A writer passes the exact text it wrote. If the file no longer holds those bytes (someone edited it
+  // between the write and this stamp), nothing is stamped: the previous baseline stays, so the change
+  // reads as the user's, never as CORE's. A read that fails is not an empty file, so it never matches.
+  if (typeof written === 'string') {
+    if (readFailed) return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'unreadable-after-write' };
+    if (currentText !== written) return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'changed-since-write' };
+  }
   const projectDir = dirname(resolve(projectMdPath));
   // Shared locked-stamp plumbing lives in state-cache.mjs (shared with
   // decorate-graph.mjs so there is one copy of the
@@ -315,7 +322,7 @@ function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, h
       const live = readFileSync(path, 'utf8');
       if (live !== original) throw needsReconciliationError(resolve(path), 'stale-preimage');
       atomicWriteFileSync(path, next);
-      outcome = recordProjectMdWrite(path, { now, home });
+      outcome = recordProjectMdWrite(path, { now, home, written: next });
     }
     return { updated: next, applied: next !== original, stampOutcome: outcome };
   });
@@ -390,7 +397,7 @@ function clearHotSectionCore(projectDir, { now, home } = {}) {
       // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
       // stale after a clear — edit-detection would then misread the clear
       // itself as an unattributed change on the very next check.
-      stampOutcome = recordProjectMdWrite(path, { now, home });
+      stampOutcome = recordProjectMdWrite(path, { now, home, written: updated });
     }
     return { updated, cleared, stampOutcome };
   });

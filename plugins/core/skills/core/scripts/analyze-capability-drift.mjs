@@ -20,6 +20,7 @@ import { writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { readHistory } from './capability-history.mjs';
 import { projectRootFor, detectStateHarness } from './project-state.mjs';
+import { stampCreatedBaseline } from './lifecycle-detect.mjs';
 
 // identity_status rank — higher is healthier. Drift = new rank < old rank.
 const STATUS_RANK = { PASS: 3, DEGRADED: 2, 'NOT-YET': 1, UNKNOWN: 0 };
@@ -304,7 +305,12 @@ export function main(argv) {
   ensureStoreIgnores(project);
   writeFileSync(outPath, md);
   removeLegacyDriftLog(project);
+  // The log is CORE's own generated file. Stamp exactly the bytes just written so the next
+  // session's edit check reads it as CORE's write instead of a pending user edit. A stamp that
+  // cannot land is reported, never hidden.
+  const stamp = stampCreatedBaseline(project, outPath, { kind: 'unit', lastWrittenBy: 'analyze-capability-drift', written: md });
   console.log(JSON.stringify({
+    stamped: stamp?.stamped === true,
     drift: drift.length, healing: healing.length, regressions: regressions.length,
     not_attributable: ambiguous.length,
     history_entries: history.length, untagged_skipped: countUntaggedSessions(history), out: outPath,

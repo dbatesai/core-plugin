@@ -82,13 +82,23 @@ export function truncateUtf8(str, maxBytes) {
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
-export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed', 'migration-in-progress', 'state-untrusted', 'state-uninspectable'];
+export const RETRIEVAL_REASONS = ['ok', 'import-failed', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed', 'migration-in-progress', 'state-untrusted', 'state-uninspectable'];
+
+// Which harness invoked this hook. CORE_HOOK_HARNESS is the explicit signal, set by the harness's
+// own wrapper; the ambient variables are the fallback for a direct invocation. Null when unknown.
+export function resolveHookHarness(env = process.env) {
+  if (env.CORE_HOOK_HARNESS === 'codex') return 'codex';
+  if (env.CORE_HOOK_HARNESS === 'claude-code') return 'claude-code';
+  if (env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return 'claude-code';
+  if (env.CODEX_SESSION_ID || env.CODEX_PLUGIN_ROOT) return 'codex';
+  return null;
+}
 
 export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
   const r = RETRIEVAL_REASONS.includes(reason) ? reason : 'pipeline-error';
   try {
-    const out = logHookEvent({ hook: 'retrieve-context', action: a, reason: r, ...extra });
+    const out = logHookEvent({ hook: 'retrieve-context', action: a, reason: r, harness: resolveHookHarness(), ...extra });
     if (!out?.written) {
       // stderr is the last-resort operational surface. Never print to stdout:
       // stdout is injected into the user's context by the hook protocol.
@@ -261,10 +271,7 @@ export async function main() {
       // below is undocumented Codex behavior — kept ONLY
       // for direct/manual invocation that bypasses the wrapper, never trusted
       // as the primary signal.
-      const harness = process.env.CORE_HOOK_HARNESS === 'codex' ? 'codex'
-        : process.env.CORE_HOOK_HARNESS === 'claude-code' ? 'claude-code'
-        : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
-        : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : null);
+      const harness = resolveHookHarness();
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {

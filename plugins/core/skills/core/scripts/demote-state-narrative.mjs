@@ -373,7 +373,7 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
       appendToArchiveState(archivePath, block);
     }
     atomicWriteFileSync(projectMdPath, newText);
-    const outcome = recordProjectMdWrite(projectMdPath);
+    const outcome = recordProjectMdWrite(projectMdPath, { written: newText });
     if (outcome && outcome.stamped === false) stats.attribution = outcome;
   });
 

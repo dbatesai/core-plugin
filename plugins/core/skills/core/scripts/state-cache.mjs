@@ -583,6 +583,52 @@ export function stampFiles(projectDir, entries, { now, lock } = {}) {
   return stampOutcome;
 }
 
+/**
+ * repointMovedCache — carry the baseline across a user-confirmed folder move.
+ *
+ * Stamps are keyed by absolute path, so after a move every key names a folder that is gone and
+ * the files read as having no baseline. This renames the keys that sit under an old root to the
+ * same relative place under `projectDir`. Each stamp's hash, time and writer are kept exactly:
+ * nothing is re-baselined, so an edit made before or after the move is still detected. A key
+ * already present at the new path is left alone. Only the caller that has verified a move may
+ * call this; a copied folder never does.
+ *
+ * @param {string} projectDir the project root now
+ * @param {string[]} oldRoots spellings of the root before the move
+ * @returns {{status: 'repointed'|'nothing-to-do'|'held', count: number, reason?: string}}
+ */
+export function repointMovedCache(projectDir, oldRoots) {
+  const root = resolve(projectDir);
+  const olds = [...new Set((oldRoots || []).filter((o) => typeof o === 'string' && isAbsolute(o)).map((o) => resolve(o)))]
+    .filter((o) => o !== root);
+  if (!olds.length) return { status: 'nothing-to-do', count: 0 };
+  const cachePath = projectCachePath(root);
+  const custody = cacheCustodyProblem(root);
+  if (custody) return { status: 'held', count: 0, reason: `cache-custody: ${custody}` };
+  const peek = readProjectCache(root);
+  if (peek.status === CACHE_ABSENT) return { status: 'nothing-to-do', count: 0 };
+  if (peek.status !== CACHE_CLEAN) return { status: 'held', count: 0, reason: `cache-${peek.status}` };
+  let count = 0;
+  try {
+    withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
+      const cache = readProjectCache(root);
+      if (cache.status !== CACHE_CLEAN) return;
+      for (const key of Object.keys(cache.files)) {
+        const old = olds.find((o) => { const r = relative(o, key); return r && !isAbsolute(r) && r !== '..' && !r.startsWith('..' + sep); });
+        if (!old) continue;
+        const next = join(root, relative(old, key));
+        if (!own(cache.files, next)) cache.files[next] = cache.files[key];
+        delete cache.files[key];
+        count++;
+      }
+      if (count) atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
+    }, { ...STAMP_LOCK_BUDGET });
+  } catch (e) {
+    return { status: 'held', count: 0, reason: String(e?.code || e?.message || e) };
+  }
+  return { status: count ? 'repointed' : 'nothing-to-do', count };
+}
+
 /** A completed stamp can still require lock cleanup; callers must retain both. */
 export function stampNeedsRecovery(outcome) {
   return outcome?.stamped === false || (outcome?.lockReleaseFailures?.length || 0) > 0;

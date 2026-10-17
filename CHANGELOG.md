@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.1] — 2026-10-17
+
+### Changed
+- Data-storage protocol: an action's obligation, its attempt history and its support are stated separately; units that depend on it are updated in the same pass; a render never upgrades a pending action to done.
+- Hot-section rule: each warning or in-flight item names what it affects, what was tried, who owns the next action and what closes it.
+- Startup protocol: a capability check that comes back short is described in plain words (what was checked, what it means, what the user can do) instead of a mandated phrase.
+- `--stamp-created` guidance: the command adopts the current bytes, so it runs right after the write, never as a later re-stamp.
+
+### Fixed
+- A turn-capture row is no longer dropped when a purge removes the capture folder while the custody check is running; the check looks again and reads the folder as absent (3 of 60 isolated runs on Windows before, 0 of 60 after).
+- A confirmed folder move carries the file baselines and the metrics storage pin to the new path; a copy is not repointed.
+- Writers stamp only the bytes they wrote; an edit that lands between a write and its stamp reads as the user's, and a read-back that fails is refused rather than stamped as empty.
+- The memory-index refresh re-reads the harness memory file right before writing and recomputes if it changed, up to three tries, instead of overwriting another writer's change.
+- The capability-drift log is stamped when written, so it no longer shows as a pending edit every session.
+- Codex retrieval hook: an import failure leaves a receipt instead of a silent exit 0, and every receipt names its harness.
+
+### Tests
+- Deterministic custody-retry cases replace the remover stress test; the vanished-then-link case runs on Windows through a junction; the harness-resolver test imports by file URL on Windows; the package report's "Deltas unavailable" branch is covered; the source-package smoke runs the hooks from a scratch folder with empty stdin and fails if the caller's project state changes.
+
 ## [3.20.0] — 2026-10-09
 
 ### Changed

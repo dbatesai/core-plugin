@@ -86,9 +86,11 @@
  *   node lifecycle-detect.mjs <project> --import-legacy-cache [--apply] [--recover] [--json]
  *     --record-session-start <id>  Snapshot which user-sensitive files exist NOW
  *                                  (diagnostic hint only — see above).
- *     --stamp-created <path>       Establish the first CORE-authored baseline for
- *                                  a file CORE just created (graduation, PROJECT.md
- *                                  render). --kind selects the domain block hasher
+ *     --stamp-created <path>       Adopt the file's current bytes as its first
+ *                                  baseline, run as the next step after CORE writes
+ *                                  it (graduation, PROJECT.md render). It cannot
+ *                                  prove the bytes are the writer's; in-process
+ *                                  writers pass their text through createFile. --kind selects the domain block hasher
  *                                  (default 'unit'); --by sets last_written_by.
  *
  * Ships with the plugin as prescriptive code; .mjs only.
@@ -185,9 +187,14 @@ export function recordSessionStart(projectDir, { sessionId = null, now = new Dat
  * stamp failure surfaces as attribution-unknown/recovery-required, per the
  * review requirement) — it never throws into the creator.
  */
-export function stampCreatedBaseline(projectDir, absPath, { kind = 'unit', lastWrittenBy, now, home } = {}) {
+export function stampCreatedBaseline(projectDir, absPath, { kind = 'unit', lastWrittenBy, now, home, written } = {}) {
   const abs = resolve(absPath);
   const text = readFileSync(abs, 'utf8');
+  // With `written`, only the bytes the creator wrote can become its baseline; without it (the
+  // --stamp-created command), the current bytes are adopted as they stand.
+  if (typeof written === 'string' && text !== written) {
+    return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'changed-since-write' };
+  }
   const outsideHash = kind === 'project' ? hashOutsideHotBlock(text) : hashOutsideEdgesBlock(text);
   const by = lastWrittenBy || (kind === 'project' ? 'project-create' : 'unit-create');
   return stampFile(projectDir, abs, hashText(text), by, { now, home, extra: { outside_hash: outsideHash } });
@@ -205,7 +212,7 @@ export function createFile(projectDir, absPath, content, { kind = 'unit', lastWr
   const abs = resolve(absPath);
   mkdirSync(dirname(abs), { recursive: true });
   atomicWriteFileSync(abs, content);
-  return stampCreatedBaseline(projectDir, abs, { kind, lastWrittenBy, now, home });
+  return stampCreatedBaseline(projectDir, abs, { kind, lastWrittenBy, now, home, written: content });
 }
 
 // ---------- per-file classification (reporting) ----------

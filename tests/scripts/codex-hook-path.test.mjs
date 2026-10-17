@@ -1,7 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -119,4 +119,38 @@ function runBrokenWrapper(wrapperName, targetName) {
 test('Codex UserPromptSubmit wrapper: a broken shared module still exits 0 (fail-open covers the import, not just main())', () => {
   assert.doesNotThrow(() => runBrokenWrapper('retrieve-context-hook-codex.mjs', 'retrieve-context-hook.mjs'),
     'a SyntaxError in the imported module must not propagate as a non-zero exit');
+});
+
+test('Codex wrapper: when the shared module will not load, a receipt names the failure on stderr and stdout stays empty', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codex-wrapper-import-receipt-'));
+  try {
+    writeFileSync(join(dir, 'retrieve-context-hook-codex.mjs'), readFileSync(join(HOOKS_DIR, 'retrieve-context-hook-codex.mjs'), 'utf8'));
+    writeFileSync(join(dir, 'retrieve-context-hook.mjs'), 'export function main( {{{ syntax error\n');
+    const r = spawnSync('node', [join(dir, 'retrieve-context-hook-codex.mjs')], {
+      input: JSON.stringify({ cwd: dir, session_id: 'import-receipt-probe' }),
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog() },
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, 'the turn still passes');
+    assert.equal(r.stdout, '', 'nothing is injected into the user context');
+    const row = JSON.parse(r.stderr.trim().split('\n').pop());
+    assert.equal(row.hook, 'retrieve-context');
+    assert.equal(row.action, 'failed');
+    assert.equal(row.reason, 'import-failed');
+    assert.equal(row.harness, 'codex');
+    assert.equal(row.error_code, 'SyntaxError');
+    assert.ok(!/probe|Users|tmp/.test(row.error_code), 'no path or message rides the code');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retrieval receipts carry the harness that invoked the hook, from the explicit signal first', async () => {
+  const { resolveHookHarness, RETRIEVAL_REASONS } = await import(pathToFileURL(join(HOOKS_DIR, 'retrieve-context-hook.mjs')).href);
+  assert.equal(resolveHookHarness({ CORE_HOOK_HARNESS: 'codex' }), 'codex');
+  assert.equal(resolveHookHarness({ CORE_HOOK_HARNESS: 'claude-code', CODEX_SESSION_ID: 'x' }), 'claude-code', 'explicit beats ambient');
+  assert.equal(resolveHookHarness({ CLAUDECODE: '1' }), 'claude-code');
+  assert.equal(resolveHookHarness({ CODEX_PLUGIN_ROOT: '/x' }), 'codex');
+  assert.equal(resolveHookHarness({}), null, 'unknown stays unknown, not guessed');
+  assert.ok(RETRIEVAL_REASONS.includes('import-failed'));
 });

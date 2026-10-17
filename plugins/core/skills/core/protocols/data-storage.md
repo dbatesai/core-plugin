@@ -9,6 +9,7 @@
   - [Tier 1 — Observations](#tier-1--observations)
   - [External-source observations — three-layer filtering](#external-source-observations--three-layer-filtering)
   - [Tier 2 — Units](#tier-2--units)
+  - [Action status in answers and stored projections](#action-status-in-answers-and-stored-projections)
   - [The priority pin](#the-priority-pin)
   - [Open-question units and the `by-when` field](#open-question-units-and-the-by-when-field)
 - [The committed edge types](#the-committed-edge-types)
@@ -189,6 +190,23 @@ Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per the stand
 
 **Field-name distinction between tiers.** Tier 1 observations carry `references-person:` and `references-topic:` — the raw entities mentioned in the capture. Tier 2 units carry curated `people:` and `topics:` arrays — the result of graduation reasoning, which may add, drop, or rename entries from the raw observation lists. `priority.mjs` and `check-units.mjs` read the Tier 2 `topics:` field; the priority function's A signal (Jaccard alignment with session-intent topics) operates on this curated list.
 
+### Action status in answers and stored projections
+
+An action the project owes (a release, a send, a move, a payment) carries three separate things. Keep them separate, because a failed attempt does not cancel the obligation and an attempt does not prove an outcome.
+
+**The obligation:** `owed` (its condition is met and it is not confirmed complete), `not owed` (completed, cancelled, or no longer wanted), or `blocked` (owed, and waiting on something you name).
+
+**What happened to attempts:** `no attempt shown`, `started` (an event shows it began), `partial`, `failed` (with the error that was reported), `outcome unknown` (it was started and the result never came back), or `completed`.
+
+**What supports that:** nothing yet, `reported by <who>`, or `verified` (independent support suited to the action: a receipt, an observable changed state, a second source).
+
+- An action can be `owed` with a `failed` or `outcome unknown` attempt behind it. Say both, and keep the attempt in the history.
+- An error response alone does not show that the outside state is unchanged. Say `state uncertain` unless an event shows the state, and name that event when it does.
+- Do not repeat an operation whose outcome is unknown or whose failure left the state uncertain until you have checked. An unknown outcome never authorizes a replay.
+- Use in-progress wording ("is being sent") only when an event shows the operation started. Use completed wording ("is released", "has been moved") only when an event reports completion, and say who reported it. A report is evidence of the report; call it verified only with independent support.
+- A standing instruction restated as a rule is the instruction, not state. A pending item stays pending in the answer and in every stored line until an event changes it.
+- Keep labeled history. Do not delete an earlier state to make the record look consistent, and do not rewrite text the user wrote; flag it instead.
+
 ### The priority pin
 
 Top-priority units use `pinned` in frontmatter: `floor` gives the priority scorer a 0.7 floor, `true` a 0.9 floor, and `always` a 1.5 override; `false` is neutral. A pin is not a separate authority tier and does not grant authority. The product retriever has its own title/topics + BM25 ranking; do not infer a product-ranking boost from this priority-score setting.
@@ -227,7 +245,7 @@ The `deferrals` field is an optional integer: how many times the user has deferr
 
 Status lifecycle: `active` → `archived` (resolved with the answer captured elsewhere — usually a decision unit citing this one as `supersedes`-equivalent context) or `active` → `retired` (no longer relevant; the question stopped mattering).
 
-**Resolution by supersession.** When an open-question is answered, the answer typically lands as an observation or decision unit citing the open-question. The open-question itself moves to `status: archived` rather than being deleted — the question and its eventual answer both stay queryable.
+**Resolution by supersession.** When an open-question is answered, the answer typically lands as an observation or decision unit citing the open-question. The open-question itself moves to `status: archived` rather than being deleted — the question and its eventual answer both stay queryable. When an event settles a question, update the current dependent projections that still describe it as open (a `depends-on` note, a decision line, a PROJECT.md bullet) in the same update pass. Leave explicitly historical text alone, and flag content the user wrote instead of editing it. This is a consistency requirement for the pass, not a transaction.
 
 **Staleness at startup.** The startup protocol's elapsed-time signals (per `protocols/startup.md` §"Elapsed-time signals") include a sweep over active open-question units. Any unit with a past `by-when` surfaces in the readiness summary. This is the absence-detection primitive — the architecture knows the question is past due even when nobody has explicitly noted it. Mechanism for the Michelle probe (spec §10).
 
@@ -298,7 +316,7 @@ The graduation step is where the LLM's value lives — noticing connections acro
    node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" <project> --stamp-created "_memories/<new-unit>.md" --kind unit
    ```
 
-   This is the ONLY safe first-write: creating a new file establishes its first baseline, which is a different, safe operation from overwriting an existing file that might carry unreconciled user content. If you skip it, the unit is not lost — it is held and surfaced at the next lifecycle pass, and you re-stamp then. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
+   The command adopts the file's bytes as they are when it runs; it cannot prove they are the bytes you wrote. Run it as the very next step after your own write, before anything else can touch the file. If you skipped it, or anything may have changed the file since your write, do not stamp it later: the unit is not lost, it is held and surfaced at the next lifecycle pass, and it stays held until you have read it and confirmed the content is what you wrote. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
 9. Source observations stay in place — the raw record is preserved.
 
 ### Dispatch gate — Sonnet vs Opus
@@ -456,6 +474,8 @@ PROJECT.md is rendered from canonical units. Three triggers:
 3. **In-session, autonomously** — section-level re-render after each meaningful update affecting a section. New decision → re-render Decisions & Risks. New risk → re-render Decisions & Risks. Status-shifting event → re-render State.
 
 Section-level writes, not full-file. You read the current section state, preserve user edits, propagate them back into the source-of-truth units.
+
+What you render into §State or §Moves about an owed action takes its obligation, attempt history and support from §"Action status in answers and stored projections". A render never upgrades a pending, failed or unknown-outcome action to a completed one; only an event in the record does.
 
 When you invoke `priority.mjs` during an in-session render (trigger 3 above) and want an audit trail, pass `--log <project>/_sessions/<date>/priority-log.jsonl --log-label render-on-change`. The log captures the timestamp, intent topics, top-K rankings, and label per invocation — useful for reconstructing why a particular re-render happened after the fact. Optional; not required for the render to happen.
 

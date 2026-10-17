@@ -302,3 +302,27 @@ test('entries with no session cannot be attributed to a lineage', () => {
   assert.equal(drift.length, 0);
   assert.ok(ambiguous.some(a => a.reason === 'no-session-lineage'));
 });
+
+// --- the log is CORE's own write: stamped, so the next edit check reads it as clean ---
+
+test('main: the drift log is stamped with the bytes written, so the edit check reads it as clean', async () => {
+  const { main } = await import('../../plugins/core/skills/core/scripts/analyze-capability-drift.mjs');
+  const { classifyFileLifecycle } = await import('../../plugins/core/skills/core/scripts/lifecycle-detect.mjs');
+  const { realpathSync, appendFileSync } = await import('node:fs');
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'capdrift-stamp-')));
+  const logPath = join(project, '_memories', '_capability-drift-log.md');
+  const realLog = console.log;
+  try {
+    console.log = () => {};
+    assert.equal(main([project, '--harness', 'claude-code']), 0);
+    console.log = realLog;
+    assert.ok(existsSync(logPath));
+    assert.equal(classifyFileLifecycle(project, logPath, { kind: 'unit' }).classification, 'clean');
+    // A later hand edit is still caught: the stamp covers the bytes written, not the file forever.
+    appendFileSync(logPath, '\nuser note\n');
+    assert.equal(classifyFileLifecycle(project, logPath, { kind: 'unit' }).classification, 'pending-edit');
+  } finally {
+    console.log = realLog;
+    rmSync(project, { recursive: true, force: true });
+  }
+});
