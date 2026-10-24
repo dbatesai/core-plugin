@@ -317,11 +317,15 @@ function summarizeProbe(rows) {
 // is the rule's ONLY wildcard. Forward slashes on every platform: the harness
 // matches the command text, and the agent is told to type the path this way.
 export function permissionRules(coreRoot) {
-  const root = resolve(coreRoot).replace(/\\/g, '/');
-  const parent = dirname(root);
+  // String work only, no resolve(): a POSIX-shaped root must stay POSIX-shaped
+  // when this runs on Windows (the test fixtures), and a Windows root comes out
+  // with forward slashes, which node and the rule matcher both accept.
+  const root = String(coreRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+  const cut = root.lastIndexOf('/');
+  const parent = root.slice(0, cut);
   // ponytail: only the immediate parent is a plugin cache if it holds a version
   // folder; a dev install (…/core-plugin/plugins/core) keeps its literal path.
-  const glob = /^[0-9]+\.[0-9]+\.[0-9]+/.test(root.slice(parent.length + 1)) ? `${parent}/*` : root;
+  const glob = /^[0-9]+\.[0-9]+\.[0-9]+/.test(root.slice(cut + 1)) ? `${parent}/*` : root;
   const scripts = `${glob}/skills/core/scripts/*.mjs`;
   return [`Bash(node ${scripts} *)`, `Bash(node ${scripts})`];
 }
