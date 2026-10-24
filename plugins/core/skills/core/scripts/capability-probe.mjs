@@ -424,15 +424,25 @@ export async function main(argv) {
   }
 
   if (outPath) {
-    const { writeFileSync, renameSync, mkdirSync } = await import('node:fs');
-    const { dirname } = await import('node:path');
-    const tmp = `${outPath}.${process.pid}.tmp`;
+    // This call runs pre-approved under the skill's allowed-tools, so --out must
+    // not become a way to write anywhere: the file is the project's own
+    // capability-state.json inside an existing _core state folder, nothing else.
+    const { writeFileSync, renameSync, realpathSync } = await import('node:fs');
+    const { dirname, basename, sep } = await import('node:path');
+    let dir;
+    try { dir = realpathSync(dirname(outPath)); } catch { dir = null; }
+    const inState = dir && dir.split(sep).includes('_core');
+    if (!dir || !inState || basename(outPath) !== 'capability-state.json') {
+      process.stderr.write(`error: --out must be an existing <project>/_core/<harness>/capability-state.json; got ${outPath}\n`);
+      return 2;
+    }
+    const target = `${dir}${sep}capability-state.json`;
+    const tmp = `${target}.${process.pid}.tmp`;
     try {
-      mkdirSync(dirname(outPath), { recursive: true });
       writeFileSync(tmp, JSON.stringify(result, null, 2) + '\n');
-      renameSync(tmp, outPath);
+      renameSync(tmp, target);
     } catch (e) {
-      process.stderr.write(`error: could not write ${outPath}: ${e.message}\n`);
+      process.stderr.write(`error: could not write ${target}: ${e.message}\n`);
       return 1;
     }
     const { summary } = result;

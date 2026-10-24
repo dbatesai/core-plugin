@@ -77,13 +77,16 @@ test('CLI: --startup --out writes the JSON to the file and prints one summary li
   const { tmpdir } = await import('node:os');
   const { fileURLToPath } = await import('node:url');
   const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'capability-probe.mjs');
+  const { mkdirSync } = await import('node:fs');
   const home = mkdtempSync(join(tmpdir(), 'cap-out-'));
   try {
-    const out = join(home, 'hot', 'capability-state.json');
+    const hot = join(home, 'proj', '_core', 'claude-code');
+    mkdirSync(hot, { recursive: true });
+    const out = join(hot, 'capability-state.json');
     const stdout = execFileSync(process.execPath, [SCRIPT, '--startup', '--json', '--out', out], {
       cwd: home, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
     });
-    assert.ok(existsSync(out), 'file written (parent folder created)');
+    assert.ok(existsSync(out), 'file written into the existing _core state folder');
     const json = JSON.parse(readFileSync(out, 'utf8'));
     assert.equal(json.mode, 'startup');
     assert.match(stdout, /capability-probe \(mode=startup/);
@@ -100,4 +103,31 @@ test('CLI: --out without a path is a usage error', async () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--startup', '--out'], { encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--out requires a file path/);
+});
+
+// The call runs pre-approved under the skill's allowed-tools, so --out is confined:
+// an existing <project>/_core/<harness>/ folder and the fixed file name, nothing else.
+test('CLI: --out outside a _core state folder, or with another name, is refused before any write', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, mkdirSync, rmSync, existsSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { fileURLToPath } = await import('node:url');
+  const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'capability-probe.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'cap-out-refuse-'));
+  try {
+    mkdirSync(join(home, '.claude'));
+    mkdirSync(join(home, 'proj', '_core', 'claude-code'), { recursive: true });
+    const cases = [
+      join(home, '.claude', 'settings.json'),                        // a settings file: outside any _core folder
+      join(home, 'proj', '_core', 'claude-code', 'other.json'),      // right folder, wrong name
+      join(home, 'proj', '_core', 'missing', 'capability-state.json'), // parent folder does not exist
+    ];
+    for (const out of cases) {
+      const r = spawnSync(process.execPath, [SCRIPT, '--startup', '--out', out], { cwd: home, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } });
+      assert.equal(r.status, 2, `${out}: exit 2`);
+      assert.match(r.stderr, /--out must be an existing <project>\/_core\/<harness>\/capability-state\.json/);
+      assert.ok(!existsSync(out), `${out}: nothing written`);
+    }
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

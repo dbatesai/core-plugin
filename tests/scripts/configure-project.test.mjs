@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -372,55 +372,31 @@ test('permissionRules: a plugin-cache root globs the version folder; a dev root 
   for (const r of [...cache, ...dev]) assert.ok(!r.includes('\\'), 'forward slashes on every platform');
 });
 
-test('applyPermissionRules: merges into permissions.allow, keeps every other key, idempotent', async () => {
-  const { applyPermissionRules, permissionRules, userSettingsPath } = await import('../../plugins/core/skills/core/scripts/configure-project.mjs');
-  const dir = mkdtempSync(join(tmpdir(), 'core-perms-'));
-  try {
-    const file = join(dir, 'settings.json');
-    writeFileSync(file, JSON.stringify({ model: 'opus', permissions: { allow: ['Read(*)'], deny: ['Bash(sudo *)'] }, hooks: { x: 1 } }));
-    const rules = permissionRules('/p/cache/core/core/1.2.3');
-    const first = applyPermissionRules(file, rules);
-    assert.equal(first.written, true);
-    assert.equal(first.added.length, 2);
-    const after = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(after.model, 'opus');
-    assert.deepEqual(after.permissions.deny, ['Bash(sudo *)']);
-    assert.deepEqual(after.hooks, { x: 1 });
-    assert.deepEqual(after.permissions.allow, ['Read(*)', ...rules]);
-    const second = applyPermissionRules(file, rules);
-    assert.equal(second.written, false, 'a second apply writes nothing');
-    const fresh = join(dir, 'none', 'settings.json');
-    mkdirSync(join(dir, 'none'));
-    assert.equal(applyPermissionRules(fresh, rules).written, true, 'a missing settings file is created');
-    assert.deepEqual(JSON.parse(readFileSync(fresh, 'utf8')).permissions.allow, rules);
-    assert.equal(userSettingsPath({ CLAUDE_CONFIG_DIR: '/cfg' }), join('/cfg', 'settings.json'), 'honours CLAUDE_CONFIG_DIR');
-    assert.equal(userSettingsPath({}, '/home/u'), join('/home/u', '.claude', 'settings.json'));
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+test('userSettingsPath honours CLAUDE_CONFIG_DIR and falls back to ~/.claude', async () => {
+  const { userSettingsPath } = await import('../../plugins/core/skills/core/scripts/configure-project.mjs');
+  assert.equal(userSettingsPath({ CLAUDE_CONFIG_DIR: '/cfg' }), join('/cfg', 'settings.json'));
+  assert.equal(userSettingsPath({}, '/home/u'), join('/home/u', '.claude', 'settings.json'));
 });
 
-test('CLI: --permissions prints the rules and the file, writes nothing without --apply', async () => {
+test('CLI: --permissions is print-only — names the rules and the file, writes nothing, even with --apply', async () => {
   await withFixture({}, async ({ coreRoot, home }) => {
-    const settings = join(home, 'settings-under-test.json');
-    const child = runCli(['--permissions', '--core-root', coreRoot, '--settings', settings, '--json'], { home });
+    const before = readdirSyncSafe(home);
+    const child = runCli(['--permissions', '--core-root', coreRoot, '--json'], { home });
     assert.equal(child.status, 0, `stderr: ${child.stderr}`);
     const out = JSON.parse(child.stdout);
     assert.equal(out.rules.length, 2);
     assert.match(out.rules[0], /^Bash\(node .*\/skills\/core\/scripts\/\*\.mjs \*\)$/);
-    assert.equal(out.applied, null);
-    assert.ok(!existsSync(settings), 'report-only: no file written');
-    const applied = runCli(['--permissions', '--core-root', coreRoot, '--settings', settings, '--apply'], { home });
+    assert.equal(out.written, false);
+    assert.match(out.settingsPath, /settings\.json$/);
+    // --apply is not a mode here: a pre-approved script must never widen its own permissions
+    const applied = runCli(['--permissions', '--core-root', coreRoot, '--apply'], { home });
     assert.equal(applied.status, 0, `stderr: ${applied.stderr}`);
-    assert.match(applied.stdout, /Applied: added 2 rule/);
-    assert.deepEqual(JSON.parse(readFileSync(settings, 'utf8')).permissions.allow, out.rules);
+    assert.match(applied.stdout, /Not written by this script, by design/);
+    assert.deepEqual(readdirSyncSafe(home), before, 'nothing new written under the fixture home');
+    assert.ok(!existsSync(join(home, '.claude', 'settings.json')), 'no settings file created');
   });
 });
 
-test('CLI: --permissions --apply on a settings path that cannot be updated exits 1 with the reason', async () => {
-  await withFixture({}, async ({ coreRoot, home }) => {
-    const dirAsFile = join(home, 'settings-is-a-dir.json');
-    mkdirSync(dirAsFile);
-    const child = runCli(['--permissions', '--core-root', coreRoot, '--settings', dirAsFile, '--apply'], { home });
-    assert.equal(child.status, 1);
-    assert.match(child.stderr, /could not update .*settings-is-a-dir\.json/);
-  });
-});
+function readdirSyncSafe(dir) {
+  try { return JSON.stringify([...readdirSync(dir)].sort()); } catch { return '[]'; }
+}

@@ -17,7 +17,7 @@
  *
  *   node configure-project.mjs [--project <dir>] [--harness claude-code|codex]
  *                              [--apply] [--json] [--core-root <dir>]
- *   node configure-project.mjs --permissions [--apply] [--settings <file>] [--json]
+ *   node configure-project.mjs --permissions [--json]   (print-only; never writes settings)
  *
  * Ships as a script with the plugin; .mjs only.
  *
@@ -33,7 +33,7 @@
  * verified-reachable. The script never asserts a capability it cannot check.
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -331,29 +331,15 @@ export function userSettingsPath(env = process.env, home = homedir()) {
   return join(dir, 'settings.json');
 }
 
-// Merge the rules into permissions.allow of the user settings file; never
-// touches any other key, never removes a rule, never writes when nothing changes.
-export function applyPermissionRules(settingsPath, rules) {
-  let settings = {};
-  if (existsSync(settingsPath)) settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
-  const perms = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {};
-  const allow = Array.isArray(perms.allow) ? perms.allow : [];
-  const added = rules.filter((r) => !allow.includes(r));
-  if (added.length === 0) return { settingsPath, added, written: false };
-  settings.permissions = { ...perms, allow: [...allow, ...added] };
-  const tmp = `${settingsPath}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
-  renameSync(tmp, settingsPath);
-  return { settingsPath, added, written: true };
-}
-
-function formatPermissions(rules, settingsPath, applied) {
+// Print-only on purpose: this script runs under the skill's own allowed-tools,
+// so a mode that wrote the user's settings would let a pre-approved command widen
+// its own standing permissions with no prompt. The user pastes the rule in.
+function formatPermissions(rules, settingsPath) {
   const L = ['CORE permissions — one standing allow rule for every CORE script call:', ''];
   for (const r of rules) L.push(`  ${r}`);
   L.push('');
-  L.push(`Belongs in: ${settingsPath}  (permissions.allow)`);
-  if (applied) L.push(applied.written ? `Applied: added ${applied.added.length} rule(s).` : 'Applied: already present, nothing written.');
-  else L.push('Not written (pass --apply to merge it in).');
+  L.push(`Paste into: ${settingsPath}  (permissions.allow)`);
+  L.push('Not written by this script, by design: it runs pre-approved, so it never edits your permissions.');
   L.push('');
   L.push('Limit: a `*` also matches `..`, so this bounds the command text, not where a script may live.');
   L.push('Deny and ask rules, and any command gate you run, still stand above it.');
@@ -372,14 +358,9 @@ export async function main(argv) {
 
   if (has('permissions')) {
     const rules = permissionRules(coreRoot);
-    const settingsPath = opt('settings') || userSettingsPath();
-    let applied = null;
-    if (apply) {
-      try { applied = applyPermissionRules(settingsPath, rules); }
-      catch (e) { process.stderr.write(`error: could not update ${settingsPath}: ${e.message}\n`); return 1; }
-    }
-    if (has('json')) process.stdout.write(JSON.stringify({ schema: 'configure-project-permissions/1', rules, settingsPath, applied }, null, 2) + '\n');
-    else process.stdout.write(formatPermissions(rules, settingsPath, applied) + '\n');
+    const settingsPath = userSettingsPath();
+    if (has('json')) process.stdout.write(JSON.stringify({ schema: 'configure-project-permissions/1', rules, settingsPath, written: false }, null, 2) + '\n');
+    else process.stdout.write(formatPermissions(rules, settingsPath) + '\n');
     return 0;
   }
 
