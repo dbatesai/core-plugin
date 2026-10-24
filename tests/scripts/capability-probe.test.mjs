@@ -67,3 +67,37 @@ test('a harness with declared capabilities reports a complete rowset', async () 
   assert.equal(r.complete, true);
   assert.ok(r.rows.length >= 1);
 });
+
+// --out replaces the shell redirect startup used to write capability-state.json:
+// one plain `node … --out <file>` is what a permission rule can match; `>` asks.
+test('CLI: --startup --out writes the JSON to the file and prints one summary line', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, readFileSync, rmSync, existsSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { fileURLToPath } = await import('node:url');
+  const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'capability-probe.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'cap-out-'));
+  try {
+    const out = join(home, 'hot', 'capability-state.json');
+    const stdout = execFileSync(process.execPath, [SCRIPT, '--startup', '--json', '--out', out], {
+      cwd: home, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.ok(existsSync(out), 'file written (parent folder created)');
+    const json = JSON.parse(readFileSync(out, 'utf8'));
+    assert.equal(json.mode, 'startup');
+    assert.match(stdout, /capability-probe \(mode=startup/);
+    assert.ok(!stdout.includes('"rows"'), 'the JSON goes to the file, not stdout');
+    assert.ok(!existsSync(`${out}.${process.pid}.tmp`), 'no temp file left behind');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('CLI: --out without a path is a usage error', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'capability-probe.mjs');
+  const r = spawnSync(process.execPath, [SCRIPT, '--startup', '--out'], { encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--out requires a file path/);
+});

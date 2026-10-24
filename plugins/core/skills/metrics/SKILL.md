@@ -4,7 +4,8 @@ description: Report CORE memory health with trust-labeled evidence for storage, 
 user-invocable: true
 allowed-tools:
   - Read
-  - Bash
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs)
   - Glob
   - Task
   - Artifact
@@ -16,14 +17,14 @@ The point: someone runs it and can **confidently say what's proven and what isn'
 
 **One door, four modes:** the plain `/metrics` default answers the three outcome questions from stored conclusions; `full` opens the instrument panel; `export` produces the anonymized shareable package; `self-test` runs a deliberate blind test round now. The old `/self-test` and `/metrics-package` commands are gone; their work runs as the modes here.
 
-**Script path resolution (all modes).** Take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/metrics/SKILL.md` — that prefix is the plugin root (`CORE_ROOT`). Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
+**Where the scripts are.** `<scripts>` below is `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts` — type that path in full, one `node <scripts>/<name>.mjs …` per Bash call, nothing chained, no `cd`, no variable prefix, no redirect. (If the variable shows unexpanded, the harness didn't substitute it: take this skill's base directory, strip `/skills/metrics`, append `/skills/core/scripts`.) If `node` answers `Cannot find module`, the install path is wrong or stale: say so, skip that step, and never run against a guessed path.
 
 ---
 
 ## Default mode — the answer view
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/metrics-check.mjs" <project-dir> --answers
+node <scripts>/metrics-check.mjs <project-dir> --answers
 ```
 
 Relay stdout **verbatim** — it is already the finished, plain-language view. It reads ONLY pinned conclusions (the scorecard history the maintenance cadence writes) plus the tripwire state — no live recomputation, so two reads of the same history always say the same thing. Its shape:
@@ -45,7 +46,7 @@ Nothing needs your attention right now.
 ## `full` mode — the instrument panel
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/metrics-check.mjs" <project-dir>
+node <scripts>/metrics-check.mjs <project-dir>
 ```
 
 **The script is the only renderer** — it gathers every number AND renders the report (verdict heading, bar gauges, narrative). Relay it verbatim; never hand-compute a bar, re-word the narrative, or round a number. Add `--json` for the machine object (`render-metrics-artifact --json-in` consumes it).
@@ -62,7 +63,7 @@ The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEA
 **Artifact display (harnesses with an artifact surface):** the full report displays artifact-first — a self-contained plain-language HTML page from the SAME canonical object:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <project-dir>/_core/_scratch/core-metrics.html
+node <scripts>/render-metrics-artifact.mjs <project-dir> --out <project-dir>/_core/_scratch/core-metrics.html
 ```
 
 Narrate the printed manifest (content class `aggregates-only`, byte count, producer identity), publish **private** via the Artifact tool, keep a stable URL by republishing the same path, and record the outcome with `--record-publish` (the script refuses `published-private` without evidence + authorization fields). Consent: ask-first by default; narrate-and-proceed only under this user's own durably-recorded standing authorization. On Codex (no artifact surface on that harness): say so by name, give the `--out` path, never fake a publish.
@@ -71,8 +72,8 @@ Narrate the printed manifest (content class `aggregates-only`, byte count, produ
 
 1. **Scope from the user's words:** "this project"/unspecified → current project; "all my projects"/"everything" → `--all`. Ambiguous → current project, said in one line.
 2. ```bash
-   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" "<project-dir>"
-   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" --all --scratch-project "<exported-project-dir>"
+   node <scripts>/metrics-package.mjs "<project-dir>"
+   node <scripts>/metrics-package.mjs --all --scratch-project "<exported-project-dir>"
    ```
    With `--all`, use the current exported project as the explicit scratch host; if it is not in the exported set, resolve the host before running. Do not silently select the first registry entry.
 3. **Verify before claiming:** the script prints `package: <path>` — confirm the file exists, then relay the landing path, the coverage line, and every `flag[...]` line (the flags are the point, not noise). Exit codes: **0** complete; **1** partial — the package shipped but some sources were unavailable; name exactly which and what that costs, never round up to complete; **2** failed — inspect the result: a leakage abort ships nothing, but cleanup failure can leave verified output and retained scratch. Name both when reported; a retained staging folder is recoverable material, not proof of delivery. Never retry with the boundary loosened or hand-build a package. **The script is the only writer** — a hand-patched package voids the anonymization boundary. If the user asks to de-anonymize "just this once": decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't. Turn-capture evidence content NEVER enters the package by construction (canary-tested).
@@ -83,7 +84,7 @@ The scheduled maintenance pass never authors a round itself — when the current
 
 1. **`new-round`** — freezes the corpus identity, creates the append-only round dir, prints the blind-authoring brief:
    ```bash
-   node "${CORE_ROOT}/skills/core/scripts/self-test-round.mjs" new-round <project-dir>
+   node <scripts>/self-test-round.mjs new-round <project-dir>
    ```
 2. **Spawn the BLIND author** — a fresh subagent whose entire prompt is the brief verbatim plus the active unit bodies from `<project>/_memories/` (skip `_`-prefixed and `INDEX` files). Nothing else: no session context, no prior rounds, no retrieval code, no search tools. The author records `meta.blind_attestation` and `meta.author` (registration refuses a set without them). Prefer a different model family than the project's own reasoning model when an alternate CLI is available; when not, say so honestly — the old-vs-new delta is the backstop.
 3. **`register <round> <goldset-file>`** — mechanical verification (schema, zero word-overlap for indirect kinds, false-premise entity checks, per-kind quota, corpus identity), then FROZEN. **On refusal, the violations go back to the author — never silently patch the set yourself**; that defeats the blindness.
@@ -94,4 +95,4 @@ The scheduled maintenance pass never authors a round itself — when the current
 
 ## Never (all modes)
 
-Pad the default view with sections it doesn't have; hand-edit bars, verdicts, or narrative; claim the gold-set/self-test snapshot is `proven-live`; run against a guessed `CORE_ROOT`; publish an artifact without narrating it; let any display source a different data object than the script emitted.
+Pad the default view with sections it doesn't have; hand-edit bars, verdicts, or narrative; claim the gold-set/self-test snapshot is `proven-live`; run against a guessed scripts path; publish an artifact without narrating it; let any display source a different data object than the script emitted.

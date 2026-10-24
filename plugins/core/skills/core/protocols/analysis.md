@@ -90,7 +90,7 @@ Phase transitions are decisions, not timers. If Phase 3 produces flat agreement 
 Every multi-agent run passes the anti-anchoring authority gate at setup. Run it before you spawn and carry the decision through the whole run:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/adversarial-run-gate.mjs" --harness <harness> --json
+node <scripts>/adversarial-run-gate.mjs --harness <harness> --json
 ```
 
 The gate reads the live `anti-anchoring-mechanism` capability row — the real row, not a policy string — and returns one typed `decision`. Branch on `decision`, never on the booleans; `ADVISORY` must never be mistaken for `AUTHORIZED`:
@@ -99,7 +99,7 @@ The gate reads the live `anti-anchoring-mechanism` capability row — the real r
 - **ADVISORY** — anti-anchoring is DEGRADED / UNKNOWN / NOT-YET. This is the normal case on Claude Code today. The run is allowed, but its output is advisory only: stamp the SYNTHESIS with the gate's `watermark`, and do **not** let it directly drive a canonical mutation — an independent agent or the user accepts the finding first.
 - **BLOCKED** — the capability row is absent (setup anomaly). Fix the descriptor before running; don't proceed.
 
-This is enforcement, not closure: the gate makes the DEGRADED state load-bearing (advisory output watermarked, mutation authority held), but it does not by itself retire the underlying risk — the physical-isolation proof is separate. If `CORE_ROOT` is unresolved, treat the run as ADVISORY and say so in the synthesis.
+This is enforcement, not closure: the gate makes the DEGRADED state load-bearing (advisory output watermarked, mutation authority held), but it does not by itself retire the underlying risk — the physical-isolation proof is separate. If the gate cannot run (`Cannot find module`), treat the run as ADVISORY and say so in the synthesis.
 
 ## Output shape
 

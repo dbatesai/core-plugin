@@ -17,9 +17,9 @@ const startup = readFileSync(join(CORE, 'protocols', 'startup.md'), 'utf8');
 const skill = readFileSync(join(CORE, 'SKILL.md'), 'utf8');
 
 test('every startup index-registry invocation names the SHIPPED path (skills/core/scripts)', () => {
-  assert.doesNotMatch(startup, /<CORE_ROOT>\/scripts\/index-registry\.mjs/,
-    'the readiness command must not name the nonexistent <CORE_ROOT>/scripts/ path');
-  assert.match(startup, /<CORE_ROOT>\/skills\/core\/scripts\/index-registry\.mjs/,
+  assert.doesNotMatch(startup, /CORE_ROOT/,
+    'the retired CORE_ROOT resolver idiom must not come back — every call is `node <scripts>/…`');
+  assert.match(startup, /node <scripts>\/index-registry\.mjs bootstrap/,
     'the record-the-bootstrap command names the shipped location');
 });
 

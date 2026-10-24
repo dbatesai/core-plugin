@@ -391,9 +391,18 @@ export async function main(argv) {
   const asJson = argv.includes('--json');
   const startupIdx = argv.indexOf('--startup');
   const preActionIdx = argv.indexOf('--pre-action');
+  // --out <file>: write the JSON there instead of a shell redirect, so the call
+  // stays one plain `node … --out <file>` that a permission rule can match
+  // (a `>` makes the harness ask every time).
+  const outIdx = argv.indexOf('--out');
+  const outPath = outIdx === -1 ? null : argv[outIdx + 1];
 
   if (startupIdx === -1 && preActionIdx === -1) {
-    process.stderr.write(`usage: capability-probe.mjs [--startup | --pre-action <name>] [--json]\n`);
+    process.stderr.write(`usage: capability-probe.mjs [--startup | --pre-action <name>] [--json] [--out <file>]\n`);
+    return 2;
+  }
+  if (outIdx !== -1 && (!outPath || outPath.startsWith('--'))) {
+    process.stderr.write(`error: --out requires a file path\n`);
     return 2;
   }
 
@@ -414,7 +423,21 @@ export async function main(argv) {
     }
   }
 
-  if (asJson) {
+  if (outPath) {
+    const { writeFileSync, renameSync, mkdirSync } = await import('node:fs');
+    const { dirname } = await import('node:path');
+    const tmp = `${outPath}.${process.pid}.tmp`;
+    try {
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(tmp, JSON.stringify(result, null, 2) + '\n');
+      renameSync(tmp, outPath);
+    } catch (e) {
+      process.stderr.write(`error: could not write ${outPath}: ${e.message}\n`);
+      return 1;
+    }
+    const { summary } = result;
+    process.stdout.write(`capability-probe (mode=${result.mode}, harness=${result.harness}) → ${outPath}: ${summary.total} rows (PASS=${summary.pass} DEGRADED=${summary.degraded} NOT-YET=${summary.not_yet} UNKNOWN=${summary.unknown})\n`);
+  } else if (asJson) {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } else {
     const { harness, mode, rows, summary } = result;

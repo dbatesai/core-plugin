@@ -60,7 +60,7 @@ Retired without replacement. No automated session-log cleanup ships: `_sessions/
 
 Look across surviving entries for meta-patterns — recurring themes, consistent user feedback, project patterns no single entry captures but the collection implies. Write a new entry if a genuine meta-pattern emerges.
 
-**Retrieval trip-wire check.** Read the per-project retrieval log at `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl` (or run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project>` for the aggregated view). Check the four standing trip-wires:
+**Retrieval trip-wire check.** Read the per-project retrieval log at `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl` (or run `node <scripts>/analyze-retrieval-quality.mjs <project>` for the aggregated view). Check the four standing trip-wires:
 
 | Trip-wire | Condition | Next-step infra if fires twice consecutively |
 |---|---|---|

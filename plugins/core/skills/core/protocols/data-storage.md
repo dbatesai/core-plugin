@@ -277,8 +277,7 @@ After every unit create or edit, enrichment is due. This is derived search state
 Write the result through the governed CLI, not by editing the sidecar directly:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/enrichment-sidecar.mjs" <project> <path-relative-to-_memories> \
-  --input <json-file> --writer-family <family> --answer-family <family>
+node <scripts>/enrichment-sidecar.mjs <project> <path-relative-to-_memories> --input <json-file> --writer-family <family> --answer-family <family>
 ```
 
 The JSON input carries `aliases`, `paraphrases`, and `likely_questions` arrays. The CLI rejects same-family provenance, keys the record to the source file's SHA-256, stores it separately at `_memories/_lib/enrichment-sidecar.json`, and writes owner-only. Retrieval scores valid enrichment as its own lower-weight arm; it never mixes generated phrases into the unit body. An edit changes the source hash immediately, so stale enrichment becomes ineligible before re-enrichment runs.
@@ -313,7 +312,7 @@ The graduation step is where the LLM's value lives — noticing connections acro
 8. **Stamp the creation baseline in the SAME step you write the unit.** A newly-written unit has no cache-stamp baseline, and CORE never assumes authorship from timing — so until its creating writer stamps it, decoration/hot-section/compaction will HOLD it as `no-baseline` (fail closed) rather than touch it. Establish the baseline the instant the file lands, so the same session's decoration backstop can decorate it normally:
 
    ```bash
-   node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" <project> --stamp-created "_memories/<new-unit>.md" --kind unit
+   node <scripts>/lifecycle-detect.mjs <project> --stamp-created "_memories/<new-unit>.md" --kind unit
    ```
 
    The command adopts the file's bytes as they are when it runs; it cannot prove they are the bytes you wrote. Run it as the very next step after your own write, before anything else can touch the file. If you skipped it, or anything may have changed the file since your write, do not stamp it later: the unit is not lost, it is held and surfaced at the next lifecycle pass, and it stays held until you have read it and confirmed the content is what you wrote. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
@@ -425,7 +424,7 @@ Signals:
 
 Starting weights: `w_R=0.30, w_F=0.15, w_S=0.20, w_A=0.35`.
 
-Priority is computed at retrieval time over a candidate set, never persisted as a stored ranked list. The implementation ships with the plugin at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs` (executable units stay in the plugin; project folders hold only data). Invoke as `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories/ [--intent t1,t2]` for a ranking diagnostic, or import the `score`, `scoreUnitFile`, and `scoreProxyRS` library functions.
+Priority is computed at retrieval time over a candidate set, never persisted as a stored ranked list. The implementation ships with the plugin at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs` (executable units stay in the plugin; project folders hold only data). Invoke as `node <scripts>/priority.mjs <project>/_memories/ [--intent t1,t2]` for a ranking diagnostic, or import the `score`, `scoreUnitFile`, and `scoreProxyRS` library functions.
 
 ---
 

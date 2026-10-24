@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Every command the skills tell the agent to run is now one plain `node <scripts>/<name>.mjs …` per Bash call: the `[ -n "$CORE_ROOT" ] && … || echo MARKER` guards, the `${CORE_ROOT}` variable, the `|| true` and `2>/dev/null` tails and the shell redirects are gone from `startup.md`, the other protocols, the references and every companion skill. A chained or variable-prefixed command can never match a permission rule, so each CORE call asked for approval; a plain call matches one rule. `<scripts>` is defined once in `core/SKILL.md` from `${CLAUDE_PLUGIN_ROOT}`, which the harness substitutes at load; the failure markers moved into prose and are raised on a non-zero exit, and `Cannot find module` is the unresolved-root signal.
+- Each skill that runs CORE scripts (`core`, `finalize`, `process-memory`, `metrics`, `memory-view`, `configure-project`) pre-approves exactly that shape in its `allowed-tools` frontmatter — `Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)` and the bare form — so the turn that invokes a CORE skill needs no settings at all. The bare `Bash` grants three skills carried are gone.
+- `capability-probe.mjs --out <file>` writes the startup JSON to the file, replacing the shell redirect startup used.
+- `configure-project.mjs --permissions` prints the one standing allow rule for every later turn, written against the live install path with the version folder replaced by `*` (a `*` matches anywhere in a Bash rule), and the settings file it belongs in (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`); `--apply` merges it in without touching any other key. The receipt names the rule's limit: `*` also matches `..`, so deny and ask rules and any user command gate still stand above it.
+
+### Tests
+- `plain-invocation-doc-guard` walks every bash block in the shipped skills and refuses chaining, variables, pipes, redirects, continuations and bare `Bash` grants; the `coreroot-resolver-doc-guard` it replaces is removed. `--out` and `--permissions` have CLI and unit coverage.
+
 ## [3.20.1] — 2026-10-17
 
 ### Changed

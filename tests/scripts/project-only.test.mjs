@@ -899,7 +899,7 @@ test('the /process-memory skill sends a project-only session to the confined com
   const branch = skill.indexOf('## Project-only mode');
   assert.ok(branch > 0 && branch < skill.indexOf('## Step 0 '), 'the branch comes before the first step');
   const text = skill.slice(branch, skill.indexOf('## Step 0 '));
-  assert.match(text, /project-only\.mjs" process-memory --root <project> --apply/);
+  assert.match(text, /node <scripts>\/project-only\.mjs process-memory --root <project> --apply/);
   assert.match(text, /don't run the script commands in the steps below/);
   for (const step of ['0.5', '6.5b', '6.5c', '6.6', '6.7']) assert.ok(text.includes(step), `names step ${step} as skipped`);
 });

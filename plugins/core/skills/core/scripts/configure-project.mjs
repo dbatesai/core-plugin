@@ -17,6 +17,7 @@
  *
  *   node configure-project.mjs [--project <dir>] [--harness claude-code|codex]
  *                              [--apply] [--json] [--core-root <dir>]
+ *   node configure-project.mjs --permissions [--apply] [--settings <file>] [--json]
  *
  * Ships as a script with the plugin; .mjs only.
  *
@@ -32,7 +33,7 @@
  * verified-reachable. The script never asserts a capability it cannot check.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -307,6 +308,58 @@ function summarizeProbe(rows) {
   return 'ran';
 }
 
+// ── Permissions: the one standing allow rule for CORE's scripts ──────────────
+// Every CORE command is one plain `node <scripts>/<name>.mjs …` call, so one
+// Bash rule covers all of them. The install path carries a version folder
+// (…/cache/<marketplace>/core/<version>); replacing that segment with `*` keeps
+// the rule valid across plugin updates — a `*` matches anywhere in a Bash rule.
+// Two rules because a trailing ` *` only also matches the bare command when it
+// is the rule's ONLY wildcard. Forward slashes on every platform: the harness
+// matches the command text, and the agent is told to type the path this way.
+export function permissionRules(coreRoot) {
+  const root = resolve(coreRoot).replace(/\\/g, '/');
+  const parent = dirname(root);
+  // ponytail: only the immediate parent is a plugin cache if it holds a version
+  // folder; a dev install (…/core-plugin/plugins/core) keeps its literal path.
+  const glob = /^[0-9]+\.[0-9]+\.[0-9]+/.test(root.slice(parent.length + 1)) ? `${parent}/*` : root;
+  const scripts = `${glob}/skills/core/scripts/*.mjs`;
+  return [`Bash(node ${scripts} *)`, `Bash(node ${scripts})`];
+}
+
+export function userSettingsPath(env = process.env, home = homedir()) {
+  const dir = env.CLAUDE_CONFIG_DIR && env.CLAUDE_CONFIG_DIR.trim() ? env.CLAUDE_CONFIG_DIR : join(home, '.claude');
+  return join(dir, 'settings.json');
+}
+
+// Merge the rules into permissions.allow of the user settings file; never
+// touches any other key, never removes a rule, never writes when nothing changes.
+export function applyPermissionRules(settingsPath, rules) {
+  let settings = {};
+  if (existsSync(settingsPath)) settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  const perms = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {};
+  const allow = Array.isArray(perms.allow) ? perms.allow : [];
+  const added = rules.filter((r) => !allow.includes(r));
+  if (added.length === 0) return { settingsPath, added, written: false };
+  settings.permissions = { ...perms, allow: [...allow, ...added] };
+  const tmp = `${settingsPath}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
+  renameSync(tmp, settingsPath);
+  return { settingsPath, added, written: true };
+}
+
+function formatPermissions(rules, settingsPath, applied) {
+  const L = ['CORE permissions — one standing allow rule for every CORE script call:', ''];
+  for (const r of rules) L.push(`  ${r}`);
+  L.push('');
+  L.push(`Belongs in: ${settingsPath}  (permissions.allow)`);
+  if (applied) L.push(applied.written ? `Applied: added ${applied.added.length} rule(s).` : 'Applied: already present, nothing written.');
+  else L.push('Not written (pass --apply to merge it in).');
+  L.push('');
+  L.push('Limit: a `*` also matches `..`, so this bounds the command text, not where a script may live.');
+  L.push('Deny and ask rules, and any command gate you run, still stand above it.');
+  return L.join('\n');
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 export async function main(argv) {
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
@@ -316,6 +369,19 @@ export async function main(argv) {
   const coreRoot = resolveCoreRoot({ coreRootArg: opt('core-root') });
   const harness = opt('harness') || detectHarness();
   const apply = has('apply');
+
+  if (has('permissions')) {
+    const rules = permissionRules(coreRoot);
+    const settingsPath = opt('settings') || userSettingsPath();
+    let applied = null;
+    if (apply) {
+      try { applied = applyPermissionRules(settingsPath, rules); }
+      catch (e) { process.stderr.write(`error: could not update ${settingsPath}: ${e.message}\n`); return 1; }
+    }
+    if (has('json')) process.stdout.write(JSON.stringify({ schema: 'configure-project-permissions/1', rules, settingsPath, applied }, null, 2) + '\n');
+    else process.stdout.write(formatPermissions(rules, settingsPath, applied) + '\n');
+    return 0;
+  }
 
   // Best-effort capability probe; never blocks. Imported lazily so a probe-side
   // failure can't stop the rest of the report.

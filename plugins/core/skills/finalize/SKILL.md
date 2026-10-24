@@ -2,6 +2,9 @@
 name: finalize
 description: Close the session — capture what must survive, write the resume summary, certify this exact session's close receipt. Use when the user runs /finalize or asks to close or wrap up the current session.
 user-invocable: true
+allowed-tools:
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs)
 ---
 
 # `/finalize`
@@ -10,7 +13,7 @@ You're closing the session. Project state has been updating continuously — obs
 
 Everything the old close did beyond that has a different home: memory maintenance runs in `/process-memory`, analytics in `/metrics`, priority recentering in `/refocus`, plugin-development checks in the test suite. Do not run those here. A close that reruns maintenance "to be safe" is a defect, not diligence.
 
-**Script path resolution.** Commands invoke scripts as `${CORE_ROOT}/skills/core/scripts/<script>.mjs`. `${CLAUDE_PLUGIN_ROOT}` is not reliably injected into agent Bash tool calls, so resolve `CORE_ROOT` the same way startup does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/finalize/SKILL.md`. Reuse the session's already-resolved value when you have it. If you cannot resolve a concrete root, skip the affected script step and say so plainly — never run `node` against a guessed base.
+**Where the scripts are.** `<scripts>` below is `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts` — type that path in full, one `node <scripts>/<name>.mjs …` per Bash call, nothing chained, no `cd`, no variable prefix, no redirect. (If the variable shows unexpanded, the harness didn't substitute it: take this skill's base directory, strip `/skills/finalize`, append `/skills/core/scripts`.) If `node` answers `Cannot find module`, the install path is wrong or stale: say so, skip that step, and never run against a guessed path.
 
 **Kill switch.** `CORE_AUTO_CLOSE=0` disables the automatic close hook, not this command — the user typed `/finalize`, so run it. But while it's set, don't perform unattended autonomous writes beyond what this skill names.
 
@@ -21,9 +24,7 @@ Everything the old close did beyond that has a different home: memory maintenanc
 When the task includes the word **project-only** (`/finalize project-only`), close from the project folder alone. Use the same steps below, with these commands instead of `close-pass.mjs`, a session id you already know, and the name of the harness you are running in (`claude-code`, `codex`). Pass that same `--harness` to every command here: it is the one the project-only startup used, and each harness keeps its own record. The session id is the one on the "CORE session id for this session (from the harness)" line in your context (on Codex, the thread id Codex gives you). Never take one from a folder name, a path, a file or an earlier session. There's no transcript search in this mode. If you have no id, still write the session's units and summary, don't run the close commands, and tell the user the close is unresolved: it can't be certified without the real id.
 
 ```bash
-[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" finalize-begin --root <project> --harness <harness> --session <session-id> \
-  || echo "CORE-PROJECT-ONLY-FAILED: CORE_ROOT is unresolved or begin refused (see its JSON)"
+node <scripts>/project-only.mjs finalize-begin --root <project> --harness <harness> --session <session-id>
 ```
 
 Record `material-capture`, `render-project-md` (`done` or `skipped`) and `session-summary` as you finish each, with `project-only.mjs finalize-record --root <project> --harness <harness> --session <id> --op <op> --status done|skipped|failed`. Skip Step 5's native memory refresh: the harness's own memory is outside the folder, and the op is already recorded `unavailable`. Then run `finalize-certify` and `finalize-finish` with the same `--root`, `--harness` and `--session`. A command run without `--harness` refuses with `harness-required`. Certification returns `outcome: partial` with `unavailable: ["memory-refresh"]`. Tell the user exactly that: the session's work is captured in the project, and the native memory refresh didn't run. Each step refuses a linked or substituted path, but it can't defend against another program running as the user that renames project folders during the step itself. The record stays in `_core/_project-only/`, so a later normal session still treats this session's close as owed.
@@ -31,8 +32,7 @@ Record `material-capture`, `render-project-md` (`done` or `skipped`) and `sessio
 ## Step 1 — Begin: lock and owed-ops marker
 
 ```bash
-node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <session-id-if-known> \
-  --ops material-capture,render-project-md,session-summary,memory-refresh
+node <scripts>/close-pass.mjs begin <project> --session <session-id-if-known> --ops material-capture,render-project-md,session-summary,memory-refresh
 ```
 
 Without `--session`, `begin` names the session from the newest project-bound transcript, the same way `certify` does, so the op record belongs to this session. If `begin` refuses ("lock held"), another close is running — stop and say so. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
@@ -55,7 +55,7 @@ Record op `material-capture`.
 Run the edit gate first — every PROJECT.md write is edit-gated, no exceptions:
 
 ```bash
-node ${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs <project> --json
+node <scripts>/lifecycle-detect.mjs <project> --json
 ```
 
 `pending-edit` → the user's edit wins: propagate it to source units, fire anti-resurrection for removals, and do not render over it this pass. `malformed` / `no-baseline` / `missing` / `read-only` → surface plainly, don't write. A missing baseline always refuses; only `clean` / `generated-only` proceeds. See `protocols/startup.md` §"The authorship rule" for creation-time stamping and explicit legacy-store adoption; neither is an exception for a later writer.
@@ -87,7 +87,7 @@ Record op `session-summary`.
 
 ## Step 5 — Harness memory refresh (cheap, Claude Code only)
 
-On Claude Code: run `node ${CORE_ROOT}/skills/core/scripts/generate-memory-index.mjs <project>/_memories --memory-md ~/.claude/projects/<mapped-root>/memory/MEMORY.md --top 15`, where `<mapped-root>` is the slug of the git worktree root (the cwd when the project isn't in a repo) — that's the folder the harness actually injects; the system prompt's "persistent, file-based memory system at …" line names it. A project inside a larger repository (a home-directory repo) shares that file with its siblings, and the script skips the priority block there on its own with a one-line reason — expected, not a failure. Add this session's one-line entry to "Recent activity", drop pointers to anything retired, keep MEMORY.md under 200 lines. The script also removes any leftover visibility-canary line from MEMORY.md; CORE no longer writes one.
+On Claude Code: run `node <scripts>/generate-memory-index.mjs <project>/_memories --memory-md ~/.claude/projects/<mapped-root>/memory/MEMORY.md --top 15`, where `<mapped-root>` is the slug of the git worktree root (the cwd when the project isn't in a repo) — that's the folder the harness actually injects; the system prompt's "persistent, file-based memory system at …" line names it. A project inside a larger repository (a home-directory repo) shares that file with its siblings, and the script skips the priority block there on its own with a one-line reason — expected, not a failure. Add this session's one-line entry to "Recent activity", drop pointers to anything retired, keep MEMORY.md under 200 lines. The script also removes any leftover visibility-canary line from MEMORY.md; CORE no longer writes one.
 
 On Codex: no harness-memory writes (explicit-save only) — confirm the facts are in `_memories/` and the summary from Step 4, and say so in one line.
 
@@ -98,7 +98,7 @@ Record op `memory-refresh`.
 Certify this exact session's close receipt — this is what stops the SessionEnd hook from running a second close over a session you just closed by hand:
 
 ```bash
-node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs certify <project> --summary <summary-path>
+node <scripts>/close-pass.mjs certify <project> --summary <summary-path>
 ```
 
 `certify` resolves the current session's native id from the newest project-bound transcript and writes the `closed` receipt. It counts only ops recorded for this same session: if it prints `MARKER-SESSION-MISMATCH`, the recorded ops belong to another session, so begin again for this one and record its ops. If it prints `UNRESOLVED`, pass `--session <id>` explicitly if you know it; otherwise say so — the automatic close will record the session's lifecycle evidence instead, and nothing is lost.
@@ -106,7 +106,7 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs certify <project> --summary
 Then finish the marker and release the lock:
 
 ```bash
-node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session <session-id>
+node <scripts>/close-pass.mjs finish <project> --session <session-id>
 ```
 
 Close in plain voice, naming anything skipped or failed:

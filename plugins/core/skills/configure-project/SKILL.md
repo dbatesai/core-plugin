@@ -1,6 +1,9 @@
 ---
 name: configure-project
 description: Bootstrap and health-check a CORE project for the current harness — confirm the install, validate the memory store, resolve workspace identity, report connector capability, and generate the harness instruction surface (AGENTS.md) when a contract exists. Use when setting up CORE on a folder under Codex, when a second harness joins a folder Claude Code already manages, or any time you want a one-shot "is this project wired correctly here?" check. Idempotent; report-only unless you pass --apply.
+allowed-tools:
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs)
 ---
 
 Base directory for this skill: this `SKILL.md`'s directory.
@@ -21,18 +24,17 @@ It is **idempotent** and **report-only by default**. The only write it ever perf
 
 ## Run it
 
-**Resolve the plugin root from this skill's path**, the same way the other CORE skills do: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/configure-project/SKILL.md` to get `<PLUGIN_ROOT>`. The script lives at `<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs`. Don't guess the base from an env var; the loaded path carries the resolution.
+**Where the scripts are.** `<scripts>` below is `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts` — type that path in full, one `node <scripts>/<name>.mjs …` per Bash call, nothing chained, no `cd`, no variable prefix, no redirect. (If the variable shows unexpanded, the harness didn't substitute it: take this skill's base directory, strip `/skills/configure-project`, append `/skills/core/scripts`.) If `node` answers `Cannot find module`, the install path is wrong or stale: say so, skip that step, and never run against a guessed path.
 
-Run from the project directory; omitting `--project` uses the current directory on Bash and PowerShell. Use one line and substitute the resolved plugin path:
+Run from the project directory; omitting `--project` uses the current directory on Bash and PowerShell. The script finds its own plugin root from where it lives:
 
-```text
-node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --core-root "<PLUGIN_ROOT>"
-# add --harness codex|claude-code to override detection
-# add --apply to actually generate AGENTS.md (requires a CONTRACT.md)
-# add --json for the structured report instead of the receipt
+```bash
+node <scripts>/configure-project.mjs
 ```
 
-If you cannot substitute `<PLUGIN_ROOT>`, fall back to `${CLAUDE_PLUGIN_ROOT}` / `${CODEX_PLUGIN_ROOT}`. If neither resolves, say so plainly and stop — don't run `node` against an empty path.
+Add `--harness codex|claude-code` to override detection, `--apply` to actually generate AGENTS.md (requires a CONTRACT.md), `--json` for the structured report instead of the receipt.
+
+**`--permissions`** prints the one standing allow rule that lets every CORE script run without a prompt on later turns (the skill `allowed-tools` only covers the turn that invokes a CORE skill). It is written against the live install path with the version folder replaced by `*`, so it survives plugin updates, and it names the settings file it belongs in (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`). `--permissions --apply` merges it into that file. Read the rule back to the user in plain words, including its limit: `*` also matches `..`, so the rule bounds the command text, not where a script may live — deny and ask rules, and any command gate the user runs, still stand above it.
 
 ## Read the receipt out loud, in plain voice
 

@@ -148,17 +148,16 @@ What does NOT (per the same recall-vs-project-store split):
 
 ## configure-project
 
-Codex has no startup-mandate hook the way Claude Code does. `/configure-project` is the install-and-store health check, not a replacement for startup: it does not load the workspace, run catch-up, or print readiness — type `/core` for that. What it does do: resolve `CORE_ROOT`, confirm the manifests + skill dir + this adapter are present, runs the workspace fork-check in detect-only mode (a path already registered is a *returning* workspace regardless of which harness registered it — Codex opening a Claude-managed folder is not a fork), validates the `_memories/` store, reports configured-vs-session-live connector capability, runs the capability probe, and generates `AGENTS.md` from `CONTRACT.md` when one exists.
+Codex has no startup-mandate hook the way Claude Code does. `/configure-project` is the install-and-store health check, not a replacement for startup: it does not load the workspace, run catch-up, or print readiness — type `/core` for that. What it does do: resolve its own plugin root, confirm the manifests + skill dir + this adapter are present, runs the workspace fork-check in detect-only mode (a path already registered is a *returning* workspace regardless of which harness registered it — Codex opening a Claude-managed folder is not a fork), validates the `_memories/` store, reports configured-vs-session-live connector capability, runs the capability probe, and generates `AGENTS.md` from `CONTRACT.md` when one exists.
 
 Run it as the setup step on a folder, or any time you want a "is this project wired correctly under Codex?" check:
 
 ```bash
-# Derive PLUGIN_ROOT from the loaded SKILL.md path (the `${CLAUDE_PLUGIN_ROOT}`
-# rule below). The script self-resolves CORE_ROOT too, but pass --core-root for safety.
+# <scripts> is the skill's scripts folder, typed in full (the rule below).
 # Run from the project directory and OMIT --project — the script defaults to the
 # process cwd. ($(pwd) is bash-only: PowerShell evaluates it to a PathInfo object
 # and the argument breaks silently.)
-node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --core-root "<PLUGIN_ROOT>" --harness codex
+node <scripts>/configure-project.mjs --harness codex
 # Not in the project directory? Pass --project with an absolute literal path.
 # --apply to actually write AGENTS.md (needs a CONTRACT.md); --json for the structured report
 ```
@@ -181,11 +180,4 @@ These are RTK-specific, not Codex-specific — but they're worth listing here be
 
 ### `${CLAUDE_PLUGIN_ROOT}` is not set on Codex
 
-Codex doesn't set `${CLAUDE_PLUGIN_ROOT}`. Companion skills that need to invoke scripts in the sibling core skill (`/finalize`, `/process-memory`) must derive the path from the loaded SKILL.md location rather than relying on the env var.
-
-The mechanical rule mirrors the protocol-resolution rule used in `skills/finalize/SKILL.md` and `skills/process-memory/SKILL.md`: take the absolute path you loaded SKILL.md from, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`, and invoke that. Concretely:
-
-- Claude Code marketplace install: `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs` works because the env var is set.
-- Codex plugin-cache install: derive the path from the loaded `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/<wrapper>/SKILL.md`, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`.
-
-Don't construct paths against a guessed plugin base. The loaded path carries the resolution.
+Claude Code substitutes `${CLAUDE_PLUGIN_ROOT}` into a plugin skill's body and `allowed-tools` when it loads the skill; Codex does not. So on Codex the `<scripts>` path every CORE skill asks you to type comes from the loaded SKILL.md location: take the absolute path you loaded `skills/<wrapper>/SKILL.md` from, strip `/skills/<wrapper>/SKILL.md`, append `/skills/core/scripts`. On a Codex plugin-cache install that is `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/scripts`. Type it in full on every call, one `node <scripts>/<name>.mjs …` per call, nothing chained. Don't construct paths against a guessed plugin base; the loaded path carries the resolution.

@@ -156,7 +156,7 @@ test('finalize SKILL.md invokes no maintenance or analytics script, and points a
 
 test('decorate-graph: process-memory/SKILL.md actually invokes the script', () => {
   const p = read('skills', 'process-memory', 'SKILL.md');
-  assert.match(p, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs" "<project>"/,
+  assert.match(p, /node <scripts>\/decorate-graph\.mjs "<project>"/,
     'process-memory must run decorate-graph.mjs as part of its hygiene sequence, not just describe it');
 });
 
@@ -173,11 +173,11 @@ test('export-obsidian: fully retired — no shipped skill, no lingering command 
 // data is indexed and processed, not just infer it from close-pass bookkeeping). These guard
 // the same "op is really wired, not a phantom string" invariant as the decorate-graph tests
 // above, applied to the new unconditional startup step rather than the close-time wiring.
-test('startup.md invokes the decoration + index refresh backstop for real (not --dry-run/--check), guarded like every script call', () => {
+test('startup.md invokes the decoration + index refresh backstop for real (not --dry-run/--check), as plain single commands', () => {
   const s = read('skills', 'core', 'protocols', 'startup.md');
-  assert.match(s, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs" <project> \\/,
+  assert.match(s, /^node <scripts>\/decorate-graph\.mjs <project>$/m,
     'startup must invoke decorate-graph.mjs directly, not just describe it');
-  assert.match(s, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/maintenance-run\.mjs" <project> --json \\/,
+  assert.match(s, /^node <scripts>\/maintenance-run\.mjs <project> --json$/m,
     'startup must invoke maintenance-run.mjs directly, not just describe it');
 
   const backstop = s.indexOf('Decoration + index refresh backstop');
@@ -185,8 +185,8 @@ test('startup.md invokes the decoration + index refresh backstop for real (not -
   const block = s.slice(backstop, backstop + 1500);
   assert.ok(!/decorate-graph\.mjs[^\n]*--dry-run/.test(block), 'decoration must run for real, never --dry-run, at startup');
   assert.ok(!/decorate-graph\.mjs[^\n]*--check/.test(block), 'decoration must run for real, never --check, at startup');
-  assert.match(block, /\[ -n "\$CORE_ROOT" \] && \[ -d "\$CORE_ROOT\/skills\/core\/scripts" \] &&/,
-    'the decoration/index calls must be guarded exactly like every other script call in this file');
+  assert.ok(!/node <scripts>[^\n]*(&&|\|\||;|\\$)/m.test(block),
+    'the decoration/index calls are plain single commands, like every other script call in this file');
 });
 
 test("startup.md orders the backstop AFTER edit-detection and before startup catch-up (authorship ordering)", () => {

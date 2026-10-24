@@ -59,10 +59,10 @@ Fields:
 
 ## Runner
 
-The runner is at `<plugin-root>/skills/core/scripts/validate.mjs`. Resolve `<plugin-root>` the way `protocols/startup.md` does — from the skill base directory, reusing the `CORE_ROOT` startup resolved this session — because `${CLAUDE_PLUGIN_ROOT}` is not reliably injected into agent Bash tool calls. The `${CLAUDE_PLUGIN_ROOT}` form below is shorthand for that resolved root; substitute the concrete path. Invocation:
+The runner is `<scripts>/validate.mjs`, where `<scripts>` is the literal scripts path `SKILL.md` §"Running CORE's scripts" gives (`${CLAUDE_PLUGIN_ROOT}` is substituted there at load, not in agent Bash tool calls — type the path in full). Invocation:
 
 ```
-node ${CORE_ROOT}/skills/core/scripts/validate.mjs <project-path>
+node <scripts>/validate.mjs <project-path>
 ```
 
 The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.

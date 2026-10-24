@@ -125,7 +125,7 @@ test('REF-11 never instructs the agent to perform maintenance or close work', ()
   const invocations = [
     [/^\s*(run|execute|invoke|call)\s+`?\/?(finalize|process-memory|metrics)/im,
       'must not instruct running a sibling command'],
-    [/\bnode\s+["'`]?\$?\{?CORE_ROOT/i, 'must not invoke CORE scripts'],
+    [/\bnode\s+(["'`]?\$?\{?CORE_ROOT|<scripts>)/i, 'must not invoke CORE scripts'],
     [/^\s*```bash/m, 'must contain no executable block at all'],
     [/\b(then|next|finally)\s+(run|regenerate|render|validate)\b/i,
       'must not sequence maintenance steps'],

@@ -47,8 +47,7 @@ At session start, `<project>/PROJECT.md` and `<project>/_core/_agent/agent-profi
 **Preferred:** run `graph-walk.mjs` from the plugin:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <seed-unit-path> \
-    --format json
+node <scripts>/graph-walk.mjs <seed-unit-path> --format json
 ```
 
 This returns a scored, hop-ordered candidate list. Read the top results. Fall back to manual traversal only if the script isn't reachable in the current harness context.
@@ -68,7 +67,7 @@ This returns a scored, hop-ordered candidate list. Read the top results. Fall ba
 When following an edge to a candidate unit:
 
 1. Read the candidate's frontmatter
-2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs:scoreProxyRS(unit)` (priority logic ships with the plugin, not per-project)
+2. Compute the **R·S proxy** — recency times source-type weight — using `<scripts>/priority.mjs:scoreProxyRS(unit)` (priority logic ships with the plugin, not per-project)
 3. If R·S < **0.3**, prune this branch — do NOT continue walking from this candidate
 4. If R·S ≥ 0.3, the candidate enters the result set; recursion continues from this candidate
 
@@ -96,7 +95,7 @@ A branch terminates when ANY of these are true:
 When the first two shards don't resolve it, or Tier 1 returned context that still doesn't answer the question, continue by hand from the next shard — a model-free hook cannot judge semantic sufficiency:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/select-relevant-units.mjs" <project> "<the question>" --shard 0 --shard-size 80
+node <scripts>/select-relevant-units.mjs <project> "<the question>" --shard 0 --shard-size 80
 ```
 
 The first line reports `Reasoning shard X/Y`, `units_scanned`, and `units_total`. Run every shard from `0` through `Y-1`; do not stop after the first plausible candidate. The order is recall-oriented: the shipped full-body product ranking comes first, followed by every unmatched active unit in deterministic id order, so the union of all shards covers the entire active corpus exactly once. Reason with world knowledge over each shard's id/topics/summary rows, Read the genuinely relevant units in full, then answer. This keeps query-time code model-free while using the already-active Claude/Codex model for the value-to-instance bridge (for example, "heritage" → El Primero). Log Tier 3 only after the reasoning pass actually runs; the hook's injected pack or directive alone remains an honest Tier 1 no-hit. The retrieval harness measures this path as the `escalated` arm: set `CORE_HARNESS_REASONER` to a command that reads the pack on stdin and prints `{"picks": [ids]}` (name its model in `CORE_HARNESS_REASONER_MODEL`), and the arm ranks the reasoner's picks ahead of the substrate on triggered queries; without one it prints `— (no reasoner configured)`.
@@ -120,10 +119,10 @@ Every Tier 1+ retrieval event writes one JSONL record to `<project>/_sessions/<Y
 Two writers share the producer helper. The per-turn hook (`hooks/retrieve-context-hook.mjs`, registered on UserPromptSubmit) is the canonical product emitter — it writes one `per-turn-hook` event per prompt automatically. Retrievals you run yourself beyond the hook (an explicit graph walk, a Tier-3 escalation) get their entry from you, through the same helper:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-event.mjs <project> --event-json '<json>'
+node <scripts>/record-retrieval-event.mjs <project> --event-json '<json>'
 ```
 
-Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`) when `CLAUDE_PLUGIN_ROOT` is not the active install root. The helper validates the row, then writes it through `log-event.mjs` to the `_sessions` JSONL — the sole event substrate. Per-event schema:
+`<scripts>` is the literal scripts path from `SKILL.md` §"Running CORE's scripts". The helper validates the row, then writes it through `log-event.mjs` to the `_sessions` JSONL — the sole event substrate. Per-event schema:
 
 ```jsonl
 {
@@ -177,7 +176,7 @@ For Tier 2 walks, log the seed unit and the result set together as one event (on
 The analyzer ships in the plugin:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project> [--since-days N | --all] [--json]
+node <scripts>/analyze-retrieval-quality.mjs <project> [--since-days N] [--all] [--json]
 ```
 
 Default window is 30 days. Output: tier distribution, top dip-back units (precision proxy), top escalation topics (recall proxy). `/process-memory` calls this script and surface anomalies in plain language.

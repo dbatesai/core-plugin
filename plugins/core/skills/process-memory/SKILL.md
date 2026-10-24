@@ -6,7 +6,9 @@ allowed-tools:
   - Read
   - Write
   - Edit
-  - Bash
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs)
+  - Bash(wc -c *)
   - Glob
   - Grep
 ---
@@ -19,7 +21,7 @@ The pass is best-effort, not a guarantee. Almost everything gets decided in-pass
 
 Runs synchronously in the current session.
 
-**Script path resolution.** Commands below invoke scripts as `${CORE_ROOT}/skills/core/scripts/<script>.mjs`, where `CORE_ROOT` is the resolved plugin root — the same variable name `protocols/startup.md` and `protocols/validation.md` use. **`${CLAUDE_PLUGIN_ROOT}` is not reliably injected into agent Bash tool calls** (the same constraint `protocols/startup.md` documents — it's why startup resolves the root from the skill base directory, not the env var). So resolve `CORE_ROOT` once, the same way on every harness: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/process-memory/SKILL.md` — that prefix is your plugin root (Claude Code marketplace: `.../plugins/core`; Codex plugin cache: `~/.codex/plugins/cache/<marketplace>/core/<version>`). Reuse the `CORE_ROOT` value startup already resolved this session if you have it. **Guard discipline:** if you cannot resolve a concrete root, skip the affected script step and surface the skip in plain voice — never run `node` against a guessed or empty base. Do not depend on the env var being present.
+**Where the scripts are.** `<scripts>` below is `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts` — type that path in full, one `node <scripts>/<name>.mjs …` per Bash call, nothing chained, no `cd`, no variable prefix, no redirect. (If the variable shows unexpanded, the harness didn't substitute it: take this skill's base directory, strip `/skills/process-memory`, append `/skills/core/scripts`.) If `node` answers `Cannot find module`, the install path is wrong or stale: say so, skip that step, and never run against a guessed path.
 
 ---
 
@@ -28,9 +30,7 @@ Runs synchronously in the current session.
 If this session started with `/core project-only`, or the task says **project-only**, don't run the script commands in the steps below: several of them read session transcripts, the harness's own memory or state outside the folder. Use this instead, with the harness you are running in:
 
 ```bash
-[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" process-memory --root <project> --apply \
-  || echo "CORE-PROJECT-ONLY-FAILED: CORE_ROOT is unresolved or the command refused (see its JSON)"
+node <scripts>/project-only.mjs process-memory --root <project> --apply
 ```
 
 It checks the units, refreshes the link blocks, regenerates the indexes and checks the `PROJECT.md` cap, from the folder alone. Then do the reasoning half yourself, writing only inside `_memories/`: Step 0 (look back over this conversation), Step 1 (the inbox) and Step 2 (graduating observations). Skip Steps 0.5, 6.5b, 6.5c, 6.6 and 6.7 and the direct script calls in Steps 3 to 5.5; the command's `not_run` list names what is waiting for a normal session. Tell the user which parts ran and which are waiting. A `refused` answer means a link or an unreadable folder was found: say which path, and stop.
@@ -64,13 +64,13 @@ Then narrate in plain voice: "Captured N observations from this session before p
 The automatic session close is deterministic and makes zero model calls, so an auto-closed session gets a lifecycle receipt but no observation capture. This step is where that work happens.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/backfill-memory.mjs" list "<project>" --json --limit 5
+node <scripts>/backfill-memory.mjs list "<project>" --json --limit 5
 ```
 
 For each pending session (newest first, at most 5 per pass so one long gap doesn't blow up the run): read its transcript via `read-transcript.mjs` (the receipt carries the session id), apply the same Step-0 capture patterns to what you find, then stamp it done:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/backfill-memory.mjs" mark "<project>" --session <session-id>
+node <scripts>/backfill-memory.mjs mark "<project>" --session <session-id>
 ```
 
 Mark a session even when it produced nothing — processed-and-empty is a result; unmarked means unprocessed. If the list reports corrupt receipts, name the count — that's evidence in an unknown state, not nothing. If `total_pending` exceeds the limit, say how many remain for the next pass.
@@ -82,7 +82,7 @@ Mark a session even when it produced nothing — processed-and-empty is a result
 If `<project>/inbox.md` is non-empty, run the mechanical pre-flight first:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/check-inbox.mjs" "<project>"
+node <scripts>/check-inbox.mjs "<project>"
 ```
 
 It validates block structure — required pre-graduation fields, valid `mode` values, `judgment-needed` present on `mode: C`, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries and graduate within authorized scope; user-only authorship decisions and required approvals still wait for the user (`protocols/data-storage.md` §"Deciding on memory writes"). Two shapes can appear:
@@ -120,7 +120,7 @@ macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write c
 Run the schema + integrity check:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" "<project>/_memories"
+node <scripts>/check-units.mjs "<project>/_memories"
 ```
 
 Read the output. The validator emits three counts: PASS, WARN, FAIL.
@@ -150,7 +150,7 @@ After fixing what you can, re-run the validator and report the new counts.
 Run the consolidated mechanical pass. It regenerates both indexes + the summary index, reports ghost duplicates, and checks the PROJECT.md cap — signature-gated (no-op when units are unchanged) and recorded in the cadence ledger (`_memories/_maintenance-state.json`):
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" "<project>"
+node <scripts>/maintenance-run.mjs "<project>"
 ```
 
 Surface its one-line narration (never silent — visible-continuous-curation). This is the mechanical half of upkeep; the judgment half (graduation review, Tier-C surfacing) is the rest of this pass. Indexes write to `_memories/INDEX-*.md`, top-level units only — archived ones in `_memories/archive/` are excluded. Autonomous/unattended runs are gated per `hygiene.md §"Autonomous maintenance"` and not enabled here.
@@ -162,7 +162,7 @@ Surface its one-line narration (never silent — visible-continuous-curation). T
 Regenerate the marker-delimited `[[wikilink]]` block in every active unit, computed from that unit's own `edges:` frontmatter, so `_memories/` itself opens directly as an Obsidian vault — graph view, backlinks, note browsing, no separate export copy to go stale:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs" "<project>"
+node <scripts>/decorate-graph.mjs "<project>"
 ```
 
 The script is the only writer of the generated block — it sits between `<!-- CORE:BEGIN_EDGES -->` / `<!-- CORE:END_EDGES -->` markers and is fully regenerated each run; a unit is only rewritten when its computed block actually differs from what's on disk. Retired/archived units are excluded from the snapshot entirely, so they're never decorated. A unit whose markers are duplicated, orphaned, or out of order is refused and left byte-identical rather than guessed at — name any refused file plainly, it needs a manual look. Narrate "decorated N units" only if N > 0; "none needed" is a clean result, not a failure.
@@ -176,7 +176,7 @@ The script is the only writer of the generated block — it sits between `<!-- C
 **Lifecycle preflight FIRST — the user-authorship boundary.** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. Without this edit-detection gate, an unreconciled user correction to a §Decisions entry would be compacted away silently.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" "<project>" --json
+node <scripts>/lifecycle-detect.mjs "<project>" --json
 ```
 
 Handle each classification before writing: `pending-edit` → reconcile it first (propagate the user's edit back to the source unit, fire anti-resurrection for removals) — do NOT run the writers over it; `malformed` → surface by name, a manual marker fix is needed; `no-baseline` → always refuse and surface it; `missing`/`read-only` → surface plainly. Only `clean`/`generated-only` are safe to write. A creating writer must stamp its newly created bytes in the same operation; an existing unbaselined file follows reconciliation or explicit legacy-store adoption in `protocols/startup.md` §"The authorship rule", never a timing-based first-write exception. The detector is preflight/reporting — the writers below ALSO self-refuse at their own boundary (each rechecks its live preimage and the shared PROJECT.md lock immediately before its atomic write), so a skipped preflight degrades safely rather than opening the hole again.
@@ -184,9 +184,9 @@ Handle each classification before writing: `pending-edit` → reconcile it first
 Then run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 by decision — only `--apply` writes. Each shares one PROJECT.md writer lock and re-stamps the baseline after its write, so they compose without falsely reading each other's changes as user edits; a writer that prints a `refused` line (pending-edit / stale-preimage) wrote nothing — reconcile and re-run rather than forcing past it.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"
-node "${CORE_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
-node "${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
+node <scripts>/demote-moves.mjs "<project>"
+node <scripts>/compact-project.mjs "<project>"
+node <scripts>/demote-state-narrative.mjs "<project>"
 ```
 
 - `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` gates on "all cited units terminal" instead of checkbox + age. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
@@ -201,9 +201,9 @@ Report the demoted count and the before/after sizes the scripts print. Over-cap 
 
 Three operations over the world-time validity dimension, on the project's own corpus:
 
-1. `node "${CORE_ROOT}/skills/core/scripts/bitemporal.mjs" "<project>" --stamp` — **dry-run first.** Lists the `t_invalid` stamps a supersedes-edge would set and any loose supersedes edges (a supersedes edge pointing at a still-active target). The writer is conservative (terminal-status targets only, never overwriting an explicit value), but `t_invalid` writes to historical units — eyeball the stamps, then re-run with `--apply` if they look right. Name loose edges as fix candidates. If the dry-run itself errors, skip the whole sub-step and say so — never `--apply` past a failed dry-run.
-2. `node "${CORE_ROOT}/skills/core/scripts/bitemporal.mjs" "<project>" --metrics` — the storage-health readout. Surface only what's actionable.
-3. `node "${CORE_ROOT}/skills/core/scripts/impact-trace.mjs" "<project>" --superseded-impact` — for anything invalidated this pass, what still depends on it. `clean` → silence.
+1. `node <scripts>/bitemporal.mjs "<project>" --stamp` — **dry-run first.** Lists the `t_invalid` stamps a supersedes-edge would set and any loose supersedes edges (a supersedes edge pointing at a still-active target). The writer is conservative (terminal-status targets only, never overwriting an explicit value), but `t_invalid` writes to historical units — eyeball the stamps, then re-run with `--apply` if they look right. Name loose edges as fix candidates. If the dry-run itself errors, skip the whole sub-step and say so — never `--apply` past a failed dry-run.
+2. `node <scripts>/bitemporal.mjs "<project>" --metrics` — the storage-health readout. Surface only what's actionable.
+3. `node <scripts>/impact-trace.mjs "<project>" --superseded-impact` — for anything invalidated this pass, what still depends on it. `clean` → silence.
 
 ---
 
@@ -222,7 +222,7 @@ If over ~66KB, surface a recommendation but do not auto-compact — review any c
 Run the retrieval-quality analyzer over the last 30 days of session logs:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs" "<project>"
+node <scripts>/analyze-retrieval-quality.mjs "<project>"
 ```
 
 Read the output. The three signals worth surfacing in plain voice:
@@ -240,7 +240,7 @@ If the project has no `_sessions/<date>/retrieval-log.jsonl` files yet, the anal
 Complements Step 6.5: that one reads the retrieval *log* (precision/recall, needs logged events); this one reads the session *transcript* directly, so it works even when the log is empty. It detects the recognition-failure signature — a memory-dependent turn answered without reaching the CORE store first (the IGM-episode shape: a project term was asked about and answered from head, no `_memories/` grep).
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/analyze-retrieval-skip.mjs" "<project>"
+node <scripts>/analyze-retrieval-skip.mjs "<project>"
 ```
 
 Read the output honestly — these are **candidates, not verdicts** (term presence is a heuristic for memory-dependence). If `SKIPS-FOUND`, surface the flagged term(s) in plain voice as a self-audit prompt ("I answered about IGM without grepping `_memories/` first — that's the retrieval-skip pattern; worth checking I had it right."). `CLEAN` → one sentence or silence. `UNKNOWN` means the transcript yielded no tool records — that is unexpected on both harnesses (the read-transcript adapter extracts tool records from Claude Code and Codex transcripts alike), so investigate it; never wave it off, and never treat it as clean. This is the behavioral consumer of the `read-transcript` helper (a self-dispatching script, not a `harness.md` contract verb); it surfaces the lapse so the user doesn't have to catch it.
@@ -250,7 +250,7 @@ Read the output honestly — these are **candidates, not verdicts** (term presen
 Surface where native harness memory (MEMORY.md / `~/.codex/memories`) holds project-relevant facts the CORE store doesn't — read-only, sampled:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
+node <scripts>/audit-memory-boundary.mjs "<project>"
 ```
 
 **Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is not performed — it is too noisy without a stronger matcher.
@@ -262,7 +262,7 @@ node "${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
 Read the per-session capability history and surface any drift:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/analyze-capability-drift.mjs" "<project>"
+node <scripts>/analyze-capability-drift.mjs "<project>"
 ```
 
 It reads `<project>/_core/<harness>/capability-history.jsonl` (appended each session at startup by `record-capability-snapshot.mjs`), renders `<project>/_memories/_capability-drift-log.md`, and reports degrading drift + regressions. Narrate only what's actionable in plain voice — a capability that slipped PASS→DEGRADED, or one that stopped reporting between sessions. If there's no history yet, say so in one sentence ("No capability history yet — it accrues per session."). Healing-direction changes are informational; don't lead with them.
@@ -274,10 +274,10 @@ It reads `<project>/_core/<harness>/capability-history.jsonl` (appended each ses
 Run the mechanical recognition pipeline — capture-gated like everything metrics (a workspace that opted out prints `DISABLED`; say so once and move on):
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/classify-turns.mjs" "<project>"
-node "${CORE_ROOT}/skills/core/scripts/metrics-rollup.mjs" "<project>"
-node "${CORE_ROOT}/skills/core/scripts/metrics-detectors.mjs" "<project>"
-node "${CORE_ROOT}/skills/core/scripts/calibrate-classifier.mjs" "<project>" --check
+node <scripts>/classify-turns.mjs "<project>"
+node <scripts>/metrics-rollup.mjs "<project>"
+node <scripts>/metrics-detectors.mjs "<project>"
+node <scripts>/calibrate-classifier.mjs "<project>" --check
 ```
 
 The rollup writes the one-line recognition signal the next startup reads, so this pass is what keeps that signal current. Classifier output is PROVISIONAL until calibration clears — narrate the headline as a self-audit signal, never a graded metric. Surface citation-resolver/stale-context findings in plain voice; `clean` → a sentence or silence. The interpretation and verdict layer stays behind `/metrics`.

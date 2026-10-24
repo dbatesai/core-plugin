@@ -3,6 +3,9 @@ name: core
 description: "CORE is a project intelligence agent that knows the user's project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. A single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis. Reaches for multi-agent adversarial analysis when stakes warrant — but that's one tool, not the product. Use CORE for project work where the relationship across sessions matters: ongoing development, architecture, decision tracking, risk surfacing, anything where continuity and challenge add value."
 argument-hint: "[optional instruction — most invocations need none]"
 model: sonnet
+allowed-tools:
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs)
 ---
 
 # CORE
@@ -25,9 +28,17 @@ Three steps, in order:
 
 Exception — project-only mode. When the task includes the word `project-only`, `protocols/startup.md` §"Project-only mode" replaces steps 2 and 3: it reads and writes inside the project folder only, never registers it, and records its bootstrap in the folder.
 
-Exception — already bootstrapped this session. The dedup rule lives in ONE place: `protocols/startup.md` §"Bootstrap dedup" — read and apply it from there; this file deliberately does not restate its steps, so the two can't drift. What stays here is the two SKILL-level behaviors around it: on a bare re-orient ask — `/core` with no task, "where are we" — re-compose a fresh readiness summary per `protocols/startup.md` §"Compose the readiness summary" (resolve `CORE_ROOT` first if you want the capability and recognition-signal lines, since without it they fail open and the summary is prose-only), otherwise pick up where the conversation left off; and when the dedup check can't run cleanly (file absent, stale, workspace won't resolve), run the protocol.
+Exception — already bootstrapped this session. The dedup rule lives in ONE place: `protocols/startup.md` §"Bootstrap dedup" — read and apply it from there; this file deliberately does not restate its steps, so the two can't drift. What stays here is the two SKILL-level behaviors around it: on a bare re-orient ask — `/core` with no task, "where are we" — re-compose a fresh readiness summary per `protocols/startup.md` §"Compose the readiness summary" (run the capability probe first if you want the capability and recognition-signal lines, since without it they fail open and the summary is prose-only), otherwise pick up where the conversation left off; and when the dedup check can't run cleanly (file absent, stale, workspace won't resolve), run the protocol.
 
 If the user's task explicitly says "skip startup" or "don't bootstrap" — they have a reason, honor it, but flag the skip in your first reply so they see it.
+
+## Running CORE's scripts
+
+The scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts`. Wherever a protocol writes `<scripts>`, type that path out in full. (If the line above shows the variable unexpanded, the harness didn't substitute it: use this skill's base directory from the header with `/scripts` appended.) One `node <scripts>/<name>.mjs …` per Bash call — nothing chained, no `cd`, no variable prefix, no redirect, no `\` continuation. The `allowed-tools` in this file's frontmatter pre-approves exactly that shape for the turn that invokes `/core`; for every later turn, the one standing rule that `/configure-project --permissions` prints covers it. A chained or variable-prefixed command matches no rule and asks every time.
+
+## Running CORE's scripts
+
+The scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts`. Wherever a protocol writes `<scripts>`, type that path out in full. (If the line above shows the variable unexpanded, the harness didn't substitute it: use this skill's base directory from the header with `/scripts` appended.) One `node <scripts>/<name>.mjs …` per Bash call — nothing chained, no `cd`, no variable prefix, no redirect, no `\` continuation. The `allowed-tools` in this file's frontmatter pre-approves exactly that shape for the turn that invokes `/core`; for every later turn, the one standing rule that `/configure-project --permissions` prints covers it. A chained or variable-prefixed command matches no rule and asks every time.
 
 ---
 

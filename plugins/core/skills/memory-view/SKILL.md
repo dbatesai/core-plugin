@@ -4,7 +4,8 @@ description: Generate a self-contained, read-only HTML snapshot of the project's
 user-invocable: true
 allowed-tools:
   - Read
-  - Bash
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs *)
+  - Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/*.mjs)
   - Artifact
 ---
 
@@ -16,15 +17,14 @@ One self-contained HTML page — the store as an inbox (newest first, search, ty
 
 **The script is the only generator.** `scripts/render-browse-artifact.mjs` (in the core skill's `scripts/` directory) reads the store through the same snapshot loader decoration uses, writes the HTML, prints the preflight manifest, and writes the local generation receipt. It never uploads anything — publishing is YOUR step, and only after the user's go-ahead. Never hand-assemble or edit the HTML; never publish a file this script didn't just generate.
 
-**Script path resolution.** Resolve `CORE_ROOT` the same way `/metrics` does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/memory-view/SKILL.md` — that prefix is the plugin root. Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
+**Where the scripts are.** `<scripts>` below is `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts` — type that path in full, one `node <scripts>/<name>.mjs …` per Bash call, nothing chained, no `cd`, no variable prefix, no redirect. (If the variable shows unexpanded, the harness didn't substitute it: take this skill's base directory, strip `/skills/memory-view`, append `/skills/core/scripts`.) If `node` answers `Cannot find module`, the install path is wrong or stale: say so, skip that step, and never run against a guessed path.
 
 ## Step 1 — generate the snapshot locally
 
 Resolve scope from the user's words: default is **active units only** (condition 7 — content minimization). "Everything including the archive" → `--scope all-including-archive`. "Leave out <topic>" → `--exclude-topic <topic>` (repeatable). Never widen scope beyond what the user asked for.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" <project-dir> \
-  --out <project-dir>/_core/_scratch/core-memory-browse.html [--scope ...] [--exclude-topic ...]
+node <scripts>/render-browse-artifact.mjs <project-dir> --out <project-dir>/_core/_scratch/core-memory-browse.html [--scope ...] [--exclude-topic ...]
 ```
 
 `--out` goes to the project's own scratch folder, `_core/_scratch/` (the script makes it, git-ignored, when the path names it) — **never inside `_memories/`**: the script refuses that on the real target, links included, and the same for `--metrics-cache`. The store is read-only to this whole flow, unconditionally — generation never writes a byte under `_memories/`, not even the derived `_lib/` index cache on a cold store. One invariant, no mode, no flag. Passing `--metrics-cache` together with `--no-metrics` is refused loudly (exit 2) — the two flags contradict, and the script no longer picks a silent winner. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2. The snapshot id covers exactly the scoped population the page embeds: an `all-including-archive` render's id also covers the archive bytes it shows; an active render's id is the plain store snapshot id.
@@ -58,12 +58,7 @@ Two receipts, two different claims. The receipt written at generation time (`<pr
 After the publish step resolves — published, **declined by the user, or failed** — you MUST record the outcome as a **publish receipt** (condition 4's actual audit trail):
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" --record-publish \
-  --generation-receipt <receipt_path from the manifest> \
-  --status published-private|declined|failed \
-  [--artifact-url <hosted URL>] \
-  [--private-verified-evidence "<how privacy was actually confirmed>"] \
-  [--consent-by <who>] [--consent-mechanism "<what they were shown and agreed to>"]
+node <scripts>/render-browse-artifact.mjs --record-publish --generation-receipt <receipt_path from the manifest> --status published-private|declined|failed [--artifact-url <hosted URL>] [--private-verified-evidence "<how privacy was actually confirmed>"] [--consent-by <who>] [--consent-mechanism "<what they were shown and agreed to>"]
 ```
 
 - **`published-private`** requires `--private-verified-evidence` AND both authorization fields (`--consent-by`, `--consent-mechanism`) — the script refuses without them. State what you actually checked in Step 3, pass the hosted artifact URL when the harness surfaces one, and record what authorized the publish: a per-instance yes verbatim when one was given (the default mode), or — in standing-authorization mode only — the user's own standing grant, cited from their record (e.g. `--consent-by <user> --consent-mechanism "standing authorization for artifact publishes, granted <date>, recorded in <where>"`).
@@ -79,15 +74,10 @@ Keeps the published page current while the session runs: the platform already up
 
 **Consent basis for the loop's republishes:** the per-republish consent basis is the standing-authorization mechanism this skill already documents in Step 2 — live mode is only available in standing-authorization mode, because an unattended loop cannot stop and ask. If this user has no standing authorization on record, say so and offer the normal one-shot flow instead; do not start the loop. The grant is **prospective and bounded**: it authorizes future republishes of this loop **only within the scope and exclusions recorded at start** (persisted in the loop-state record below, with the grant's basis in its `grant_basis` field) — it is never a blanket license for whatever the store comes to contain. **The boundary rule:** the user must stop live mode before sensitive or third-party content enters the store; and at every refresh, YOU re-check the same boundary — if you know another party's data or user-flagged sensitive content has entered the rendered scope, stop the loop and fall back to ask-first rather than republishing under the old grant. (This is your judgment at render time — the watcher never inspects content, and no classifier exists or should.) All of Step 2's language still binds every republish: narrated in the conversation where it happens, always-ask when another party's data or user-flagged sensitive content is involved, stop-and-record-declined if the user objects.
 
-**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Resolve the loop-state path through `node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" path --root <project> --kind hot --name memory-view-live.json`. Use the returned absolute path as `<live-state-path>` below and on every later read/write; do not construct `_core/<harness>/` yourself. Stop on resolver refusal, unsuccessful exit, or an empty/unresolved path; no live-state write or re-arm follows that refusal. An existing account-global live-state record remains history: do not overwrite its grant or budget, and do not infer a current publication grant from it. Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
+**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Resolve the loop-state path through `node <scripts>/index-registry.mjs path --root <project> --kind hot --name memory-view-live.json`. Use the returned absolute path as `<live-state-path>` below and on every later read/write; do not construct `_core/<harness>/` yourself. Stop on resolver refusal, unsuccessful exit, or an empty/unresolved path; no live-state write or re-arm follows that refusal. An existing account-global live-state record remains history: do not overwrite its grant or budget, and do not infer a current publication grant from it. Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" --write-live-state \
-  <live-state-path> \
-  --artifact-url <hosted URL from the publish receipt> \
-  --scope <active|all-including-archive> [--exclude-topic <t>]... \
-  --baseline-snapshot <snapshot_id from the publish receipt> \
-  --grant-basis "<the standing grant this loop runs under: who granted, when, recorded where>"
+node <scripts>/memory-view-watch.mjs --write-live-state <live-state-path> --artifact-url <hosted URL from the publish receipt> --scope <active|all-including-archive> [--exclude-topic <t>]... --baseline-snapshot <snapshot_id from the publish receipt> --grant-basis "<the standing grant this loop runs under: who granted, when, recorded where>"
 ```
 
 The record carries `artifact_url`, `scope`, `excluded_topics`, `grant_basis`, `baseline_snapshot`, `publish_budget` (`window_start`, `count`), and `retry_at`, and every write replaces it atomically. The loop persists the scope and excluded topics here precisely so a later refresh can never silently widen the published content or narrow an archive view: **every refresh render re-applies the record's `--scope` and every `--exclude-topic` entry, read back from the record — never from conversation memory.**
@@ -95,8 +85,7 @@ The record carries `artifact_url`, `scope`, `excluded_topics`, `grant_basis`, `b
 **Arm.** Start the watcher as a **harness background task** (Bash with `run_in_background` on Claude Code — not a shell `&`):
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" <project-dir> \
-  --live-state <live-state-path>
+node <scripts>/memory-view-watch.mjs <project-dir> --live-state <live-state-path>
 ```
 
 The watcher reads `baseline_snapshot`, `scope`, `excluded_topics`, and `retry_at` from the record and compares the **same-scoped, same-exclusions** snapshot id the renderer receipts — an `all-including-archive` view is compared over active + archive bytes, an active view over active bytes only, so an archive-only edit wakes an archive-including view and never an active one. Topic exclusions participate in that identity: it covers exactly the population the page embeds, so an edit wholly inside an excluded topic does **not** wake the loop (the page's bytes could not change), while any edit to a kept unit does. A record the watcher cannot honor — missing, corrupt, or wrong-schema at an explicitly passed `--live-state` path — is a configuration error: the watcher refuses to arm (exit 1, named reason on stderr) rather than silently arming with defaults that could reset scope or lose a deferred publish.
