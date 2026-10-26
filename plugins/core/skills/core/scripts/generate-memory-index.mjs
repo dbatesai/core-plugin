@@ -76,10 +76,22 @@ export function extractFirstBodyLine(unitText) {
 // `existing` is a string or undefined (caller resolves preserved curation).
 export function resolveDescription(existing, fm, unitText) {
   if (existing) return existing;
-  if (fm && fm.description) return String(fm.description).trim();
+  if (fm && fm.description) return clampDescription(String(fm.description).trim());
   const h1 = extractH1(unitText);
-  if (h1 !== FALLBACK_DESCRIPTION) return h1;
-  return extractFirstBodyLine(unitText);
+  if (h1 !== FALLBACK_DESCRIPTION) return clampDescription(h1);
+  return clampDescription(extractFirstBodyLine(unitText));
+}
+
+// One index line must stay short: the harness loads MEMORY.md up to a byte cap and drops the tail
+// past it. Descriptions derived here are cut at a word boundary; a curated line already in the
+// file is never touched, and the unit file keeps its full text.
+export const MAX_DESCRIPTION_CHARS = 160;
+export function clampDescription(text, max = MAX_DESCRIPTION_CHARS) {
+  const t = String(text);
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  const at = cut.lastIndexOf(' ');
+  return (at > max * 0.6 ? cut.slice(0, at) : cut).trimEnd() + '…';
 }
 
 // Returns a Date for a YYYY-MM-DD arg, or null if the arg is present but malformed

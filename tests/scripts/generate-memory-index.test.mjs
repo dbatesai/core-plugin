@@ -278,3 +278,14 @@ test('replaceIfUnchanged: dry run and an already-current file write nothing', ()
     assert.equal(readFileSync(file, 'utf8'), 'a\n');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('derived descriptions are clamped to one short line; a curated line is left alone', async () => {
+  const { resolveDescription, clampDescription, MAX_DESCRIPTION_CHARS } = await import('../../plugins/core/skills/core/scripts/generate-memory-index.mjs');
+  const long = 'word '.repeat(120).trim();
+  const fromFm = resolveDescription(undefined, { description: long }, '');
+  assert.ok(fromFm.length <= MAX_DESCRIPTION_CHARS, `frontmatter description clamped (got ${fromFm.length})`);
+  assert.ok(fromFm.endsWith('…'));
+  const curated = 'c'.repeat(400);
+  assert.equal(resolveDescription(curated, { description: long }, ''), curated, 'curated text is never clamped');
+  assert.equal(clampDescription('short'), 'short');
+});
