@@ -26,6 +26,12 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
+// Claude Code's projects folder: $CLAUDE_CONFIG_DIR/projects when that variable is set, else <home>/.claude/projects.
+// Forward-slash joined so the path is identical on Windows and POSIX (Node's fs accepts it on Windows).
+export function claudeProjectsRoot(home, env = process.env) {
+  return `${env.CLAUDE_CONFIG_DIR ? String(env.CLAUDE_CONFIG_DIR).replace(/\\/g, '/').replace(/\/+$/, '') : `${home}/.claude`}/projects`;
+}
+
 export function mapProjectPathToSlug(p) {
   return String(p).replace(/[/\\._:]/g, '-');
 }

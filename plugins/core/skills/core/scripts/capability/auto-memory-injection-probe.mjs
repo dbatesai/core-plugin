@@ -30,7 +30,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { mapMemoryProjectPathToSlug, resolveMemoryProjectRoot } from '../project-slug.mjs';
+import { claudeProjectsRoot, mapMemoryProjectPathToSlug, resolveMemoryProjectRoot } from '../project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'auto-memory-injection';
@@ -53,7 +53,7 @@ export function mappedMemoryPath(cwd, home = homedir()) {
   // the path, making the probe report a false-DEGRADED ("memory not visible")
   // on a store the harness actually injects fine.
   const mapped = mapMemoryProjectPathToSlug(cwd);
-  return [home, '.claude', 'projects', mapped, 'memory', 'MEMORY.md'].join('/');
+  return [claudeProjectsRoot(home), mapped, 'memory', 'MEMORY.md'].join('/');
 }
 
 /**

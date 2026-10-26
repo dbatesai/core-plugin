@@ -39,7 +39,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { mapMemoryProjectPathToSlug } from './project-slug.mjs';
+import { claudeProjectsRoot, mapMemoryProjectPathToSlug } from './project-slug.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
@@ -56,7 +56,7 @@ export function mappedNativePath(projectRoot, { home = homedir() } = {}) {
   // Forward-slash join (not path.join) so the slug path is identical on Windows and
   // POSIX — Claude Code's projects-folder shape uses '/'-derived dashes, and Node's fs
   // accepts forward slashes on Windows. path.join would emit backslashes and mislocate.
-  return [home, '.claude', 'projects', mapMemoryProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md'].join('/');
+  return [claudeProjectsRoot(home), mapMemoryProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md'].join('/');
 }
 
 // High-signal identifier shapes (mirrors analyze-retrieval-skip's term policy): DC-/R-

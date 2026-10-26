@@ -32,7 +32,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { detectHarness } from './configure-project.mjs';
-import { mapMemoryProjectPathToSlug } from './project-slug.mjs';
+import { claudeProjectsRoot, mapMemoryProjectPathToSlug } from './project-slug.mjs';
 import { outsideObservationOff } from './restrictive-mode.mjs';
 
 export const DEFAULT_MEMORY_CAP_BYTES = 24576; // ~24KB harness injection budget
@@ -63,7 +63,7 @@ export function resolveAutoMemorySurface({
   if (h === 'claude-code') {
     return {
       harness: h,
-      path: join(home, '.claude', 'projects', mapMemoryProjectPathToSlug(cwd), 'memory', 'MEMORY.md'),
+      path: join(claudeProjectsRoot(home), mapMemoryProjectPathToSlug(cwd), 'memory', 'MEMORY.md'),
       skipped: false,
     };
   }

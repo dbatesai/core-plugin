@@ -105,3 +105,10 @@ test('resolveMemoryProjectRoot: outside any repo, and for a path that does not e
   assert.equal(resolveMemoryProjectRoot('/no/such/dir/anywhere'), '/no/such/dir/anywhere');
   assert.equal(mapMemoryProjectPathToSlug('C:\\Users\\David.Bates28\\proj'), 'C--Users-David-Bates28-proj');
 });
+
+test('claudeProjectsRoot: CLAUDE_CONFIG_DIR wins, else <home>/.claude/projects', async () => {
+  const { claudeProjectsRoot } = await import('../../plugins/core/skills/core/scripts/project-slug.mjs');
+  assert.equal(claudeProjectsRoot('/h', {}), '/h/.claude/projects');
+  assert.equal(claudeProjectsRoot('/h', { CLAUDE_CONFIG_DIR: '/cfg/claude/' }), '/cfg/claude/projects');
+  assert.equal(claudeProjectsRoot('/h', { CLAUDE_CONFIG_DIR: 'C:\\cfg' }), 'C:/cfg/projects');
+});
