@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mapProjectPathToSlug } from '../../plugins/core/skills/core/scripts/project-slug.mjs';
 import {
   parseClaudeCode, parseCodex, parseTranscript, resolveTranscriptPath, resolveTranscript, readTranscript, SUPPORTED_HARNESSES,
 } from '../../plugins/core/skills/core/scripts/read-transcript.mjs';
@@ -335,5 +336,29 @@ test('claude-code: another project\'s transcript is never returned for this proj
     const r = resolveTranscript('claude-code', { cwd: '/work/proj-a', home, env: {} });
     assert.equal(r.path, null);
     assert.equal(r.reason, 'no-project-transcript');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// --- claude-code transcripts root: CLAUDE_CONFIG_DIR honored, a missing root is named ---
+
+test('resolveTranscript: CLAUDE_CONFIG_DIR picks the transcripts root', () => {
+  const cfg = mkdtempSync(join(tmpdir(), 'rt-cfg-'));
+  const home = mkdtempSync(join(tmpdir(), 'rt-home-'));
+  const cwd = '/tmp/some-project';
+  try {
+    const slug = mapProjectPathToSlug(cwd);
+    mkdirSync(join(cfg, 'projects', slug), { recursive: true });
+    writeFileSync(join(cfg, 'projects', slug, 's1.jsonl'), '{}\n');
+    const r = resolveTranscript('claude-code', { cwd, home, env: { CLAUDE_CONFIG_DIR: cfg }, sessionId: 's1' });
+    assert.equal(r.resolution, 'session-id');
+  } finally { rmSync(cfg, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
+});
+
+test('resolveTranscript: missing transcripts root says so, not "no transcript"', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-home-'));
+  try {
+    const r = resolveTranscript('claude-code', { cwd: '/tmp/some-project', home, env: {} });
+    assert.equal(r.reason, 'transcript-root-missing');
+    assert.equal(readTranscript('claude-code', { cwd: '/tmp/some-project', home, env: {} }).available, false);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

@@ -59,7 +59,7 @@ export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
  *
  * Returns { path, resolution, reason } — resolution ∈ 'override' | 'session-id'
  * | 'mtime-fallback' | null; reason ∈ 'override-missing' | 'no-project-transcript'
- * | 'unsupported-harness' | null.
+ * | 'transcript-root-missing' | 'unsupported-harness' | null.
  */
 export function resolveTranscript(harness, { cwd = process.cwd(), home = homedir(), override = null, sessionId = null, env = process.env } = {}) {
   // Project-only mode reads no transcript, named or found; the caller reports it as unavailable.
@@ -73,7 +73,11 @@ export function resolveTranscript(harness, { cwd = process.cwd(), home = homedir
   }
   if (harness === 'claude-code') {
     // The project slug directory IS the project binding — nothing outside it is a candidate.
-    const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(String(cwd)));
+    const projectsRoot = join(env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'projects');
+    // A transcripts folder that isn't there at all is a different fact from a project with no
+    // transcript yet: the first means this lookup measured nothing.
+    if (!existsSync(projectsRoot)) return { path: null, resolution: null, reason: 'transcript-root-missing', sessionMismatch: false };
+    const dir = join(projectsRoot, mapProjectPathToSlug(String(cwd)));
     const sid = sessionId || env.CLAUDE_CODE_SESSION_ID || null;
     if (sid) {
       const exact = join(dir, `${sid}.jsonl`);
