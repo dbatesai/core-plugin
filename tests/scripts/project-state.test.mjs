@@ -319,6 +319,61 @@ test('mv within an existing parent classifies as moved', () => {
   } finally { s.cleanup(); }
 });
 
+/** Whether `dir` is on a filesystem that treats two spellings differing only in case as one name. */
+function caseInsensitiveAt(dir) {
+  const probe = mk(dir, 'CaseProbe');
+  try { return existsSync(join(dir, 'caseprobe')); } finally { rmSync(probe, { recursive: true, force: true }); }
+}
+
+test('a folder renamed by letter case only reads as moved, not copied; its state is kept and re-stamped; a real copy beside it still reads as copied', async (t) => {
+  const { stateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const s = sandbox();
+  try {
+    const parent = mk(s.base, 'Projects');
+    if (!caseInsensitiveAt(parent)) return t.skip('case-sensitive filesystem: a case-only rename is a rename to a different name');
+    const p = mk(parent, 'Proj');
+    writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    const ws = join(p, '_core', 'claude-code', 'workspace.json');
+    writeFileSync(ws, '{"project_id":"abc"}');
+    register(s.coreDir, [p]);
+    const renamed = join(parent, 'proj');
+    renameSync(p, renamed);
+    assert.equal(realpathSync.native(p), renamed, 'precondition: the old spelling now resolves to the renamed folder');
+    const r = classifyStamp({ root: renamed, harness: 'claude-code', coreDir: s.coreDir });
+    assert.equal(r.status, 'moved', 'the same folder under a new spelling is a move');
+    assert.equal(r.oldPath, p);
+    const w = stateDir({ root: renamed, harness: 'claude-code', coreDir: s.coreDir, forWrite: true });
+    assert.equal(w.status, 'moved');
+    assert.equal(w.setAside, undefined, 'nothing is set aside');
+    assert.equal(readFileSync(join(renamed, '_core', 'claude-code', 'workspace.json'), 'utf8'), '{"project_id":"abc"}', 'the project keeps its identity');
+    assert.equal(classifyStamp({ root: renamed, harness: 'claude-code', coreDir: s.coreDir }).status, 'verified', 'the re-stamp names the new spelling');
+
+    // control: a real copy beside the renamed folder is still a copy
+    const copy = join(parent, 'Proj-copy');
+    cpSync(renamed, copy, { recursive: true });
+    const c = classifyStamp({ root: copy, harness: 'claude-code', coreDir: s.coreDir });
+    assert.equal(c.status, 'copied');
+    assert.equal(c.oldPath, renamed);
+  } finally { s.cleanup(); }
+});
+
+test('on a case-sensitive filesystem, Proj and proj are two folders: a copy of Proj into proj still reads as copied', (t) => {
+  const s = sandbox();
+  try {
+    const parent = mk(s.base, 'Projects');
+    if (caseInsensitiveAt(parent)) return t.skip('case-insensitive filesystem: Proj and proj cannot both exist');
+    const p = mk(parent, 'Proj');
+    writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    const other = join(parent, 'proj');
+    cpSync(p, other, { recursive: true });
+    assert.notEqual(statSync(p).ino, statSync(other).ino, 'precondition: two distinct folders');
+    const r = classifyStamp({ root: other, harness: 'claude-code', coreDir: s.coreDir });
+    assert.equal(r.status, 'copied', 'names equal ignoring case are not the same folder');
+    assert.equal(r.oldPath, p);
+    assert.equal(classifyStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir }).status, 'verified', 'control: the original still verifies');
+  } finally { s.cleanup(); }
+});
+
 test('old path and its parent both gone (unmounted drive, re-clone) asks instead of guessing', () => {
   const s = sandbox();
   try {

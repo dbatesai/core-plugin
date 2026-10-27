@@ -341,6 +341,21 @@ export function writeStamp({ root, harness, coreDir = defaultCoreDir() }) {
   return stamp;
 }
 
+/**
+ * Whether `oldPath` names the folder at `real` under another spelling: it resolves to `real`
+ * and is the same directory by device and inode. Names are never compared ignoring case, so
+ * on a case-sensitive disk `Proj` and `proj` stay two folders. A link at the old spelling is
+ * not the same folder.
+ */
+function sameFolderRespelled(oldPath, real) {
+  try {
+    if (canonical(oldPath) !== real) return false;
+    const was = lstatSync(oldPath, { bigint: true });
+    const now = statSync(real, { bigint: true });
+    return was.isDirectory() && now.isDirectory() && was.dev === now.dev && was.ino === now.ino;
+  } catch { return false; }
+}
+
 function wellFormed(s) {
   return s && typeof s === 'object'
     && typeof s.path === 'string' && s.path
@@ -357,8 +372,10 @@ function wellFormed(s) {
  *   verified        — this install's stamp for this path: use the state
  *   planted         — missing/malformed stamp, or this install's id but it does not verify
  *   foreign-install — well-formed stamp from another install: leave it untouched
- *   moved           — verifies, old path gone and its parent still exists
- *   copied          — verifies, old path still exists
+ *   moved           — verifies, old path gone and its parent still exists, or the old path
+ *                     is this same folder under another spelling (a rename by letter case
+ *                     on a case-insensitive disk)
+ *   copied          — verifies, old path still exists as a different folder or a link
  *   ask             — verifies, old path and its parent both gone
  */
 export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
@@ -386,6 +403,7 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
     return { status: 'planted', reason: 'hmac-mismatch' };
   }
   if (stamp.path === real) return { status: 'verified', stamp };
+  if (sameFolderRespelled(stamp.path, real)) return { status: 'moved', stamp, oldPath: stamp.path };
   if (existsSync(stamp.path)) return { status: 'copied', stamp, oldPath: stamp.path };
   if (existsSync(dirname(stamp.path))) return { status: 'moved', stamp, oldPath: stamp.path };
   return { status: 'ask', stamp, oldPath: stamp.path };
