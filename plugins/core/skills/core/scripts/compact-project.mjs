@@ -233,6 +233,16 @@ export function main(argv) {
   const projectMd = join(projectDir, 'PROJECT.md');
   const memoriesDir = join(projectDir, '_memories');
 
+  // Every mode refuses a linked PROJECT.md, PROJECT-ARCHIVE.md or `_memories` before its first read:
+  // the size checks would otherwise report on a file outside the project, and compaction would read
+  // outside units and take the writer lock in an outside folder.
+  try { assertStoreBoundary(projectDir, { synthesis: true }); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
+
   let text;
   try { text = readFileSync(projectMd, 'utf8'); } catch {
     process.stderr.write(`error: ${projectMd} not readable\n`);
@@ -256,15 +266,6 @@ export function main(argv) {
     console.log(`PROJECT.md: ${total} bytes total. Section breakdown:`);
     console.log(formatSectionSizes(sizes));
     return 0;
-  }
-
-  // A linked `_memories` is refused before units are read through it or the writer lock is taken
-  // in it, so no title from outside the project reaches PROJECT.md.
-  try { assertStoreBoundary(projectDir, { synthesis: true }); }
-  catch (e) {
-    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
-    process.stderr.write(`refused: ${e.message}\n`);
-    return 3;
   }
 
   let units;

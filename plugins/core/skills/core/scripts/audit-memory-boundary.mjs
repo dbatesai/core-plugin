@@ -142,8 +142,9 @@ if (isCliEntry(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const projectRoot = resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
-  // The unit text is read from `_memories`; a link anywhere under it is refused first.
-  try { assertStoreBoundary(projectRoot); } catch (e) { process.exit(refusalExit(e)); }
+  // The unit text is read from `_memories` and the terms from PROJECT.md; a link anywhere under the
+  // store, or a linked PROJECT.md, is refused first.
+  try { assertStoreBoundary(projectRoot, { synthesis: true }); } catch (e) { process.exit(refusalExit(e)); }
   // Default native surface on Claude Code: the project's auto-memory MEMORY.md.
   const nativePath = opt('native') || mappedNativePath(projectRoot);
   const nativeContent = existsSync(nativePath) ? readFileSync(nativePath, 'utf8') : '';

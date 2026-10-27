@@ -1457,30 +1457,46 @@ export function runPackage(argv, { homeOverride } = {}) {
     projectDirs = [p];
   }
 
+  // A project whose key can't be used, or whose store is refused, is reported under a pseudonym from
+  // a key that exists only for this run.
+  const runSeal = makeSeal(randomBytes(32).toString('hex'));
+  // Every store is checked before anything is created in any project. Under --all a linked `_memories`
+  // is recorded under its code (STORE_OUTSIDE_ROOT) and skipped; a refused store gets no scratch, key,
+  // or history.
+  const refusedDirs = new Map();
+  for (const dir of projectDirs) {
+    try { assertStoreBoundary(dir); }
+    catch (err) {
+      const code = (err && typeof err.code === 'string') ? err.code : 'collection-error';
+      refusedDirs.set(dir, { err, row: { project: runSeal('project', resolve(dir)), available: false, reason: code } });
+    }
+  }
+
   // Scratch has one explicit owner, never the first registry entry or an inferred staging parent.
   let scratchProject, scratchDir;
   try {
     scratchProject = projectArtifactRoot(flagsIn.scratchProject || projectDirs[0]);
     // Compare the true on-disk spelling, so one folder named two ways (case, 8.3) still counts as the same project.
-    if (!projectDirs.some(p => realpathSync.native(projectArtifactRoot(p)) === realpathSync.native(scratchProject))) {
-      return { exit: 2, error: '--scratch-project must name an exported project' };
+    const owner = projectDirs.find(p => realpathSync.native(projectArtifactRoot(p)) === realpathSync.native(scratchProject));
+    if (!owner) return { exit: 2, error: '--scratch-project must name an exported project' };
+    const ownerRefusal = refusedDirs.get(owner)?.err;
+    if (ownerRefusal?.code === 'STORE_OUTSIDE_ROOT' || ownerRefusal?.code === 'STORE_BOUNDARY_UNVERIFIED') {
+      return { exit: 3, refused: ownerRefusal.message, coverage: [...refusedDirs.values()].map(r => r.row) };
     }
+    if (ownerRefusal) return { exit: 2, error: 'project scratch is unavailable', error_code: ownerRefusal.code || 'scratch-error' };
     scratchDir = ensureProjectArtifactDir(scratchProject, '_scratch');
   } catch (e) {
     return { exit: 2, error: 'project scratch is unavailable', error_code: e.code || 'scratch-error' };
   }
-  // Each project's key and delta history live in its own package state folder. A project whose key
-  // can't be used is reported under a pseudonym from a key that exists only for this run.
-  const runSeal = makeSeal(randomBytes(32).toString('hex'));
+  // Each project's key and delta history live in its own package state folder.
   let saltCreated = false;
 
   // collect
   const coverage = [];
   const projects = [];
   for (const dir of projectDirs) {
+    if (refusedDirs.has(dir)) { coverage.push(refusedDirs.get(dir).row); continue; }
     try {
-      // Under --all a linked `_memories` is recorded under its code (STORE_OUTSIDE_ROOT) and skipped.
-      assertStoreBoundary(dir);
       const stateDir = ensureProjectArtifactDir(projectArtifactRoot(dir), '_package');
       const { salt, created } = loadOrCreateSalt(stateDir);
       saltCreated ||= created;

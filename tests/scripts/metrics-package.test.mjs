@@ -7,6 +7,7 @@ import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
+import { linkFolder } from '../helpers/links.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats, computeDeltas,
   buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics, selfTestStats,
@@ -464,6 +465,33 @@ test('--all records a project whose _memories links outside it as unavailable, a
     assert.equal(refused[0].reason, 'STORE_OUTSIDE_ROOT', 'the reason is the boundary code, never a message carrying a path');
     assert.deepEqual(readdirSync(outside).sort().map(n => `${n}:${readFileSync(join(outside, n), 'utf8')}`), outsideBefore, 'the outside folder is unchanged');
     assert.deepEqual(readdirSync(linked).sort(), linkedBefore, 'no package state is created in the linked project');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('--all naming a linked-store project as the scratch project refuses it before any scratch is made there', { skip: process.platform === 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-all-link-scratch-'));
+  try {
+    const home = makeFixtureHome(root);
+    const good = makeFixtureProject(root);
+    const outside = join(root, 'outside-target');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'dc-9-outside.md'), '---\nid: dc-9-outside\ntype: decision\nstatus: active\ncreated: 2026-06-01\n---\n\nOutside body.\n');
+    const linked = join(root, 'linked');
+    mkdirSync(linked, { recursive: true });
+    writeFileSync(join(linked, 'PROJECT.md'), '# L\n');
+    linkFolder(outside, join(linked, '_memories'));
+    const linkedBefore = readdirSync(linked).sort();
+    const goodBefore = readdirSync(good).sort();
+    writeFileSync(join(home, '.core', 'index.json'), JSON.stringify([
+      { id: 'fixture-ws-alpha', path: good },
+      { id: 'linked-ws', path: linked },
+    ]));
+    const result = runPackage(['--all', '--scratch-project', linked, '--home', home, '--out', join(root, 'out')]);
+    assert.equal(result.exit, 3, JSON.stringify(result));
+    assert.match(result.refused || '', /_memories is a link/);
+    assert.deepEqual(readdirSync(linked).sort(), linkedBefore, 'no scratch or package state is created in the refused project');
+    assert.deepEqual(readdirSync(good).sort(), goodBefore, 'nothing is collected or staged for the others once the scratch project is refused');
+    assert.ok(!existsSync(join(root, 'out')), 'no package is written');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
