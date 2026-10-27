@@ -49,7 +49,7 @@ import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock, withAc
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
-import { computeSourceSignature } from './generate-summary-index.mjs';
+import { computeSourceSignature, assertStoreBoundary } from './generate-summary-index.mjs';
 import { ensureStoreIgnores } from './store-ignores.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous
@@ -688,6 +688,14 @@ function main(argv) {
   const store = f._[0];
   const json = !!f.json;
   if (!sub || !store) { process.stderr.write('usage: close-pass.mjs <detect|begin|record|finish|certify|process-request|release> <store> [...]\n'); return 2; }
+  // A linked `_memories` is refused before any subcommand reads the marker, takes or releases the
+  // lock, or writes a receipt for the project.
+  try { assertStoreBoundary(store); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
 
   const ops = typeof f.ops === 'string' ? f.ops.split(',').map(s => s.trim()).filter(Boolean) : [];
 

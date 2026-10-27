@@ -21,6 +21,7 @@ import { join, dirname } from 'node:path';
 import { readHistory } from './capability-history.mjs';
 import { projectRootFor, detectStateHarness } from './project-state.mjs';
 import { stampCreatedBaseline } from './lifecycle-detect.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 
 // identity_status rank — higher is healthier. Drift = new rank < old rank.
 const STATUS_RANK = { PASS: 3, DEGRADED: 2, 'NOT-YET': 1, UNKNOWN: 0 };
@@ -292,6 +293,13 @@ export function main(argv) {
     else if (!argv[i].startsWith('--') && project === null) project = argv[i];
   }
   if (!project) { process.stderr.write('usage: analyze-capability-drift.mjs <project> [--harness <h>]\n'); return 2; }
+  // A linked `_memories` is refused before the log is written or the old-name file removed through it.
+  try { assertStoreBoundary(project); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
 
   const target = { root: projectRootFor(project), harness: harness || detectStateHarness() };
   const history = loadCapabilityHistory(target, project);

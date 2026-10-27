@@ -54,6 +54,7 @@ import {
   effectiveValidity, validAt, isInvalidated, iterArchivedUnits,
 } from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 
 export const BITEMPORAL_VERSION = '1.0.0';
 
@@ -368,6 +369,13 @@ if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
+  // A linked `_memories` is refused before any mode lists, reads or stamps units through it.
+  try { assertStoreBoundary(project); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    process.exit(3);
+  }
   const memoriesDir = join(project, '_memories');
   const today = todayUtc();
   let units;

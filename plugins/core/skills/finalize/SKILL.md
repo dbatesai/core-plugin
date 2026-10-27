@@ -35,7 +35,7 @@ Record `material-capture`, `render-project-md` (`done` or `skipped`) and `sessio
 node <scripts>/close-pass.mjs begin <project> --session <session-id-if-known> --ops material-capture,render-project-md,session-summary,memory-refresh
 ```
 
-Without `--session`, `begin` names the session from the newest project-bound transcript, the same way `certify` does, so the op record belongs to this session. If `begin` refuses ("lock held"), another close is running — stop and say so. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
+Without `--session`, `begin` names the session from the newest project-bound transcript, the same way `certify` does, so the op record belongs to this session. If `begin` refuses ("lock held"), another close is running — stop and say so. If it prints a `refused:` line (exit 3), the project's `_memories` is a link or leaves the project folder: nothing was written, so stop and tell the user the line. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
 
 ## Step 2 — Material capture (from the active context, once)
 

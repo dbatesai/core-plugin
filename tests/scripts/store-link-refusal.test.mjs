@@ -1,6 +1,7 @@
 // A project whose `_memories` is a link to a folder outside it: the unit-index writer, the unit
-// checker, the lifecycle report and the edge decorator each refuse before following the link, and
-// the folder the link leads to keeps its exact bytes and listing.
+// checker, the lifecycle report, the edge decorator, the session-close marker and lock, the
+// supersession stamper and the capability-drift log each refuse before following the link, and the
+// folder the link leads to keeps its exact bytes and listing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, symlinkSync, existsSync } from 'node:fs';
@@ -17,6 +18,10 @@ const UNITS = {
   'dc-001-outside-decision.md': '---\nid: dc-001-outside-decision\ntype: decision\nstatus: active\ncreated: 2026-01-01\n---\n# An outside decision\n\nbody\n',
   'risk-001-outside-risk.md': '---\nid: risk-001-outside-risk\ntype: risk\nstatus: active\ncreated: 2026-01-01\n---\n# An outside risk\n\nbody\n',
   'secret.md': '---\nid: secret\ntype: observation\n---\nsecret: outside the project\n',
+  'dc-002-retired-target.md': '---\nid: dc-002-retired-target\ntype: decision\nstatus: retired\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\n# A retired decision\n',
+  'dc-003-superseder.md': '---\nid: dc-003-superseder\ntype: decision\nstatus: active\ncreated: 2026-02-01\nupdated: 2026-02-01\nedges:\n  - { type: supersedes, target: dc-002-retired-target }\n---\n# A superseding decision\n',
+  'capability-drift-log.md': '# an outside file with the old drift-log name\n',
+  '_close-marker.json': '{"session_id":"outside","status":"closed","ops":{}}\n',
 };
 
 function writeUnits(dir) { for (const [n, body] of Object.entries(UNITS)) writeFileSync(join(dir, n), body); }
@@ -52,6 +57,16 @@ const CASES = [
   ['lifecycle-detect.mjs', (p) => [p, '--json']],
   ['lifecycle-detect.mjs', (p) => [p, '--record-session-start', 's1']],
   ['decorate-graph.mjs', (p) => [p]],
+  ['close-pass.mjs', (p) => ['begin', p, '--session', 's1', '--ops', 'material-capture']],
+  ['close-pass.mjs', (p) => ['record', p, '--op', 'material-capture', '--status', 'done']],
+  ['close-pass.mjs', (p) => ['finish', p, '--session', 's1']],
+  ['close-pass.mjs', (p) => ['detect', p, '--ops', 'material-capture']],
+  ['close-pass.mjs', (p) => ['certify', p, '--session', 's1']],
+  ['close-pass.mjs', (p) => ['release', p]],
+  ['close-pass.mjs', (p) => ['process-request', p, '--session', 's1']],
+  ['bitemporal.mjs', (p) => [p, '--stamp', '--apply']],
+  ['bitemporal.mjs', (p) => [p, '--metrics']],
+  ['analyze-capability-drift.mjs', (p) => [p, '--harness', 'claude-code']],
 ];
 
 for (const [script, argsFor] of CASES) {
