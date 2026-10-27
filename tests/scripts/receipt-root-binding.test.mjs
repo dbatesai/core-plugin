@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, renameSync, copyFileSync, statSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -138,6 +140,10 @@ test('a moved project\'s own receipt is carried to the new folder, and left inta
     assert.equal(ev.repointed.receipts[0].status, 'held', JSON.stringify(ev.repointed.receipts));
     assert.match(ev.repointed.receipts[0].reason, /^lock-/);
     assert.deepEqual(m.bytes(), before, 'a carry that cannot take the lock leaves the receipt as it was');
+    assert.equal(touched.root, m.now);
+    assert.equal(ev.oldPath, m.old);
+    const again = touchProject(s.coreDir, { root: m.now, harness: H });
+    assert.equal(again.events.some((e) => e.kind === 'state-moved'), false, 'the move itself completed: the state now verifies at the new path');
   } finally { s.cleanup(); }
   const s2 = sandbox();
   try {
@@ -150,6 +156,58 @@ test('a moved project\'s own receipt is carried to the new folder, and left inta
     assert.equal(r.files[0].to, join(m.nowState, 'notes.md'));
     assert.equal(r.files[0].from, join(s2.coreDir, 'workspaces', 'legacy', 'notes.md'), 'sources are not rewritten');
   } finally { s2.cleanup(); }
+});
+
+/** Run `fn` with `fs.renameSync` replaced by `patched(original, from, to)`, as every module importing node:fs sees it. */
+function withRename(patched, fn) {
+  const original = fs.renameSync;
+  fs.renameSync = (from, to, ...rest) => patched(original, from, to, ...rest);
+  syncBuiltinESMExports();
+  try { return fn(); }
+  finally { fs.renameSync = original; syncBuiltinESMExports(); }
+}
+
+test('a carried receipt that does not read back as written is put back byte for byte and reported held', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const before = m.bytes();
+    const file = join(m.nowState, RECEIPT);
+    // The new receipt's write is lost once (the temp file is dropped instead of renamed over it),
+    // so the folder holds the old receipt beside the new MAC and the pair does not verify.
+    let dropped = 0;
+    const touched = withRename((rename, from, to, ...rest) => {
+      if (to === file && !dropped++) { fs.unlinkSync(from); return undefined; }
+      return rename(from, to, ...rest);
+    }, () => touchProject(s.coreDir, { root: m.now, harness: H }));
+    assert.equal(dropped >= 1, true, 'fixture: the receipt write was reached');
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'held', reason: 'RECEIPT_READBACK', restored: true }]);
+    assert.deepEqual(m.bytes(), before, 'the original receipt and its MAC are back');
+    assert.deepEqual(readdirSync(m.nowState).filter((n) => n.includes('.tmp-')), [], 'no temp files left behind');
+  } finally { s.cleanup(); }
+});
+
+test('a carried receipt whose MAC write fails is put back byte for byte and reported held', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const before = m.bytes();
+    const mac = join(m.nowState, `${RECEIPT}.mac`);
+    // The new body has already replaced the old one when the MAC write fails, once.
+    let failed = 0;
+    const touched = withRename((rename, from, to, ...rest) => {
+      if (to === mac && !failed++) throw Object.assign(new Error('synthetic write failure'), { code: 'EIO' });
+      return rename(from, to, ...rest);
+    }, () => touchProject(s.coreDir, { root: m.now, harness: H }));
+    assert.equal(failed >= 1, true, 'fixture: the MAC write was reached');
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'held', reason: 'EIO', restored: true }]);
+    assert.deepEqual(m.bytes(), before, 'the original receipt and its MAC are back');
+    assert.deepEqual(readdirSync(m.nowState).filter((n) => n.includes('.tmp-')), [], 'no temp files left behind');
+  } finally { s.cleanup(); }
 });
 
 test('a signed receipt with an empty file list, copied into another project, is refused and imports nothing', { todo: 'card 235: receipt root binding' }, () => {
