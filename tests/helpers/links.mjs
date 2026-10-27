@@ -23,6 +23,7 @@ function symlinksAllowed() {
 }
 
 export const CAN_SYMLINK = symlinksAllowed();
+if (process.env.CORE_TEST_LINKS === 'junction') process.stderr.write('links: junction mode (forced by CORE_TEST_LINKS=junction)\n');
 export const FILE_LINK_SKIP = CAN_SYMLINK ? false : 'file links need symlink rights; a junction links folders only';
 
 /** A link at `path` to the folder `target`: a symbolic link, or a junction when only that is allowed. */

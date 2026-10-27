@@ -304,6 +304,21 @@ jobs:
           CORE_SUITE_ALLOW_UNENFORCED_DENY: ${{ runner.os == 'Windows' && '1' || '' }}
         run: node scripts/release/run-suite-isolated.mjs
 
+      # The hosted Windows runner may make symbolic links, so the main run never takes the junction branch of
+      # tests/helpers/links.mjs. This step forces it for the files that use that helper: folder links become
+      # junctions and file-link cases skip. Each test process prints "links: junction mode (forced ...)".
+      - name: Run link tests with junctions forced (isolated account home)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          CORE_SUITE_ALLOW_UNENFORCED_DENY: '1'
+          CORE_TEST_LINKS: junction
+        run: >-
+          node scripts/release/run-suite-isolated.mjs
+          tests/scripts/store-link-refusal.test.mjs tests/scripts/store-containment-tail.test.mjs
+          tests/scripts/project-only.test.mjs tests/scripts/graph-walk.test.mjs
+          tests/scripts/guard-before-first-read.test.mjs tests/scripts/metrics-package.test.mjs
+
       - name: The suite must not have written to the real account ~/.core
         shell: bash
         run: node scripts/release/real-home-guard.mjs check "$RUNNER_TEMP/real-home.json"
