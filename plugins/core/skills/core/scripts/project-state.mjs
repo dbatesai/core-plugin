@@ -780,8 +780,10 @@ const CLOSE_LOCK_STALE_MS = 15 * 60 * 1000;
  * rewritten; one naming any other folder was not this project's and is left as it was. Taken under
  * the project's close lock, which every receipt writer holds, without waiting: a held lock leaves
  * the receipt as it was. The new pair is read back; a failed write or read-back puts the original
- * bytes back. Never throws.
- * @returns {{folder: string, status: string, count?: number, reason?: string}}
+ * pair back while the lock is still held, reads it back, and reports `restored` (whether the
+ * original verifies again) and, when a restore write threw, `restoreFailed` (that file's name).
+ * Never throws.
+ * @returns {{folder: string, status: string, count?: number, reason?: string, restored?: boolean, restoreFailed?: string, lock?: string}}
  */
 function carryMovedReceipt({ real, harness, dir, olds, coreDir }) {
   const file = join(dir, MIGRATION_RECEIPT);
@@ -794,7 +796,6 @@ function carryMovedReceipt({ real, harness, dir, olds, coreDir }) {
     lock = acquireFileLock(lockFile, { extra: { session_id: 'move-receipt' }, staleMs: CLOSE_LOCK_STALE_MS, hardStaleMs: 2 * CLOSE_LOCK_STALE_MS });
   } catch (e) { return report('held', { reason: String(e?.code || e?.message || e) }); }
   if (!lock.ok) return report('held', { reason: `lock-${lock.reason}` });
-  let restore = null;
   try {
     return withAcquiredFileLock(lockFile, lock.nonce, () => {
       const raw = readSignedFileAt({ dir, name: MIGRATION_RECEIPT, coreDir });
@@ -813,21 +814,27 @@ function carryMovedReceipt({ real, harness, dir, olds, coreDir }) {
         return { ...f, to: join(real, f.to.slice(from.length + (from.endsWith(sep) ? 0 : 1))) };
       });
       const body = JSON.stringify({ ...receipt, root: real, files }, null, 2) + '\n';
-      restore = { body: readFileSync(file), mac: readFileSync(`${file}${MAC_SUFFIX}`) };
-      writeSignedFile({ dir, name: MIGRATION_RECEIPT, body, coreDir });
-      if (readSignedFileAt({ dir, name: MIGRATION_RECEIPT, coreDir }) !== body) throw Object.assign(new Error('receipt did not read back as written'), { code: 'RECEIPT_READBACK' });
-      restore = null;
+      const original = { body: readFileSync(file), mac: readFileSync(`${file}${MAC_SUFFIX}`) };
+      try {
+        writeSignedFile({ dir, name: MIGRATION_RECEIPT, body, coreDir });
+        if (readSignedFileAt({ dir, name: MIGRATION_RECEIPT, coreDir }) !== body) throw Object.assign(new Error('receipt did not read back as written'), { code: 'RECEIPT_READBACK' });
+      } catch (e) {
+        // Put the original pair back before the lock is released, so no other receipt writer's
+        // bytes can land in between and be overwritten. Each file is attempted on its own; the
+        // read-back decides whether the original verifies again.
+        let restoreFailed = null;
+        for (const [path, bytes, name] of [[file, original.body, MIGRATION_RECEIPT], [`${file}${MAC_SUFFIX}`, original.mac, `${MIGRATION_RECEIPT}${MAC_SUFFIX}`]]) {
+          try { atomicWriteFileSync(path, bytes); } catch { restoreFailed ??= name; }
+        }
+        const restored = readSignedFileAt({ dir, name: MIGRATION_RECEIPT, coreDir }) === original.body.toString('utf8');
+        return report('held', { reason: String(e?.code || e?.message || e), restored, ...(restoreFailed ? { restoreFailed } : {}) });
+      }
       return report('repointed', { count });
     });
   } catch (e) {
-    // The operation finished and was read back; only the lock's release failed.
+    // The operation returned its report; only the lock's release failed.
     if (e?.code === 'LOCK_RELEASE_FAILED' && e.operationResult) return { ...e.operationResult, lock: `release-failed: ${e.lockPath}` };
-    let restored = null;
-    if (restore) {
-      try { atomicWriteFileSync(file, restore.body); atomicWriteFileSync(`${file}${MAC_SUFFIX}`, restore.mac); restored = true; }
-      catch { restored = false; }
-    }
-    return report('held', { reason: String(e?.code || e?.message || e), ...(restored !== null ? { restored } : {}) });
+    return report('held', { reason: String(e?.code || e?.message || e) });
   }
 }
 

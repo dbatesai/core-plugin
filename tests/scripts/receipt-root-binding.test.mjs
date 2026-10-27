@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { registerProject, touchProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
-import { acquireFileLock, releaseFileLock } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
+import { acquireFileLock, releaseFileLock, currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs', import.meta.url));
 const H = 'claude-code';
@@ -206,6 +206,63 @@ test('a carried receipt whose MAC write fails is put back byte for byte and repo
     assert.ok(ev, 'CORE\'s own move handling ran');
     assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'held', reason: 'EIO', restored: true }]);
     assert.deepEqual(m.bytes(), before, 'the original receipt and its MAC are back');
+    assert.deepEqual(readdirSync(m.nowState).filter((n) => n.includes('.tmp-')), [], 'no temp files left behind');
+  } finally { s.cleanup(); }
+});
+
+test('a carried receipt is put back while the carry still holds the close lock', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const before = m.bytes();
+    const file = join(m.nowState, RECEIPT);
+    const mac = `${file}.mac`;
+    const lockFile = join(m.now, '_memories', '_close.lock');
+    // The new receipt's write is lost once; every later write to the pair is the restore, and
+    // each one records who holds the close lock at that moment.
+    const seen = { [file]: 0, [mac]: 0 };
+    const holders = [];
+    const touched = withRename((rename, from, to, ...rest) => {
+      if (to in seen && seen[to]++ > 0) {
+        const live = currentLockFile(lockFile);
+        let owner = null;
+        try { owner = live && JSON.parse(readFileSync(live, 'utf8')); } catch { /* unreadable reads as no owner */ }
+        holders.push({ to, session_id: owner?.session_id ?? null, pid: owner?.pid ?? null });
+      }
+      if (to === file && seen[file] === 1) { fs.unlinkSync(from); return undefined; }
+      return rename(from, to, ...rest);
+    }, () => touchProject(s.coreDir, { root: m.now, harness: H }));
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'held', reason: 'RECEIPT_READBACK', restored: true }]);
+    assert.deepEqual(holders.map((h) => h.to), [file, mac], 'fixture: both restore writes were reached');
+    for (const h of holders) assert.deepEqual(h, { to: h.to, session_id: 'move-receipt', pid: process.pid }, 'the carry owns the close lock during each restore write');
+    assert.deepEqual(m.bytes(), before, 'the original receipt and its MAC are back');
+  } finally { s.cleanup(); }
+});
+
+test('a restore write that fails is reported as restored: false, naming the file', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const before = m.bytes();
+    const file = join(m.nowState, RECEIPT);
+    const mac = `${file}.mac`;
+    // The MAC write fails after the new body landed, then the restore of the body fails too,
+    // leaving the new body beside the original MAC: a pair that does not verify.
+    const seen = { [file]: 0, [mac]: 0 };
+    const touched = withRename((rename, from, to, ...rest) => {
+      if (to in seen) seen[to]++;
+      if ((to === mac && seen[mac] === 1) || (to === file && seen[file] === 2)) throw Object.assign(new Error('synthetic write failure'), { code: 'EIO' });
+      return rename(from, to, ...rest);
+    }, () => touchProject(s.coreDir, { root: m.now, harness: H }));
+    assert.deepEqual(seen, { [file]: 2, [mac]: 2 }, 'fixture: the carry wrote each file once and the restore tried each once');
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'held', reason: 'EIO', restored: false, restoreFailed: RECEIPT }]);
+    const after = m.bytes();
+    assert.notEqual(after[0], before[0], 'the body is not back');
+    assert.equal(after[1], before[1], 'the MAC restore was still attempted and landed');
     assert.deepEqual(readdirSync(m.nowState).filter((n) => n.includes('.tmp-')), [], 'no temp files left behind');
   } finally { s.cleanup(); }
 });
