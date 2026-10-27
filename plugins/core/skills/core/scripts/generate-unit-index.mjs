@@ -19,8 +19,9 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, basename, dirname } from 'node:path';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { truncate as sharedTruncate } from './text-truncate.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -143,6 +144,15 @@ export function main(argv) {
   if (!kind || !KINDS[kind]) {
     process.stderr.write(`generate-unit-index: pass --kind ${Object.keys(KINDS).join('|')}\n`);
     return 2;
+  }
+  // The project root is read off the path as given, so a linked `_memories` is refused before
+  // anything lists or writes through it.
+  const given = resolve(store || process.cwd());
+  try { assertStoreBoundary(basename(given) === '_memories' ? dirname(given) : given); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
   }
   const memoriesDir = store ? resolveMemoriesDir(store) : resolve(process.cwd(), '_memories');
 

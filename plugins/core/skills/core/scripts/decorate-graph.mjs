@@ -29,7 +29,7 @@
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isCliEntry } from './cli-entry.mjs';
-import { loadSnapshot } from './generate-summary-index.mjs';
+import { loadSnapshot, assertStoreBoundary } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { hashText, stampFiles, readProjectCache, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
@@ -308,6 +308,8 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
  * the same unit file.
  */
 export function decorateStoreLocked(projectDir, opts = {}) {
+  // A linked store is refused before the folder, its ignore file or the lock is created through it.
+  assertStoreBoundary(projectDir);
   const lockPath = join(resolve(projectDir), '_memories', '.decorate-graph.lock');
   mkdirSync(join(resolve(projectDir), '_memories'), { recursive: true });
   ensureStoreIgnores(resolve(projectDir));
@@ -334,7 +336,13 @@ function main(argv) {
   const check = argv.includes('--check');
   const dryRun = check || argv.includes('--dry-run');
 
-  const result = decorateStoreLocked(projectDir, { dryRun });
+  let result;
+  try { result = decorateStoreLocked(projectDir, { dryRun }); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
 
   if (result.changed.length === 0 && result.refused.length === 0 && result.needs_reconciliation.length === 0) {
     process.stdout.write(`decorate-graph: ${result.total_units} units, none needed a change (snapshot ${result.snapshot_id.slice(0, 12)}).\n`);

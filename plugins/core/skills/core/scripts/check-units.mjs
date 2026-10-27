@@ -33,6 +33,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve, join, basename, dirname } from 'node:path';
 import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 
 // ---------- Schema constants ----------
 
@@ -534,6 +535,14 @@ export function main(argv) {
   }
 
   const project = resolve(projectArg);
+  // The project root is read off the path as given, so a linked `_memories` is refused before
+  // anything lists or reads through it.
+  try { assertStoreBoundary(basename(project) === '_memories' ? dirname(project) : project); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
   let memoriesDir = join(project, '_memories');
   try { readdirSync(memoriesDir); } catch {
     memoriesDir = project;

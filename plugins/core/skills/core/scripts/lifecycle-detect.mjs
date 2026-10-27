@@ -165,9 +165,9 @@ export function inventoryPaths(projectDir) {
 
 /** Record (overwrite) the session-start inventory. Diagnostic snapshot only. */
 export function recordSessionStart(projectDir, { sessionId = null, now = new Date().toISOString() } = {}) {
+  assertStoreBoundary(projectDir);
   const inv = { session: sessionId, started_at: now, paths: inventoryPaths(projectDir) };
   const path = sessionInventoryPath(projectDir);
-  assertStoreBoundary(projectDir);
   ensureLibDir(resolve(projectDir));
   atomicWriteFileSync(path, JSON.stringify(inv, null, 2) + '\n');
   return inv;
@@ -389,6 +389,13 @@ function main(argv) {
     else positionals.push(a);
   }
   const projectDir = resolve(positionals[0] || process.cwd());
+  // A linked `_memories` is refused before any action lists, reads or stamps through it.
+  try { assertStoreBoundary(projectDir); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
 
   if (flags.has('import-legacy-cache')) {
     const conflicts = opts.record !== undefined || opts.stampCreated !== undefined || flags.has('adopt-existing-store');
