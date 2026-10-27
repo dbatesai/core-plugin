@@ -40,7 +40,7 @@
  */
 
 import { readFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
-import { dirname, join, isAbsolute } from 'node:path';
+import { dirname, join, isAbsolute, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -135,14 +135,17 @@ export function registerProject(coreDir, dir, { home, confirmNew = false, offerA
   });
 }
 
-/** Replace a moved project's old path with its new one (keeps registered_at). */
+/**
+ * Replace a moved project's old path with its new one (keeps registered_at). `moved_from` is the
+ * old path as recorded: after a rename by letter case the old spelling resolves to the new folder.
+ */
 export function recordMove(coreDir, oldPath, newPath) {
   const from = canonical(oldPath);
   const to = canonical(newPath);
   return mutateProjects(coreDir || defaultCoreDir(), (entries) => {
     let found = false;
     const mapped = entries.map((e) => {
-      if (e && typeof e.path === 'string' && canonical(e.path) === from) { found = true; return { ...e, path: to, moved_from: from }; }
+      if (e && typeof e.path === 'string' && canonical(e.path) === from) { found = true; return { ...e, path: to, moved_from: resolve(oldPath) }; }
       return e;
     });
     // Startup registers the new path before the move is noticed: keep one entry per path.

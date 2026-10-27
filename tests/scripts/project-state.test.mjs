@@ -387,6 +387,7 @@ test('a folder renamed by letter case only reads as moved, not copied; its state
     assert.equal(rows.filter((e) => e.path === renamed).length, 1, 'one row names the new spelling');
     assert.deepEqual(rows.filter((e) => e.path === p), [], 'no row names the old spelling');
     assert.equal(rows.length, 1, 'no second row was added');
+    assert.equal(rows[0].moved_from, p, 'the row records the old spelling it moved from');
 
     // (c) the file baseline is keyed by the new spelling, hash and writer kept
     assert.equal(moves[0].repointed.cache.status, 'repointed');
@@ -408,6 +409,46 @@ test('a folder renamed by letter case only reads as moved, not copied; its state
     const c = classifyStamp({ root: copy, harness: 'claude-code', coreDir: s.coreDir });
     assert.equal(c.status, 'copied');
     assert.equal(c.oldPath, renamed);
+    const pinBefore = readFileSync(join(metaNow, 'storage-path.txt'), 'utf8');
+    writeFileSync(join(s.coreDir, 'projects.json'), JSON.stringify([...rows, { path: copy }]));
+    const copied = touchProject(s.coreDir, { root: copy, harness });
+    assert.ok(copied.events.some((e) => e.kind === 'state-copied'), 'the copy is set aside as a copy');
+    assert.ok(!copied.events.some((e) => e.kind === 'state-moved'), 'the copy is not a move');
+    assert.equal(readPinSigned({ dir: join(copy, '_core', harness, 'metrics'), root: copy, coreDir: s.coreDir }), null, 'the copy does not get the pin');
+    assert.equal(readFileSync(join(metaNow, 'storage-path.txt'), 'utf8'), pinBefore, 'the renamed project keeps its pin');
+  } finally { s.cleanup(); }
+});
+
+test('after a rename by letter case, a later real move still carries the metrics pin', async (t) => {
+  const { writePinSigned, readPinSigned } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { touchProject } = await import('../../plugins/core/skills/core/scripts/index-registry.mjs');
+  const s = sandbox();
+  try {
+    const parent = mk(s.base, 'Projects');
+    if (!caseInsensitiveAt(parent)) return t.skip('case-sensitive filesystem: a case-only rename is a rename to a different name');
+    const harness = 'claude-code';
+    const p = mk(parent, 'Proj');
+    register(s.coreDir, [p]);
+    writeStamp({ root: p, harness, coreDir: s.coreDir });
+    mk(p, '_metrics');
+    writePinSigned({ dir: mk(p, '_core', harness, 'metrics'), path: join(p, '_metrics'), root: p, coreDir: s.coreDir });
+
+    const lower = join(parent, 'proj');
+    renameSync(p, lower);
+    touchProject(s.coreDir, { root: lower, harness });
+
+    const other = join(parent, 'Other');
+    renameSync(lower, other);
+    // startup registers the new path before the move is noticed
+    const rows = JSON.parse(readFileSync(join(s.coreDir, 'projects.json'), 'utf8'));
+    writeFileSync(join(s.coreDir, 'projects.json'), JSON.stringify([...rows, { path: other }]));
+    const r = touchProject(s.coreDir, { root: other, harness });
+    const ev = r.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'the later move is reported');
+    assert.equal(ev.oldPath, lower);
+    const meta = join(other, '_core', harness, 'metrics');
+    assert.deepEqual(ev.repointed.pins, [{ folder: meta, status: 'repointed' }], 'the pin is carried to the new folder');
+    assert.equal(readPinSigned({ dir: meta, root: other, coreDir: s.coreDir }), join(other, '_metrics'), 'the pin reads for the new folder');
   } finally { s.cleanup(); }
 });
 

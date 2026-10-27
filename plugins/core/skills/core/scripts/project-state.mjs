@@ -743,11 +743,18 @@ export function writePinSigned({ dir, path, root, coreDir = defaultCoreDir() }) 
 
 /** The pinned folder in `dir`, when it is signed by this install and was written for `root`; otherwise null. */
 export function readPinSigned({ dir, root, coreDir = defaultCoreDir() }) {
+  const pin = readPinRecord({ dir, coreDir });
+  if (pin && canonical(pin.root) === canonical(root)) return pin.path.trim() || null;
+  return null;
+}
+
+/** The signed pin in `dir` as stored, { path, root }, or null when it does not verify or is not a pin this code wrote. */
+function readPinRecord({ dir, coreDir }) {
   const raw = readSignedFileAt({ dir, name: 'storage-path.txt', coreDir });
   if (raw === null) return null;
   try {
     const j = JSON.parse(raw);
-    if (j && typeof j.path === 'string' && typeof j.root === 'string' && canonical(j.root) === canonical(root)) return j.path.trim() || null;
+    if (j && typeof j.path === 'string' && typeof j.root === 'string') return { path: j.path, root: j.root };
   } catch { /* not a pin this code wrote */ }
   return null;
 }
@@ -780,7 +787,9 @@ export function repointMovedState({ root, harness, coreDir = defaultCoreDir(), o
   try {
     for (const { dir } of stateLocations({ root: real, harness, coreDir }).locations) {
       const meta = join(dir, 'metrics');
-      if (readPinSigned({ dir: meta, root: real, coreDir }) !== null) { result.pins.push({ folder: meta, status: 'already-current' }); continue; }
+      // Current only when it was signed for this exact spelling: after a rename by letter case the
+      // old spelling still resolves here, and a pin left naming it is lost on the next move.
+      if (readPinRecord({ dir: meta, coreDir })?.root === real) { result.pins.push({ folder: meta, status: 'already-current' }); continue; }
       let moved = false;
       for (const old of olds) {
         const pinned = readPinSigned({ dir: meta, root: old, coreDir });
@@ -793,7 +802,7 @@ export function repointMovedState({ root, harness, coreDir = defaultCoreDir(), o
         moved = true;
         break;
       }
-      if (!moved) result.pins.push({ folder: meta, status: 'no-pin-for-old-root' });
+      if (!moved) result.pins.push({ folder: meta, status: readPinSigned({ dir: meta, root: real, coreDir }) !== null ? 'already-current' : 'no-pin-for-old-root' });
     }
   } catch (e) {
     result.pins.push({ folder: null, status: `held: ${String(e?.code || e?.message || e)}` });
