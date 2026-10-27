@@ -8,11 +8,12 @@
  * through frontmatter `description:`, first H1 of the body, and first non-blank
  * body line before giving up with `(description pending)`.
  *
- * Paths are emitted relative to the project root (the parent of `_memories/`),
- * not relative to MEMORY.md's directory. Claude Code resolves these against
- * the session CWD (the project root); shorter project-root-relative paths are
- * portable across the harness's MEMORY.md location, which may sit outside the
- * project tree (e.g. `~/.claude/projects/<encoded>/memory/`).
+ * Each unit link is relative to MEMORY.md's own directory, which usually sits
+ * outside the project tree (`~/.claude/projects/<encoded>/memory/`), so it
+ * resolves from the file it is written in. When no relative path exists (a
+ * different drive on Windows) the link is the absolute path. Links always use
+ * forward slashes; one holding a space or parenthesis is wrapped in `<...>`.
+ * The coverage note names unread paths relative to the project root as text.
  *
  * Usage:
  *   node generate-memory-index.mjs <project>/_memories \
@@ -30,7 +31,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 const SECTION_HEADER_RE = /^## Top project units/;
-const EXISTING_LINE_RE = /^- \[([^\]]+)\]\(([^)]+)\) — (.+)$/;
+const EXISTING_LINE_RE = /^- \[([^\]]+)\]\((<[^>]*>|[^)]+)\) — (.+)$/;
 const FALLBACK_DESCRIPTION = '(description pending)';
 
 export function parseExistingDescriptions(memoryMdText) {
@@ -107,20 +108,30 @@ function todayFromArg(arg) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-export function renderPriorityBlock({ memoriesDir, topN, today, existingDescriptions }) {
+// The markdown link target for `unitPath` as read from a file in `linkBase`.
+// path.relative returns the absolute target when no relative path exists.
+export function unitLinkTarget(linkBase, unitPath) {
+  const rel = relative(linkBase, String(unitPath)).replace(/\\/g, '/');
+  return /[\s()]/.test(rel) ? `<${rel}>` : rel;
+}
+
+// `linkBase` is the directory of the file the block is written into (main passes
+// MEMORY.md's directory); without one, links are relative to the project root.
+export function renderPriorityBlock({ memoriesDir, topN, today, existingDescriptions, linkBase }) {
   // rankUnits applies the bi-temporal suppression invariant + load-error
   // filtering — the index is a retrieval surface.
   const ranked = rankUnits(memoriesDir, { today });
   const top = ranked.slice(0, topN);
 
   const projectRoot = dirname(memoriesDir);
+  const base = linkBase || projectRoot;
   const dateStr = today.toISOString().slice(0, 10);
 
   const lines = [`## Top project units (refreshed from priority.mjs --top ${topN}, ${dateStr})`, ''];
   const ex = ranked.excluded;
   if (ex && ex.unreadable) lines.push(`> Coverage incomplete: ${ex.unreadable} path(s) could not be read — ${ex.skipped.map(s => relative(projectRoot, String(s.path)).replace(/\\/g, '/') + ' (' + s.reason + ')').join('; ')}. Units under them are unaccounted for, not absent.`, '');
   for (const [, u] of top) {
-    const relPath = relative(projectRoot, String(u.path)).replace(/\\/g, '/');
+    const linkTarget = unitLinkTarget(base, u.path);
     const existing = existingDescriptions.get(u.id);
     let desc;
     try {
@@ -129,7 +140,7 @@ export function renderPriorityBlock({ memoriesDir, topN, today, existingDescript
     } catch {
       desc = existing || FALLBACK_DESCRIPTION;
     }
-    lines.push(`- [${u.id}](${relPath}) — ${desc}`);
+    lines.push(`- [${u.id}](${linkTarget}) — ${desc}`);
   }
   return lines.join('\n');
 }
@@ -316,7 +327,7 @@ export function main(argv) {
     const cleanedText = stripCanaryLines(oldText);
     const existingDescriptions = parseExistingDescriptions(cleanedText);
     const newSection = renderPriorityBlock({
-      memoriesDir, topN, today, existingDescriptions,
+      memoriesDir, topN, today, existingDescriptions, linkBase: dirname(memoryMdPath),
     });
     return spliceSection(cleanedText, newSection);
   }, { dryRun });

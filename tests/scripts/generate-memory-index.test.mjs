@@ -289,3 +289,33 @@ test('derived descriptions are clamped to one short line; a curated line is left
   assert.equal(resolveDescription(curated, { description: long }, ''), curated, 'curated text is never clamped');
   assert.equal(clampDescription('short'), 'short');
 });
+
+// The harness keeps MEMORY.md at ~/.claude/projects/<slug>/memory/, outside the project,
+// so every unit link must resolve from that file's own directory.
+test('every unit link written into MEMORY.md resolves to an existing file from MEMORY.md\'s directory', async () => {
+  const { existsSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  const { mapMemoryProjectPathToSlug } = await import('../../plugins/core/skills/core/scripts/project-slug.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'gmi-links-'));
+  try {
+    const project = join(home, 'work', 'My Project');
+    const mem = join(project, '_memories');
+    mkdirSync(join(mem, 'observations', '2026-10'), { recursive: true });
+    const note = (id) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [a]\n---\n# ${id}\n`;
+    writeFileSync(join(mem, 'dc-1-top.md'), note('dc-1-top'));
+    writeFileSync(join(mem, 'observations', '2026-10', 'obs-nested.md'), note('obs-nested').replace('type: decision', 'type: observation'));
+    const memDir = join(home, '.claude', 'projects', mapMemoryProjectPathToSlug(project), 'memory');
+    mkdirSync(memDir, { recursive: true });
+    const memMd = join(memDir, 'MEMORY.md');
+    writeFileSync(memMd, '# idx\n');
+    assert.equal(quietStderr(() => main([mem, '--memory-md', memMd, '--today', '2026-10-27'])), 0);
+
+    const raw = [...readFileSync(memMd, 'utf8').matchAll(/^- \[([^\]]+)\]\((<[^>]*>|[^)]+)\) — /gm)];
+    assert.ok(raw.every(([, , target]) => target.startsWith('<') && target.endsWith('>')), 'a link through "My Project" is wrapped in <...>');
+    const links = raw.map(([, id, target]) => ({ id, target: target.replace(/^<(.*)>$/, '$1') }));
+    assert.deepEqual(links.map((l) => l.id).sort(), ['dc-1-top', 'obs-nested'], 'both units are linked');
+    for (const { id, target } of links) {
+      assert.ok(!target.includes('\\'), `${id}: markdown link uses forward slashes (${target})`);
+      assert.ok(existsSync(resolve(memDir, target)), `${id}: ${target} resolves from ${memDir}`);    }
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
