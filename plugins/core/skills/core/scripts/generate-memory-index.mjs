@@ -29,6 +29,7 @@ import { rankUnits } from './priority.mjs';
 import { mapMemoryProjectPathToSlug, resolveMemoryProjectRoot } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 
 const SECTION_HEADER_RE = /^## Top project units/;
 const EXISTING_LINE_RE = /^- \[([^\]]+)\]\((<[^>]*>|[^)]+)\) — (.+)$/;
@@ -277,6 +278,15 @@ export function main(argv) {
 
   const memoriesDir = resolve(memoriesDirArg);
   memoryMdPath = resolve(memoryMdPath);
+
+  // A linked `_memories` is refused before any unit is read through it, so no title from outside
+  // the project reaches MEMORY.md.
+  try { assertStoreBoundary(dirname(memoriesDir)); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
+  }
 
   // Guard the SOURCE dir too (mirrors the sibling generators): a bad/typo'd _memories path
   // would otherwise throw an uncaught ENOENT deep in iterUnits→readdirSync. Refuse with exit 2.

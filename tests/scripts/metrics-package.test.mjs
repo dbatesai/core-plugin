@@ -2,7 +2,7 @@ import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, chmodSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, chmodSync, realpathSync, symlinkSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -434,6 +434,36 @@ test('--all packages the healthy project and records the broken one in coverage'
     const covered = result.coverage.filter(c => c.available).length;
     assert.equal(covered, 1, 'one healthy project packaged');
     assert.equal(result.coverage.length, 2, 'broken project recorded, not dropped');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('--all records a project whose _memories links outside it as unavailable, and reads nothing through the link', { skip: process.platform === 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-all-link-'));
+  try {
+    const home = makeFixtureHome(root);
+    const good = makeFixtureProject(root);
+    const outside = join(root, 'outside-target');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'dc-9-outside.md'), '---\nid: dc-9-outside\ntype: decision\nstatus: active\ncreated: 2026-06-01\n---\n\nOutside body.\n');
+    const linked = join(root, 'linked');
+    mkdirSync(linked, { recursive: true });
+    writeFileSync(join(linked, 'PROJECT.md'), '# L\n');
+    symlinkSync('../outside-target', join(linked, '_memories'));
+    const outsideBefore = readdirSync(outside).sort().map(n => `${n}:${readFileSync(join(outside, n), 'utf8')}`);
+    const linkedBefore = readdirSync(linked).sort();
+    writeFileSync(join(home, '.core', 'index.json'), JSON.stringify([
+      { id: 'fixture-ws-alpha', path: good },
+      { id: 'linked-ws', path: linked },
+    ]));
+    const result = runPackage(['--all', '--scratch-project', good, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(!result.error, `no fatal error: ${result.error}`);
+    assert.equal(result.exit, 1);
+    assert.equal(result.coverage.filter(c => c.available).length, 1, 'the healthy project is packaged');
+    const refused = result.coverage.filter(c => !c.available);
+    assert.equal(refused.length, 1, 'the linked project is recorded, not dropped');
+    assert.equal(refused[0].reason, 'STORE_OUTSIDE_ROOT', 'the reason is the boundary code, never a message carrying a path');
+    assert.deepEqual(readdirSync(outside).sort().map(n => `${n}:${readFileSync(join(outside, n), 'utf8')}`), outsideBefore, 'the outside folder is unchanged');
+    assert.deepEqual(readdirSync(linked).sort(), linkedBefore, 'no package state is created in the linked project');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

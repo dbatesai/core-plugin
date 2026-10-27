@@ -29,6 +29,7 @@ import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { readProjectCache } from './state-cache.mjs';
 import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 import {
   writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
@@ -255,6 +256,15 @@ export function main(argv) {
     console.log(`PROJECT.md: ${total} bytes total. Section breakdown:`);
     console.log(formatSectionSizes(sizes));
     return 0;
+  }
+
+  // A linked `_memories` is refused before units are read through it or the writer lock is taken
+  // in it, so no title from outside the project reaches PROJECT.md.
+  try { assertStoreBoundary(projectDir); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    process.stderr.write(`refused: ${e.message}\n`);
+    return 3;
   }
 
   let units;

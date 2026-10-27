@@ -34,6 +34,7 @@
  *   --home  test seam: treat <dir> as the user home (tests must never touch ~)
  * Exit: 0 complete · 1 partial (sources or projects unavailable, package produced)
  *       · 2 failure (may include a verified output or retained scratch; inspect the result)
+ *       · 3 refused (the project's _memories is a link or leaves the project folder; nothing written)
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
@@ -53,6 +54,7 @@ import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
 import { ensureProjectArtifactDir, projectArtifactRoot, assertArtifactFile } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
 import { aggregateCalibration } from './calibrate-classifier.mjs';
@@ -1445,6 +1447,13 @@ export function runPackage(argv, { homeOverride } = {}) {
     if (!projectDirs.length) return { exit: 2, error: '--all found no registered projects with a _memories/ store' };
   } else {
     const p = resolve(positional[0] || process.cwd());
+    // A linked `_memories` is refused before the project's package state or scratch is created or
+    // anything is read through the link into a package.
+    try { assertStoreBoundary(p); }
+    catch (e) {
+      if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+      return { exit: 3, refused: e.message };
+    }
     projectDirs = [p];
   }
 
@@ -1470,6 +1479,8 @@ export function runPackage(argv, { homeOverride } = {}) {
   const projects = [];
   for (const dir of projectDirs) {
     try {
+      // Under --all a linked `_memories` is recorded under its code (STORE_OUTSIDE_ROOT) and skipped.
+      assertStoreBoundary(dir);
       const stateDir = ensureProjectArtifactDir(projectArtifactRoot(dir), '_package');
       const { salt, created } = loadOrCreateSalt(stateDir);
       saltCreated ||= created;
@@ -1679,6 +1690,10 @@ export function runPackage(argv, { homeOverride } = {}) {
 
 if (isCliEntry(import.meta.url)) {
   const result = runPackage(process.argv.slice(2));
+  if (result.refused) {
+    process.stderr.write(`refused: ${result.refused}\n`);
+    process.exit(result.exit);
+  }
   if (result.error) {
     process.stderr.write(`error: ${result.error}\n`);
     for (const failure of result.scratch_cleanup_failures || (result.scratch_cleanup ? [result.scratch_cleanup] : [])) process.stderr.write(`scratch retained: ${failure.path} (${failure.error_code})\n`);
