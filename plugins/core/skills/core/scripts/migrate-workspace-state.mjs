@@ -57,7 +57,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
-  writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath, markMetricsEverExternal,
+  writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath, markMetricsEverExternal, MIGRATION_RECEIPT,
 } from './project-state.mjs';
 import { acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
@@ -349,7 +349,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
 // Statuses that mean the project's state is not migrated and needs attention or a retry.
 const BLOCKED_STATUSES = new Set(['held', 'legacy-held', 'migration-incomplete', 'receipt-unverified', 'lock-held']);
 const LOCK_STALE_MS = 15 * 60 * 1000;
-const RECEIPT = 'migrated-from.json';
+const RECEIPT = MIGRATION_RECEIPT;
 const LEGACY_MANIFEST = 'legacy-workspace.json';
 // Per-project records the new layout keeps; lock artifacts and the retired canary are not copied.
 const SKIP_ON_COPY = [/\.lock(\.g\d+)?(\.done)?$/, /\.lock\.g\d+\.done$/, /^\.DS_Store$/, /^visibility-canary\.json$/];

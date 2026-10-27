@@ -28,7 +28,8 @@ import { basename, dirname, join, resolve, sep, isAbsolute } from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { withFileLock } from './file-lock.mjs';
+import { withFileLock, acquireFileLock, withAcquiredFileLock } from './file-lock.mjs';
+import { ensureRealFolders } from './store-ignores.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
@@ -767,17 +768,81 @@ function oldRootSpellings(oldPath) {
   return [...out];
 }
 
+/** The signed record of a project's migration from its legacy workspace, in the project's durable state. */
+export const MIGRATION_RECEIPT = 'migrated-from.json';
+/** How long a close or migration lock counts as live; the migration takes the same lock with the same budget. */
+const CLOSE_LOCK_STALE_MS = 15 * 60 * 1000;
+
+/**
+ * Carry the signed migration receipt in `dir` from an old root to `real`: each destination under
+ * the receipt's own root moves to the same place under `real`, and `root` becomes `real`. Only a
+ * receipt this install signed whose `root` is one of the old spellings the move was proved from is
+ * rewritten; one naming any other folder was not this project's and is left as it was. Taken under
+ * the project's close lock, which every receipt writer holds, without waiting: a held lock leaves
+ * the receipt as it was. The new pair is read back; a failed write or read-back puts the original
+ * bytes back. Never throws.
+ * @returns {{folder: string, status: string, count?: number, reason?: string}}
+ */
+function carryMovedReceipt({ real, harness, dir, olds, coreDir }) {
+  const file = join(dir, MIGRATION_RECEIPT);
+  const report = (status, extra = {}) => ({ folder: dir, status, ...extra });
+  if (!existsSync(file)) return report('no-receipt');
+  if (trackedStateFiles(real, harness).has(MIGRATION_RECEIPT)) return report('left-tracked');
+  let lockFile, lock;
+  try {
+    lockFile = join(ensureRealFolders(real, '_memories'), '_close.lock');
+    lock = acquireFileLock(lockFile, { extra: { session_id: 'move-receipt' }, staleMs: CLOSE_LOCK_STALE_MS, hardStaleMs: 2 * CLOSE_LOCK_STALE_MS });
+  } catch (e) { return report('held', { reason: String(e?.code || e?.message || e) }); }
+  if (!lock.ok) return report('held', { reason: `lock-${lock.reason}` });
+  let restore = null;
+  try {
+    return withAcquiredFileLock(lockFile, lock.nonce, () => {
+      const raw = readSignedFileAt({ dir, name: MIGRATION_RECEIPT, coreDir });
+      if (raw === null) return report('left-unsigned');
+      let receipt;
+      try { receipt = JSON.parse(raw); } catch { return report('left-unreadable'); }
+      if (!receipt || typeof receipt.root !== 'string' || !Array.isArray(receipt.files)) return report('left-unreadable');
+      // Current only when written for this exact spelling, as for the pin.
+      if (receipt.root === real) return report('already-current');
+      const from = receipt.root;
+      if (!olds.some((o) => o === from || canonical(o) === canonical(from))) return report('left-root-mismatch');
+      let count = 0;
+      const files = receipt.files.map((f) => {
+        if (!f || typeof f.to !== 'string' || !isInside(f.to, from) || f.to === from) return f;
+        count++;
+        return { ...f, to: join(real, f.to.slice(from.length + (from.endsWith(sep) ? 0 : 1))) };
+      });
+      const body = JSON.stringify({ ...receipt, root: real, files }, null, 2) + '\n';
+      restore = { body: readFileSync(file), mac: readFileSync(`${file}${MAC_SUFFIX}`) };
+      writeSignedFile({ dir, name: MIGRATION_RECEIPT, body, coreDir });
+      if (readSignedFileAt({ dir, name: MIGRATION_RECEIPT, coreDir }) !== body) throw Object.assign(new Error('receipt did not read back as written'), { code: 'RECEIPT_READBACK' });
+      restore = null;
+      return report('repointed', { count });
+    });
+  } catch (e) {
+    // The operation finished and was read back; only the lock's release failed.
+    if (e?.code === 'LOCK_RELEASE_FAILED' && e.operationResult) return { ...e.operationResult, lock: `release-failed: ${e.lockPath}` };
+    let restored = null;
+    if (restore) {
+      try { atomicWriteFileSync(file, restore.body); atomicWriteFileSync(`${file}${MAC_SUFFIX}`, restore.mac); restored = true; }
+      catch { restored = false; }
+    }
+    return report('held', { reason: String(e?.code || e?.message || e), ...(restored !== null ? { restored } : {}) });
+  }
+}
+
 /**
  * After a move that was verified (the stamp is this install's and the old folder is gone), carry
- * the two records that name the old path to the new one: the file baseline keyed by absolute path,
- * and the signed metrics storage pin. Hashes and times are kept as they were, so nothing is
- * re-baselined. A pin that names somewhere other than under the old root is left as it was and
- * reported. Never throws; the caller's stamp and registry move have already landed.
+ * the records that name the old path to the new one: the file baseline keyed by absolute path,
+ * the signed metrics storage pin, and the signed migration receipt. Hashes and times are kept as
+ * they were, so nothing is re-baselined. A pin that names somewhere other than under the old root,
+ * or a receipt written for another root, is left as it was and reported. Never throws; the caller's
+ * stamp and registry move have already landed.
  *
- * @returns {{cache: object, pins: {folder: string, status: string}[]}}
+ * @returns {{cache: object, pins: {folder: string, status: string}[], receipts: {folder: string, status: string}[]}}
  */
 export function repointMovedState({ root, harness, coreDir = defaultCoreDir(), oldPath }) {
-  const result = { cache: { status: 'nothing-to-do', count: 0 }, pins: [] };
+  const result = { cache: { status: 'nothing-to-do', count: 0 }, pins: [], receipts: [] };
   if (typeof oldPath !== 'string' || !isAbsolute(oldPath)) return result;
   const real = canonical(root);
   const olds = oldRootSpellings(oldPath).filter((o) => o !== real);
@@ -806,6 +871,13 @@ export function repointMovedState({ root, harness, coreDir = defaultCoreDir(), o
     }
   } catch (e) {
     result.pins.push({ folder: null, status: `held: ${String(e?.code || e?.message || e)}` });
+  }
+  try {
+    for (const { kind, dir } of stateLocations({ root: real, harness, coreDir }).locations) {
+      if (kind === 'project') result.receipts.push(carryMovedReceipt({ real, harness, dir, olds, coreDir }));
+    }
+  } catch (e) {
+    result.receipts.push({ folder: null, status: 'held', reason: String(e?.code || e?.message || e) });
   }
   return result;
 }

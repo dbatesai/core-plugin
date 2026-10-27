@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { registerProject, touchProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
+import { writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { acquireFileLock, releaseFileLock } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs', import.meta.url));
 const H = 'claude-code';
@@ -47,7 +49,7 @@ function filesUnder(dir) {
   return out;
 }
 
-test('a migrated project that is then moved still passes startup\'s apply and drift check at its new path', { todo: 'card 235: receipt root binding' }, () => {
+test('a migrated project that is then moved still passes startup\'s apply and drift check at its new path', () => {
   const s = sandbox();
   try {
     const p = s.mk('Projects', 'Old');
@@ -84,6 +86,70 @@ test('a migrated project that is then moved still passes startup\'s apply and dr
     assert.equal(drift.status, 0, `drift check after a move exits 0\n${drift.stdout}${drift.stderr}`);
     assert.ok(['unchanged', 'brought-in'].includes(drift.json.status), drift.stdout);
   } finally { s.cleanup(); }
+});
+
+/** A project registered and touched at `old`, holding a signed receipt with `root`, then moved to `now`. */
+function movedWithReceipt(s, root) {
+  const old = s.mk('Projects', 'Old');
+  registerProject(s.coreDir, old);
+  touchProject(s.coreDir, { root: old, harness: H });
+  const state = join(old, '_core', H);
+  const body = JSON.stringify({ complete: true, migrated_at: '2026-10-01T00:00:00.000Z', harness: H, root: root(old), live: 'legacy', superseded: [],
+    files: [{ from: join(s.coreDir, 'workspaces', 'legacy', 'notes.md'), to: join(state, 'notes.md'), sha256: '0'.repeat(64), length: 1 }] }, null, 2) + '\n';
+  writeSignedFile({ dir: state, name: RECEIPT, body, coreDir: s.coreDir });
+  writeFileSync(join(state, 'notes.md'), 'n\n');
+  const now = join(s.base, 'Projects', 'New');
+  renameSync(old, now);
+  registerProject(s.coreDir, now);
+  const nowState = join(now, '_core', H);
+  const bytes = () => [readFileSync(join(nowState, RECEIPT), 'utf8'), readFileSync(join(nowState, `${RECEIPT}.mac`), 'utf8')];
+  return { old, now, nowState, bytes };
+}
+
+test('a moved project whose receipt names a third folder keeps that receipt exactly as it was', () => {
+  const s = sandbox();
+  try {
+    const third = s.mk('Projects', 'Third');
+    const m = movedWithReceipt(s, () => third);
+    const before = m.bytes();
+    const touched = touchProject(s.coreDir, { root: m.now, harness: H });
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'left-root-mismatch' }]);
+    assert.deepEqual(m.bytes(), before, 'receipt and its MAC are untouched');
+    assert.equal(JSON.parse(before[0]).root, third);
+  } finally { s.cleanup(); }
+});
+
+test('a moved project\'s own receipt is carried to the new folder, and left intact and reported when the close lock is held', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const before = m.bytes();
+    const lockFile = join(m.now, '_memories', '_close.lock');
+    const lock = acquireFileLock(lockFile, { extra: { session_id: 'test-close' } });
+    assert.ok(lock.ok, 'fixture: the close lock is held');
+    let touched;
+    try { touched = touchProject(s.coreDir, { root: m.now, harness: H }); }
+    finally { releaseFileLock(lockFile, lock.nonce); }
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.equal(ev.repointed.receipts.length, 1);
+    assert.equal(ev.repointed.receipts[0].status, 'held', JSON.stringify(ev.repointed.receipts));
+    assert.match(ev.repointed.receipts[0].reason, /^lock-/);
+    assert.deepEqual(m.bytes(), before, 'a carry that cannot take the lock leaves the receipt as it was');
+  } finally { s.cleanup(); }
+  const s2 = sandbox();
+  try {
+    const m = movedWithReceipt(s2, (old) => old);
+    const touched = touchProject(s2.coreDir, { root: m.now, harness: H });
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'repointed', count: 1 }]);
+    const r = JSON.parse(m.bytes()[0]);
+    assert.equal(r.root, m.now);
+    assert.equal(r.files[0].to, join(m.nowState, 'notes.md'));
+    assert.equal(r.files[0].from, join(s2.coreDir, 'workspaces', 'legacy', 'notes.md'), 'sources are not rewritten');
+  } finally { s2.cleanup(); }
 });
 
 test('a signed receipt with an empty file list, copied into another project, is refused and imports nothing', { todo: 'card 235: receipt root binding' }, () => {
