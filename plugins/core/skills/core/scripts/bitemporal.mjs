@@ -93,6 +93,19 @@ export function malformedValidity(u) {
   return out;
 }
 
+/**
+ * The calendar day a validity value names, as YYYY-MM-DD, or null when it names
+ * no real day. A full datetime (a `created` such as `2026-10-18T23:30:00-07:00`)
+ * gives the day written in its own offset — the leading date, the same day
+ * parseIsoDate reads — never the UTC day, which can be the day after. Every
+ * bound the writer stamps comes through here, so a stamp is always a value
+ * isValidValidityDate accepts.
+ */
+export function validityDay(value) {
+  const m = String(value ?? '').trim().match(/^(\d{4}-\d{2}-\d{2})(?:$|[T ])/);
+  return m && isValidValidityDate(m[1]) ? m[1] : null;
+}
+
 /** UTC midnight of the current calendar day — the day validity is judged on. */
 export function todayUtc(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -140,7 +153,9 @@ export function classifySupersessions(units) {
       const bId = basename(b.path, '.md');
       if (unreadable.has(bId) || unreadable.has(targetId)) continue;
       const aStatus = String(a.fm.status || 'active').toLowerCase();
-      const bValid = effectiveValidity(b).t_valid;
+      // The superseder's t_valid falls back to `created`, which may be a full
+      // datetime; the stamp is its calendar day (see validityDay).
+      const bValid = validityDay(effectiveValidity(b).t_valid);
 
       if (!TERMINAL_STATUSES.has(aStatus)) {
         loose.push({ target: targetId, superseded_by: bId, target_status: aStatus });
@@ -169,7 +184,7 @@ export function classifySupersessions(units) {
   const conflicts = [];
   for (const c of confirmedByTarget.values()) {
     const a = byId.get(c.target);
-    const aValid = a ? effectiveValidity(a).t_valid : null;
+    const aValid = a ? validityDay(effectiveValidity(a).t_valid) : null;
     if (aValid && c.t_invalid < aValid) {
       conflicts.push({ target: c.target, superseded_by: c.superseders.join(', '), t_invalid_candidate: c.t_invalid, t_valid: aValid });
     } else {

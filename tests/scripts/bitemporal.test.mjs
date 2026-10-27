@@ -385,3 +385,59 @@ test('the validity day is the UTC calendar day', async () => {
     if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
   }
 });
+
+// ============================================================
+// a superseder whose `created` is a full datetime — the stamp is a calendar day
+// ============================================================
+
+test('--stamp --apply writes the calendar day of a datetime created, in its own offset, and the next --stamp reports nothing malformed', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const { checkSchema } = await import('../../plugins/core/skills/core/scripts/check-units.mjs');
+  const cli = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/bitemporal.mjs', import.meta.url));
+  // 23:30 at -07:00 is 06:30 UTC on 10-19: the day written in the value is 10-18.
+  withStore({
+    'dc-old.md': unitFile({ id: 'dc-old', status: 'retired', created: '2026-10-01' }),
+    'dc-new.md': unitFile({ id: 'dc-new', status: 'active', created: '2026-10-18T23:30:00-07:00', supersedes: 'dc-old' }),
+  }, (mem) => {
+    const project = join(mem, '..');
+    const applied = execFileSync(process.execPath, [cli, project, '--stamp', '--apply'], { encoding: 'utf8' });
+    assert.match(applied, /dc-old\.t_invalid = 2026-10-18 /);
+    assert.match(applied, /wrote 1 unit\(s\)/);
+    assert.match(readFileSync(join(mem, 'dc-old.md'), 'utf8'), /^t_invalid: 2026-10-18$/m, 'the stored bound is the calendar day');
+
+    const check = execFileSync(process.execPath, [cli, project, '--stamp'], { encoding: 'utf8' });
+    assert.doesNotMatch(check, /not a calendar day|unreadable validity bound/, 'the checker accepts what the writer wrote');
+    assert.match(check, /no supersession stamps needed/);
+
+    const units = iterActiveUnits(mem);
+    assert.deepEqual(classifySupersessions(units).malformed, []);
+    const m = storageMetrics(units, new Date(Date.UTC(2026, 9, 27)));
+    assert.equal(m.malformed_validity, 0);
+    assert.equal(m.invalidated, 1, 'the stamped unit counts as invalidated, not UNKNOWN');
+    const report = [];
+    checkSchema(units, mem, report);
+    assert.deepEqual(report.filter((r) => r.check === 't_invalid-format'), [], 'check-units accepts the stamp');
+  });
+});
+
+test('validityDay takes the leading day of a datetime and refuses a day that does not exist', async () => {
+  const { validityDay } = await import('../../plugins/core/skills/core/scripts/bitemporal.mjs');
+  assert.equal(validityDay('2026-10-18T23:30:00-07:00'), '2026-10-18');
+  assert.equal(validityDay('2026-10-18T00:30:00+14:00'), '2026-10-18');
+  assert.equal(validityDay('2026-10-18'), '2026-10-18');
+  assert.equal(validityDay('2026-02-30T10:00:00Z'), null);
+  assert.equal(validityDay('2026-10-18garbage'), null);
+  assert.equal(validityDay(null), null);
+});
+
+test('a same-day superseder of a target with a datetime created is stamped, not reported as a conflict', () => {
+  const units = [
+    unit({ id: 'dc-old', status: 'retired', created: '2026-10-18T09:00:00-07:00' }),
+    unit({ id: 'dc-new', status: 'active', created: '2026-10-18', edges: [{ type: 'supersedes', target: 'dc-old' }] }),
+  ];
+  const { confirmed, conflicts } = classifySupersessions(units);
+  assert.deepEqual(conflicts, []);
+  assert.equal(confirmed.length, 1);
+  assert.equal(confirmed[0].t_invalid, '2026-10-18');
+});
