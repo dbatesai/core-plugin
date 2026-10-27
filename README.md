@@ -1,5 +1,7 @@
 # CORE
 
+[![CI](https://github.com/dbatesai/core-plugin/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dbatesai/core-plugin/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/v/tag/dbatesai/core-plugin?sort=semver&label=version)](CHANGELOG.md)
+
 An AI agent that knows your whole project — not just the file in front of it — and remembers it from one session to the next.
 
 I built this because I kept hitting the same wall. The AI assistants I worked with were good at the task in front of them and lost on the project around them. Every session started cold. A decision I made on Tuesday didn't exist on Thursday. The conversation moved fast and the project stood still.
@@ -18,11 +20,15 @@ In a session, that adds up to three things:
 - It writes down what matters as you talk and prunes the rest, so the memory stays current instead of piling up.
 - It surfaces the decisions and risks you should be aware of, and challenges you when you're overconfident.
 
+## Compared with CLAUDE.md and built-in memory
+
+A `CLAUDE.md` or `AGENTS.md` file is instructions you write and keep current by hand, and it loads in full every session. The memory built into Claude Code and Codex saves notes as you work and loads an index at the start. CORE runs on top of both. It keeps one fact per file with typed links between facts, pulls in only the facts that fit what you're asking, tracks decisions, risks and open questions as their own kinds of fact, and gives you `PROJECT.md` as the page you edit. The cost is more moving parts. If one instructions file still covers your project, you don't need CORE.
+
 ## When it pushes back hard
 
 For the calls where being wrong is expensive — an architecture decision, a tricky judgment, public copy — CORE can run a few agents against each other: one drafts an answer, another writes down what it expects to find *before* it reads the draft, sometimes a third watches for the agents agreeing just to agree. It costs tokens and wall-clock time, and earns that back on the decisions that matter. It's one tool CORE reaches for, not what CORE is.
 
-The reason it works this way: a single AI critic caves to social pressure and reverses itself about 85% of the time, and agents kept apart produce noticeably more varied analysis than agents who've already read each other's work. Quiet agreement is the failure this setup exists to catch.
+The reason it works this way: a single AI critic tends to cave when pushed and reverse itself, and agents kept apart produce noticeably more varied analysis than agents who've already read each other's work. Quiet agreement is the failure this setup exists to catch.
 
 ## Install
 
@@ -60,3 +66,5 @@ Type `/core` to start — it loads your project and orients before anything else
 A personal tool, released in the open. It stands on its own, and I use CORE on CORE to keep building it.
 
 CORE measures how well it recognizes your project across sessions. That capture runs by default and writes only to local disk — nothing leaves your machine. Opt out per workspace (`metrics_enabled: false`) or with `CORE_METRICS_ENABLED=0`.
+
+What it shows so far, from one of my own projects over about 35 hours (2026-10-26 to 27): a judge graded 11 turns after the fact. In 8 the right stored fact came up, 3 asked about something that hadn't been stored yet, and none missed a fact that was stored. That is one project and a small sample, and nothing yet compares sessions with memory on and off, so it shows retrieval working, not time saved.
