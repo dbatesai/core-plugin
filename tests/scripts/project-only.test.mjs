@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { assertHarnessName } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { readPendingManifest, projectOnlyContext, PROJECT_ONLY_DIR } from '../../plugins/core/skills/core/scripts/project-only.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const CORE = join(REPO, 'plugins/core/skills/core');
@@ -162,42 +163,44 @@ test('only restrictions in the unverified manifest take effect; an unreadable on
 });
 
 // A folder can arrive with CORE's own paths as links to somewhere else; nothing may follow them out.
-test('a linked .core, pending folder, manifest or capture file is refused, and nothing is written or read outside', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('a linked .core, pending folder, manifest or capture file is refused, and nothing is written or read outside', async (t) => {
   const run = (root, ...args) => confined(root, [join(CORE, 'scripts/project-only.mjs'), ...args, '--root', root]);
-  for (const linkAt of ['_core', '_core/_project-only', '_core/_project-only/claude-code']) {
+  await t.test('a linked .core, pending folder or harness folder', () => {
+    for (const linkAt of ['_core', '_core/_project-only', '_core/_project-only/claude-code']) {
+      const p = project();
+      try {
+        const elsewhere = join(p.base, 'elsewhere'); mkdirSync(elsewhere);
+        mkdirSync(dirname(join(p.root, linkAt)), { recursive: true });
+        linkFolder(elsewhere, join(p.root, linkAt));
+        const r = run(p.root, 'startup');
+        assert.equal(JSON.parse(r.stdout).state, 'refused-link', linkAt);
+        assert.deepEqual(readdirSync(elsewhere), [], `nothing written through ${linkAt}`);
+        if (linkAt !== '.core') assert.equal(existsSync(join(p.root, '_core', '.gitignore')), false, `a refusal at ${linkAt} creates nothing first`);
+      } finally { p.cleanup(); }
+    }
+  });
+  await t.test('a linked manifest or capture file', { skip: FILE_LINK_SKIP }, () => {
     const p = project();
     try {
-      const elsewhere = join(p.base, 'elsewhere'); mkdirSync(elsewhere);
-      mkdirSync(dirname(join(p.root, linkAt)), { recursive: true });
-      symlinkSync(elsewhere, join(p.root, linkAt));
-      const r = run(p.root, 'startup');
-      assert.equal(JSON.parse(r.stdout).state, 'refused-link', linkAt);
-      assert.deepEqual(readdirSync(elsewhere), [], `nothing written through ${linkAt}`);
-      if (linkAt !== '.core') assert.equal(existsSync(join(p.root, '_core', '.gitignore')), false, `a refusal at ${linkAt} creates nothing first`);
+      const secret = join(p.base, 'secret.json'); writeFileSync(secret, JSON.stringify({ agent_name: 'Leaked', turn_capture: true }));
+      const dir = join(p.root, '_core', PROJECT_ONLY_DIR, 'claude-code'); mkdirSync(dir, { recursive: true });
+      linkFile(secret, join(dir, 'manifest.json'));
+      const s = JSON.parse(run(p.root, 'status').stdout);
+      assert.deepEqual([s.manifest, s.capture], ['refused-link', 'held'], 'a linked manifest is not read, and capture holds');
+      const tc = join(p.root, '_metrics', 'turn-capture'); mkdirSync(tc, { recursive: true });
+      const outsideRows = join(p.base, 'rows.jsonl'); writeFileSync(outsideRows, '{"x":1}\n{"x":2}\n{"x":3}\n');
+      linkFile(outsideRows, join(tc, '2026-10-04.jsonl'));
+      const c = JSON.parse(run(p.root, 'capture-status').stdout);
+      assert.deepEqual([c.in_project.state, c.in_project.rows, c.outside_history], ['refused-link', undefined, 'unknown'], 'a linked capture file refuses the count rather than reading through it');
     } finally { p.cleanup(); }
-  }
-  const p = project();
-  try {
-    const secret = join(p.base, 'secret.json'); writeFileSync(secret, JSON.stringify({ agent_name: 'Leaked', turn_capture: true }));
-    const dir = join(p.root, '_core', PROJECT_ONLY_DIR, 'claude-code'); mkdirSync(dir, { recursive: true });
-    symlinkSync(secret, join(dir, 'manifest.json'));
-    const s = JSON.parse(run(p.root, 'status').stdout);
-    assert.deepEqual([s.manifest, s.capture], ['refused-link', 'held'], 'a linked manifest is not read, and capture holds');
-    const tc = join(p.root, '_metrics', 'turn-capture'); mkdirSync(tc, { recursive: true });
-    const outsideRows = join(p.base, 'rows.jsonl'); writeFileSync(outsideRows, '{"x":1}\n{"x":2}\n{"x":3}\n');
-    symlinkSync(outsideRows, join(tc, '2026-10-04.jsonl'));
-    const c = JSON.parse(run(p.root, 'capture-status').stdout);
-    assert.deepEqual([c.in_project.state, c.in_project.rows, c.outside_history], ['refused-link', undefined, 'unknown'], 'a linked capture file refuses the count rather than reading through it');
-  } finally { p.cleanup(); }
+  });
 });
 
-test('a link to another place inside the folder is refused too, so pending writes never land in the memory store', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('a link to another place inside the folder is refused too, so pending writes never land in the memory store', () => {
   const p = project();
   try {
     mkdirSync(join(p.root, '_core'), { recursive: true });
-    symlinkSync(join(p.root, '_memories'), join(p.root, '_core', PROJECT_ONLY_DIR));
+    linkFolder(join(p.root, '_memories'), join(p.root, '_core', PROJECT_ONLY_DIR));
     const before = tree(join(p.root, '_memories'));
     const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), 'startup', '--root', p.root]);
     assert.equal(JSON.parse(r.stdout).state, 'refused-link');
@@ -286,15 +289,15 @@ test('a close marker can record, certify or release only while its begin still o
   } finally { p.cleanup(); }
 });
 
-test('the close folder chain is checked again on every later call', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
-  const { symlinkSync, renameSync } = await import('node:fs');
+test('the close folder chain is checked again on every later call', async () => {
+  const { renameSync } = await import('node:fs');
   const p = project();
   try {
     const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
     assert.equal(po('finalize-begin', '--harness', 'claude-code', '--session', 's-1').status, 'ok');
     const close = join(p.root, '_core', PROJECT_ONLY_DIR, 'claude-code', 'close');
     const moved = join(p.base, 'moved-close'); renameSync(close, moved);
-    symlinkSync(moved, close);   // same bytes, now reached through a link
+    linkFolder(moved, close);   // same bytes, now reached through a link
     assert.equal(po('finalize-record', '--harness', 'claude-code', '--session', 's-1', '--op', 'material-capture', '--status', 'done').state, 'refused-link');
     assert.equal(JSON.parse(readFileSync(join(moved, 'marker.json'), 'utf8')).ops['material-capture'], undefined, 'nothing was written through the link');
   } finally { p.cleanup(); }
@@ -313,8 +316,8 @@ test('installed-mode harness discovery never lists the project-only folder', asy
 });
 
 // _memories replaced, between calls, by a link to an outside copy of the lock.
-test('a _memories folder swapped for a link between finalize calls is refused; nothing outside is read or renamed', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
-  const { symlinkSync, renameSync, copyFileSync } = await import('node:fs');
+test('a _memories folder swapped for a link between finalize calls is refused; nothing outside is read or renamed', async () => {
+  const { renameSync, copyFileSync } = await import('node:fs');
   const p = project();
   try {
     const po = (...a) => confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]);
@@ -326,7 +329,7 @@ test('a _memories folder swapped for a link between finalize calls is refused; n
     writeFileSync(join(outsideDir, 'sentinel'), 'keep\n');
     const outsideBefore = tree(outsideDir);
     const aside = join(p.base, 'memories-aside'); renameSync(mem, aside);
-    symlinkSync(outsideDir, mem);
+    linkFolder(outsideDir, mem);
     for (const step of [['finalize-finish', '--harness', 'claude-code'], ['finalize-record', '--harness', 'claude-code', '--op', 'session-summary', '--status', 'done'], ['finalize-certify', '--harness', 'claude-code']]) {
       const r = po(step[0], '--session', 's1', ...step.slice(1));
       assert.equal(JSON.parse(r.stdout).state, 'refused-link', step[0]);
@@ -337,8 +340,8 @@ test('a _memories folder swapped for a link between finalize calls is refused; n
   } finally { p.cleanup(); }
 });
 
-test('a lock generation file that is a link is refused before the lock is read', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
-  const { symlinkSync, renameSync } = await import('node:fs');
+test('a lock generation file that is a link is refused before the lock is read', { skip: FILE_LINK_SKIP }, async () => {
+  const { renameSync } = await import('node:fs');
   const p = project();
   try {
     const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
@@ -346,7 +349,7 @@ test('a lock generation file that is a link is refused before the lock is read',
     const mem = join(p.root, '_memories');
     const gen = readdirSync(mem).find((n) => /^_close\.lock\.g\d+$/.test(n));
     const outsideFile = join(p.base, 'outside-gen'); renameSync(join(mem, gen), outsideFile);
-    symlinkSync(outsideFile, join(mem, gen));
+    linkFile(outsideFile, join(mem, gen));
     const before = readFileSync(outsideFile);
     assert.equal(po('finalize-finish', '--harness', 'claude-code', '--session', 's1').state, 'refused-link');
     assert.ok(readFileSync(outsideFile).equals(before) && existsSync(outsideFile));
@@ -415,15 +418,14 @@ test('pickup-archive refuses while a project-only close has begun and not certif
   } finally { p.cleanup(); }
 });
 
-test('pickup refuses a pending folder that is a link out of the project, and archive moves nothing', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('pickup refuses a pending folder that is a link out of the project, and archive moves nothing', () => {
   const p = project();
   const outsideDir = join(p.base, 'elsewhere');
   try {
     mkdirSync(outsideDir);
     writeFileSync(join(outsideDir, 'manifest.json'), JSON.stringify({ agent_name: 'Planted' }));
     mkdirSync(join(p.root, '_core', PROJECT_ONLY_DIR), { recursive: true });
-    symlinkSync(outsideDir, join(p.root, '_core', PROJECT_ONLY_DIR, 'claude-code'));
+    linkFolder(outsideDir, join(p.root, '_core', PROJECT_ONLY_DIR, 'claude-code'));
     const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
     assert.equal(po('pickup', '--harness', 'claude-code').state, 'refused-link');
     assert.equal(po('pickup-archive', '--harness', 'claude-code').state, 'refused-link');
@@ -494,66 +496,72 @@ test('pickup returns only well-formed values from the unverified pending files: 
 
 // ---------- explicit retrieval stays inside the folder ----------
 
-test('explicit retrieval: a regular store answers; a store or cache folder that is a link out of the project is refused before any outside access, and refusal is not an empty result', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('explicit retrieval: a regular store answers; a store or cache folder that is a link out of the project is refused before any outside access, and refusal is not an empty result', async (t) => {
   const RC = join(CORE, 'scripts/retrieve-context.mjs');
   const planted = (base) => { const d = join(base, 'outside-store'); mkdirSync(d); writeFileSync(join(d, 'dc-9-planted.md'), '---\nid: dc-9-planted\ntype: decision\nstatus: active\n---\nSynthetic widget colour is purple.\n'); return d; };
-  for (const run of [(root, a) => confined(root, a), (root, a) => { const r = spawnSync(process.execPath, a, { encoding: 'utf8', cwd: root }); return { ...r, violations: [] }; }]) {
-    // regular store: useful retrieval preserved
-    const ok = project();
-    try {
-      const r = run(ok.root, [RC, ok.root, 'what colour are widgets']);
-      assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stdout, /dc-1-widgets/);
-      assert.deepEqual(r.violations, []);
-      const empty = run(ok.root, [RC, ok.root, 'zzzqqq nothing matches this']);
-      assert.equal(empty.status, 0, 'a legitimate empty retrieval exits 0');
-    } finally { ok.cleanup(); }
-    // _memories is a link to an outside directory
-    const a = project();
-    try {
-      const out = planted(a.base);
-      rmSync(join(a.root, '_memories'), { recursive: true });
-      symlinkSync(out, join(a.root, '_memories'));
-      const r = run(a.root, [RC, a.root, 'synthetic widget colour']);
-      assert.equal(r.status, 3, 'refused, with its own exit code');
-      assert.match(r.stderr, /refused: store refused/);
-      assert.doesNotMatch(r.stdout, /dc-9-planted/);
-      assert.deepEqual(r.violations, [], 'refused before any outside access was attempted');
-    } finally { a.cleanup(); }
-    // _memories is real, its _lib is a link to an outside directory
-    const b = project();
-    try {
-      const out = join(b.base, 'outside-lib'); mkdirSync(out);
-      symlinkSync(out, join(b.root, '_memories', '_lib'));
-      const r = run(b.root, [RC, b.root, 'what colour are widgets']);
-      assert.equal(r.status, 3);
-      assert.deepEqual(r.violations, []);
-      assert.deepEqual(readdirSync(out), [], 'nothing was written outside');
-    } finally { b.cleanup(); }
-    // a unit file, and a subfolder, that are links out: refused like a linked store, never read
-    const d2 = project();
-    try {
-      const out = planted(d2.base);
-      symlinkSync(join(out, 'dc-9-planted.md'), join(d2.root, '_memories', 'dc-9-planted.md'));
-      symlinkSync(out, join(d2.root, '_memories', 'observations'));
-      const r = run(d2.root, [RC, d2.root, 'synthetic widget colour purple']);
-      assert.equal(r.status, 3);
-      assert.match(r.stderr, /refused: store refused: .*_memories\/(dc-9-planted\.md|observations) is a link/);
-      assert.doesNotMatch(r.stdout, /dc-9-planted/);
-      assert.deepEqual(r.violations, []);
-    } finally { d2.cleanup(); }
-    // a file inside a real _lib is a link out
-    const c = project();
-    try {
-      const target = join(c.base, 'outside-index.json'); writeFileSync(target, '{}');
-      mkdirSync(join(c.root, '_memories', '_lib'));
-      symlinkSync(target, join(c.root, '_memories', '_lib', 'unit-summaries.json'));
-      const r = run(c.root, [RC, c.root, 'what colour are widgets']);
-      assert.equal(r.status, 3);
-      assert.deepEqual(r.violations, []);
-      assert.equal(readFileSync(target, 'utf8'), '{}', 'the outside file was not overwritten');
-    } finally { c.cleanup(); }
+  const runners = [['confined', (root, a) => confined(root, a)], ['unconfined', (root, a) => { const r = spawnSync(process.execPath, a, { encoding: 'utf8', cwd: root }); return { ...r, violations: [] }; }]];
+  for (const [kind, run] of runners) {
+    await t.test(`${kind}: a regular store answers, and an empty result exits 0`, () => {
+      const ok = project();
+      try {
+        const r = run(ok.root, [RC, ok.root, 'what colour are widgets']);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /dc-1-widgets/);
+        assert.deepEqual(r.violations, []);
+        const empty = run(ok.root, [RC, ok.root, 'zzzqqq nothing matches this']);
+        assert.equal(empty.status, 0, 'a legitimate empty retrieval exits 0');
+      } finally { ok.cleanup(); }
+    });
+    await t.test(`${kind}: _memories is a link to an outside folder`, () => {
+      const a = project();
+      try {
+        const out = planted(a.base);
+        rmSync(join(a.root, '_memories'), { recursive: true });
+        linkFolder(out, join(a.root, '_memories'));
+        const r = run(a.root, [RC, a.root, 'synthetic widget colour']);
+        assert.equal(r.status, 3, 'refused, with its own exit code');
+        assert.match(r.stderr, /refused: store refused/);
+        assert.doesNotMatch(r.stdout, /dc-9-planted/);
+        assert.deepEqual(r.violations, [], 'refused before any outside access was attempted');
+      } finally { a.cleanup(); }
+    });
+    await t.test(`${kind}: _memories is real and its _lib is a link to an outside folder`, () => {
+      const b = project();
+      try {
+        const out = join(b.base, 'outside-lib'); mkdirSync(out);
+        linkFolder(out, join(b.root, '_memories', '_lib'));
+        const r = run(b.root, [RC, b.root, 'what colour are widgets']);
+        assert.equal(r.status, 3);
+        assert.deepEqual(r.violations, []);
+        assert.deepEqual(readdirSync(out), [], 'nothing was written outside');
+      } finally { b.cleanup(); }
+    });
+    // A unit file, or a subfolder, that is a link out: refused like a linked store, never read.
+    for (const [shape, plant] of [['folder', (root, out) => linkFolder(out, join(root, '_memories', 'observations'))], ['file', (root, out) => linkFile(join(out, 'dc-9-planted.md'), join(root, '_memories', 'dc-9-planted.md'))]]) {
+      await t.test(`${kind}: a ${shape} under _memories is a link out`, { skip: shape === 'file' && FILE_LINK_SKIP }, () => {
+        const d2 = project();
+        try {
+          plant(d2.root, planted(d2.base));
+          const r = run(d2.root, [RC, d2.root, 'synthetic widget colour purple']);
+          assert.equal(r.status, 3);
+          assert.match(r.stderr, /refused: store refused: .*_memories[\\/](dc-9-planted\.md|observations) is a link/);
+          assert.doesNotMatch(r.stdout, /dc-9-planted/);
+          assert.deepEqual(r.violations, []);
+        } finally { d2.cleanup(); }
+      });
+    }
+    await t.test(`${kind}: a file inside a real _lib is a link out`, { skip: FILE_LINK_SKIP }, () => {
+      const c = project();
+      try {
+        const target = join(c.base, 'outside-index.json'); writeFileSync(target, '{}');
+        mkdirSync(join(c.root, '_memories', '_lib'));
+        linkFile(target, join(c.root, '_memories', '_lib', 'unit-summaries.json'));
+        const r = run(c.root, [RC, c.root, 'what colour are widgets']);
+        assert.equal(r.status, 3);
+        assert.deepEqual(r.violations, []);
+        assert.equal(readFileSync(target, 'utf8'), '{}', 'the outside file was not overwritten');
+      } finally { c.cleanup(); }
+    });
   }
 });
 
@@ -680,43 +688,45 @@ test('purge in project-only mode: a dry run changes nothing; --apply removes the
   } finally { p.cleanup(); }
 });
 
-test('purge in project-only mode never follows a link: a linked _metrics is refused, a linked target is left alone and named, and a link inside the capture folder is removed without touching what it points at', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('purge in project-only mode never follows a link: a linked _metrics is refused, a linked target is left alone and named, and a link inside the capture folder is removed without touching what it points at', async (t) => {
   const po = (root, ...a) => { const r = confined(root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', root]); return { ...JSON.parse(r.stdout), violations: r.violations }; };
-  // _metrics itself is a link out
-  const a = project();
-  try {
-    const out = join(a.base, 'outside-metrics'); mkdirSync(join(out, 'turn-capture'), { recursive: true }); writeFileSync(join(out, 'turn-capture', '2026-10-01.jsonl'), 'x\n');
-    symlinkSync(out, join(a.root, '_metrics'));
-    const r = po(a.root, 'purge', '--apply');
-    assert.deepEqual([r.status, r.state], ['refused', 'refused-link']);
-    assert.deepEqual(r.violations, []);
-    assert.ok(existsSync(join(out, 'turn-capture', '2026-10-01.jsonl')), 'nothing outside was deleted');
-  } finally { a.cleanup(); }
-  // the capture folder is a link out; the health file is real
-  const b = project();
-  try {
-    const out = join(b.base, 'outside-capture'); mkdirSync(out); writeFileSync(join(out, '2026-10-01.jsonl'), 'x\n');
-    mkdirSync(join(b.root, '_metrics')); symlinkSync(out, join(b.root, '_metrics', 'turn-capture'));
-    writeFileSync(join(b.root, '_metrics', 'turn-capture-health.json'), '{}');
-    const r = po(b.root, 'purge', '--apply');
-    assert.equal(r.outcome, 'partly-purged-in-project');
-    assert.deepEqual(r.removed, ['_metrics/turn-capture-health.json']);
-    assert.deepEqual(r.refused, [{ path: '_metrics/turn-capture', reason: 'link-or-wrong-type' }]);
-    assert.deepEqual(r.violations, []);
-    assert.ok(existsSync(join(out, '2026-10-01.jsonl')));
-  } finally { b.cleanup(); }
-  // a link inside the real capture folder
-  const c = project();
-  try {
-    const target = join(c.base, 'outside-file.jsonl'); writeFileSync(target, 'keep\n');
-    mkdirSync(join(c.root, '_metrics', 'turn-capture'), { recursive: true });
-    symlinkSync(target, join(c.root, '_metrics', 'turn-capture', '2026-10-02.jsonl'));
-    const r = po(c.root, 'purge', '--apply');
-    assert.equal(r.outcome, 'purged-in-project');
-    assert.deepEqual(r.violations, []);
-    assert.equal(readFileSync(target, 'utf8'), 'keep\n', 'the file the link pointed at is untouched');
-  } finally { c.cleanup(); }
+  await t.test('_metrics itself is a link out', () => {
+    const a = project();
+    try {
+      const out = join(a.base, 'outside-metrics'); mkdirSync(join(out, 'turn-capture'), { recursive: true }); writeFileSync(join(out, 'turn-capture', '2026-10-01.jsonl'), 'x\n');
+      linkFolder(out, join(a.root, '_metrics'));
+      const r = po(a.root, 'purge', '--apply');
+      assert.deepEqual([r.status, r.state], ['refused', 'refused-link']);
+      assert.deepEqual(r.violations, []);
+      assert.ok(existsSync(join(out, 'turn-capture', '2026-10-01.jsonl')), 'nothing outside was deleted');
+    } finally { a.cleanup(); }
+  });
+  await t.test('the capture folder is a link out; the health file is real', () => {
+    const b = project();
+    try {
+      const out = join(b.base, 'outside-capture'); mkdirSync(out); writeFileSync(join(out, '2026-10-01.jsonl'), 'x\n');
+      mkdirSync(join(b.root, '_metrics')); linkFolder(out, join(b.root, '_metrics', 'turn-capture'));
+      writeFileSync(join(b.root, '_metrics', 'turn-capture-health.json'), '{}');
+      const r = po(b.root, 'purge', '--apply');
+      assert.equal(r.outcome, 'partly-purged-in-project');
+      assert.deepEqual(r.removed, ['_metrics/turn-capture-health.json']);
+      assert.deepEqual(r.refused, [{ path: '_metrics/turn-capture', reason: 'link-or-wrong-type' }]);
+      assert.deepEqual(r.violations, []);
+      assert.ok(existsSync(join(out, '2026-10-01.jsonl')));
+    } finally { b.cleanup(); }
+  });
+  await t.test('a file link inside the real capture folder', { skip: FILE_LINK_SKIP }, () => {
+    const c = project();
+    try {
+      const target = join(c.base, 'outside-file.jsonl'); writeFileSync(target, 'keep\n');
+      mkdirSync(join(c.root, '_metrics', 'turn-capture'), { recursive: true });
+      linkFile(target, join(c.root, '_metrics', 'turn-capture', '2026-10-02.jsonl'));
+      const r = po(c.root, 'purge', '--apply');
+      assert.equal(r.outcome, 'purged-in-project');
+      assert.deepEqual(r.violations, []);
+      assert.equal(readFileSync(target, 'utf8'), 'keep\n', 'the file the link pointed at is untouched');
+    } finally { c.cleanup(); }
+  });
 });
 
 // ---------- memory processing, the script half ----------
@@ -748,37 +758,38 @@ test('process-memory in project-only mode: a dry run writes no index; --apply ch
   } finally { p.cleanup(); }
 });
 
-test('process-memory in project-only mode refuses a store, cache folder, lock file or PROJECT.md that is a link out of the folder, and writes nothing outside', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('process-memory in project-only mode refuses a store, cache folder, lock file or PROJECT.md that is a link out of the folder, and writes nothing outside', async (t) => {
   const po = (root) => { const r = confined(root, [join(CORE, 'scripts/project-only.mjs'), 'process-memory', '--apply', '--root', root]); return { ...JSON.parse(r.stdout), violations: r.violations }; };
   const cases = {
-    'linked _memories': (p, out) => { rmSync(join(p.root, '_memories'), { recursive: true }); symlinkSync(out, join(p.root, '_memories')); },
-    'linked _lib': (p, out) => { symlinkSync(out, join(p.root, '_memories', '_lib')); },
-    'linked lock file': (p, out) => { writeFileSync(join(out, 'l'), ''); symlinkSync(join(out, 'l'), join(p.root, '_memories', '.decorate-graph.lock')); },
-    'linked index': (p, out) => { writeFileSync(join(out, 'i.md'), 'outside'); symlinkSync(join(out, 'i.md'), join(p.root, '_memories', 'INDEX-decisions.md')); },
-    'linked unit file': (p, out) => { symlinkSync(join(out, 'dc-9-planted.md'), join(p.root, '_memories', 'dc-9-planted.md')); },
-    'linked subfolder': (p, out) => { symlinkSync(out, join(p.root, '_memories', 'observations')); },
-    'linked file in a nested folder': (p, out) => { mkdirSync(join(p.root, '_memories', 'observations', '2026-10'), { recursive: true }); symlinkSync(join(out, 'dc-9-planted.md'), join(p.root, '_memories', 'observations', '2026-10', 'obs-x.md')); },
-    'linked PROJECT.md': (p, out) => { writeFileSync(join(out, 'P.md'), 'outside'); rmSync(join(p.root, 'PROJECT.md')); symlinkSync(join(out, 'P.md'), join(p.root, 'PROJECT.md')); },
+    'linked _memories': (p, out) => { rmSync(join(p.root, '_memories'), { recursive: true }); linkFolder(out, join(p.root, '_memories')); },
+    'linked _lib': (p, out) => { linkFolder(out, join(p.root, '_memories', '_lib')); },
+    'linked lock file': (p, out) => { writeFileSync(join(out, 'l'), ''); linkFile(join(out, 'l'), join(p.root, '_memories', '.decorate-graph.lock')); },
+    'linked index': (p, out) => { writeFileSync(join(out, 'i.md'), 'outside'); linkFile(join(out, 'i.md'), join(p.root, '_memories', 'INDEX-decisions.md')); },
+    'linked unit file': (p, out) => { linkFile(join(out, 'dc-9-planted.md'), join(p.root, '_memories', 'dc-9-planted.md')); },
+    'linked subfolder': (p, out) => { linkFolder(out, join(p.root, '_memories', 'observations')); },
+    'linked file in a nested folder': (p, out) => { mkdirSync(join(p.root, '_memories', 'observations', '2026-10'), { recursive: true }); linkFile(join(out, 'dc-9-planted.md'), join(p.root, '_memories', 'observations', '2026-10', 'obs-x.md')); },
+    'linked PROJECT.md': (p, out) => { writeFileSync(join(out, 'P.md'), 'outside'); rmSync(join(p.root, 'PROJECT.md')); linkFile(join(out, 'P.md'), join(p.root, 'PROJECT.md')); },
   };
+  const folderCases = new Set(['linked _memories', 'linked _lib', 'linked subfolder']);
   for (const [name, plant] of Object.entries(cases)) {
-    const p = project();
-    try {
-      const out = join(p.base, 'outside'); mkdirSync(out);
-      writeFileSync(join(out, 'dc-9-planted.md'), unit('dc-9-planted'));
-      plant(p, out);
-      const before = tree(out);
-      const r = po(p.root);
-      assert.deepEqual([r.status, r.state], ['refused', 'refused-link'], name);
-      assert.deepEqual(r.violations, [], name);
-      assert.deepEqual(tree(out), before, `${name}: nothing outside changed`);
-      assert.equal(existsSync(join(p.root, '_memories', 'INDEX-decisions.md')) && /planted/.test(readFileSync(join(p.root, '_memories', 'INDEX-decisions.md'), 'utf8')), false, `${name}: no outside unit reached an index`);
-    } finally { p.cleanup(); }
+    await t.test(name, { skip: !folderCases.has(name) && FILE_LINK_SKIP }, () => {
+      const p = project();
+      try {
+        const out = join(p.base, 'outside'); mkdirSync(out);
+        writeFileSync(join(out, 'dc-9-planted.md'), unit('dc-9-planted'));
+        plant(p, out);
+        const before = tree(out);
+        const r = po(p.root);
+        assert.deepEqual([r.status, r.state], ['refused', 'refused-link'], name);
+        assert.deepEqual(r.violations, [], name);
+        assert.deepEqual(tree(out), before, `${name}: nothing outside changed`);
+        assert.equal(existsSync(join(p.root, '_memories', 'INDEX-decisions.md')) && /planted/.test(readFileSync(join(p.root, '_memories', 'INDEX-decisions.md'), 'utf8')), false, `${name}: no outside unit reached an index`);
+      } finally { p.cleanup(); }
+    });
   }
 });
 
-test('retention in project-only mode is explicit: a dry run lists files past the window and removes nothing; --apply removes only those; a linked capture folder is refused', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('retention in project-only mode is explicit: a dry run lists files past the window and removes nothing; --apply removes only those; a linked capture folder is refused', () => {
   const p = project();
   try {
     const dir = join(p.root, '_metrics', 'turn-capture'); mkdirSync(dir, { recursive: true });
@@ -797,7 +808,7 @@ test('retention in project-only mode is explicit: a dry run lists files past the
   const q = project();
   try {
     const out = join(q.base, 'outside-capture'); mkdirSync(out); writeFileSync(join(out, '2020-01-01.jsonl'), 'old\n');
-    mkdirSync(join(q.root, '_metrics')); symlinkSync(out, join(q.root, '_metrics', 'turn-capture'));
+    mkdirSync(join(q.root, '_metrics')); linkFolder(out, join(q.root, '_metrics', 'turn-capture'));
     const r = confined(q.root, [join(CORE, 'scripts/project-only.mjs'), 'retention', '--apply', '--root', q.root]);
     assert.equal(JSON.parse(r.stdout).state, 'refused-link');
     assert.deepEqual(r.violations, []);
@@ -858,41 +869,46 @@ test('purge reports a lock that would not release as a failure, keeps the honest
 
 // ---------- the typed-edge walk stays in the folder it was given ----------
 
-test('graph-walk: a regular store walks to its neighbour; a store or seed that is a link is refused before the seed is probed, and no outside unit is returned', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('graph-walk: a regular store walks to its neighbour; a store or seed that is a link is refused before the seed is probed, and no outside unit is returned', async (t) => {
   const GW = join(CORE, 'scripts/graph-walk.mjs');
   const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
   const fill = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'dc-1-seed.md'), u('dc-1-seed', 'dc-2-neighbour')); writeFileSync(join(dir, 'dc-2-neighbour.md'), u('dc-2-neighbour')); };
-  const ok = project({ withUnits: false });
-  try {
-    fill(join(ok.root, '_memories'));
-    const r = confined(ok.root, [GW, join(ok.root, '_memories', 'dc-1-seed.md'), '--memories', join(ok.root, '_memories')]);
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /dc-2-neighbour/, 'control: the regular store returns the neighbour');
-    assert.deepEqual(r.violations, []);
-  } finally { ok.cleanup(); }
-  const a = project({ withUnits: false });
-  try {
-    const out = join(a.base, 'outside-store'); fill(out);
-    symlinkSync(out, join(a.root, '_memories'));
-    const r = confined(a.root, [GW, join(a.root, '_memories', 'dc-1-seed.md'), '--memories', join(a.root, '_memories')]);
-    assert.equal(r.status, 3);
-    assert.match(r.stderr, /refused: .*is a link/);
-    assert.doesNotMatch(r.stdout, /dc-2-neighbour/);
-    assert.deepEqual(r.violations, [], 'refused before the seed was probed');
-    const d = confined(a.root, [GW, join(a.root, '_memories', 'dc-1-seed.md')]);
-    assert.equal(d.status, 3, 'the same when the store is taken from the seed path');
-    assert.deepEqual(d.violations, []);
-  } finally { a.cleanup(); }
-  const b = project({ withUnits: false });
-  try {
-    const out = join(b.base, 'outside-store'); fill(out);
-    mkdirSync(join(b.root, '_memories')); writeFileSync(join(b.root, '_memories', 'dc-2-neighbour.md'), u('dc-2-neighbour'));
-    symlinkSync(join(out, 'dc-1-seed.md'), join(b.root, '_memories', 'dc-1-seed.md'));
-    const r = confined(b.root, [GW, join(b.root, '_memories', 'dc-1-seed.md'), '--memories', join(b.root, '_memories')]);
-    assert.equal(r.status, 3, 'a linked seed is refused too');
-    assert.deepEqual(r.violations, []);
-  } finally { b.cleanup(); }
+  await t.test('control: a regular store returns the neighbour', () => {
+    const ok = project({ withUnits: false });
+    try {
+      fill(join(ok.root, '_memories'));
+      const r = confined(ok.root, [GW, join(ok.root, '_memories', 'dc-1-seed.md'), '--memories', join(ok.root, '_memories')]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /dc-2-neighbour/, 'control: the regular store returns the neighbour');
+      assert.deepEqual(r.violations, []);
+    } finally { ok.cleanup(); }
+  });
+  await t.test('_memories is a link out', () => {
+    const a = project({ withUnits: false });
+    try {
+      const out = join(a.base, 'outside-store'); fill(out);
+      linkFolder(out, join(a.root, '_memories'));
+      const r = confined(a.root, [GW, join(a.root, '_memories', 'dc-1-seed.md'), '--memories', join(a.root, '_memories')]);
+      assert.equal(r.status, 3);
+      assert.match(r.stderr, /refused: .*is a link/);
+      assert.doesNotMatch(r.stdout, /dc-2-neighbour/);
+      assert.deepEqual(r.violations, [], 'refused before the seed was probed');
+      const d = confined(a.root, [GW, join(a.root, '_memories', 'dc-1-seed.md')]);
+      assert.equal(d.status, 3, 'the same when the store is taken from the seed path');
+      assert.deepEqual(d.violations, []);
+    } finally { a.cleanup(); }
+  });
+  await t.test('the seed file is a link out', { skip: FILE_LINK_SKIP }, () => {
+    const b = project({ withUnits: false });
+    try {
+      const out = join(b.base, 'outside-store'); fill(out);
+      mkdirSync(join(b.root, '_memories')); writeFileSync(join(b.root, '_memories', 'dc-2-neighbour.md'), u('dc-2-neighbour'));
+      linkFile(join(out, 'dc-1-seed.md'), join(b.root, '_memories', 'dc-1-seed.md'));
+      const r = confined(b.root, [GW, join(b.root, '_memories', 'dc-1-seed.md'), '--memories', join(b.root, '_memories')]);
+      assert.equal(r.status, 3, 'a linked seed is refused too');
+      assert.deepEqual(r.violations, []);
+    } finally { b.cleanup(); }
+  });
 });
 
 test('the /process-memory skill sends a project-only session to the confined command at its own door', () => {
@@ -920,8 +936,7 @@ test('retention names a lock that would not release as that, not as files left b
   } finally { p.cleanup(); }
 });
 
-test('graph-walk: a seed under a linked dated folder is refused; in a project-only folder a link anywhere under the store is refused before any hop', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('graph-walk: a seed under a linked dated folder is refused; in a project-only folder a link anywhere under the store is refused before any hop', () => {
   const GW = join(CORE, 'scripts/graph-walk.mjs');
   const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
   // a regular seed file whose parent folder is a link out
@@ -930,7 +945,7 @@ test('graph-walk: a seed under a linked dated folder is refused; in a project-on
     const mem = join(a.root, '_memories'); mkdirSync(join(mem, 'observations'), { recursive: true });
     writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
     const out = join(a.base, 'outside-month'); mkdirSync(out); writeFileSync(join(out, 'dc-3-seed.md'), u('dc-3-seed', 'dc-2-neighbour'));
-    symlinkSync(out, join(mem, 'observations', '2026-10'));
+    linkFolder(out, join(mem, 'observations', '2026-10'));
     const r = confined(a.root, [GW, join(mem, 'observations', '2026-10', 'dc-3-seed.md'), '--memories', mem]);
     assert.equal(r.status, 3);
     assert.match(r.stderr, /2026-10 is a link/);
@@ -943,7 +958,7 @@ test('graph-walk: a seed under a linked dated folder is refused; in a project-on
     const mem = join(b.root, '_memories'); mkdirSync(mem);
     writeFileSync(join(mem, 'dc-1-seed.md'), u('dc-1-seed', 'dc-2-neighbour')); writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
     const out = join(b.base, 'outside-obs'); mkdirSync(out); writeFileSync(join(out, 'obs-x.md'), u('obs-x'));
-    symlinkSync(out, join(mem, 'observations'));
+    linkFolder(out, join(mem, 'observations'));
     const args = [GW, join(mem, 'dc-1-seed.md'), '--memories', mem];
     confined(b.root, [join(CORE, 'scripts/project-only.mjs'), 'startup', '--root', b.root, '--session', 's']);
     const r = confined(b.root, args);
@@ -971,7 +986,6 @@ test('graph-walk refuses a seed that is not inside the store it is walked agains
 });
 
 test('the project-only hint is "no" when the marker is plainly absent and "yes" when it exists but cannot be read; graph-walk then applies its whole-store link check', { skip: isWin || isRoot }, async () => {
-  const { symlinkSync } = await import('node:fs');
   const { projectOnlyHint } = await import('../../plugins/core/skills/core/scripts/project-only.mjs');
   const p = project({ withUnits: false });
   try {
@@ -982,7 +996,7 @@ test('the project-only hint is "no" when the marker is plainly absent and "yes" 
     const mem = join(p.root, '_memories'); mkdirSync(mem);
     const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
     writeFileSync(join(mem, 'dc-1-seed.md'), u('dc-1-seed', 'dc-2-neighbour')); writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
-    const out = join(p.base, 'outside-obs'); mkdirSync(out); symlinkSync(out, join(mem, 'observations'));
+    const out = join(p.base, 'outside-obs'); mkdirSync(out); linkFolder(out, join(mem, 'observations'));
     chmodSync(marker, 0o000);
     try {
       assert.equal(projectOnlyHint(p.root), true, 'unreadable marker: unknown, so it restricts');

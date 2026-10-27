@@ -6,15 +6,15 @@
 // reaches MEMORY.md, PROJECT.md or a package.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, symlinkSync, existsSync, readlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, existsSync, readlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
-const isWin = process.platform === 'win32';
 const SCRIPTS = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/', import.meta.url));
 
 const UNITS = {
@@ -43,7 +43,7 @@ function fixture({ linked }) {
   writeFileSync(join(root, 'PROJECT.md'), PROJECT_MD);
   writeFileSync(join(base, 'MEMORY.md'), MEMORY_MD);
   mkdirSync(join(base, 'home', '.core'), { recursive: true });
-  if (linked) { writeUnits(outside); symlinkSync('../outside-target', join(root, '_memories')); }
+  if (linked) { writeUnits(outside); linkFolder('../outside-target', join(root, '_memories')); }
   else { mkdirSync(join(root, '_memories')); writeUnits(join(root, '_memories')); }
   return { base, root, outside, cleanup: () => rmSync(base, { recursive: true, force: true }) };
 }
@@ -98,7 +98,7 @@ function destinations(f) {
 }
 
 for (const [script, argsFor] of CASES) {
-  test(`a linked _memories is refused by ${script} ${argsFor('<P>').join(' ')}, and the folder it leads to is byte-identical after`, { skip: isWin }, () => {
+  test(`a linked _memories is refused by ${script} ${argsFor('<P>').join(' ')}, and the folder it leads to is byte-identical after`, () => {
     const f = fixture({ linked: true });
     try {
       const before = snapshot(f.outside);
@@ -117,7 +117,7 @@ for (const [script, argsFor] of CASES) {
   });
 }
 
-test('control: with a real _memories folder the same commands run and are not refused', { skip: isWin }, () => {
+test('control: with a real _memories folder the same commands run and are not refused', () => {
   const f = fixture({ linked: false });
   try {
     // PROJECT.md's creation baseline, which the compactor requires before it writes.
@@ -155,8 +155,8 @@ function deepFixture(shape) {
   writeFileSync(join(outside, 'secret.md'), secret);
   writeFileSync(join(outside, 'dir', 'dc-010-outside-folder.md'), unitText('dc-010-outside-folder', `${MARK} folder title`) + `${MARK} folder body\n`);
   let link;
-  if (shape === 'file') { link = join(mem, 'dc-009-linked-unit.md'); symlinkSync(join(outside, 'secret.md'), link); }
-  else if (shape === 'folder') { link = join(mem, 'decisions'); symlinkSync(join(outside, 'dir'), link); }
+  if (shape === 'file') { link = join(mem, 'dc-009-linked-unit.md'); linkFile(join(outside, 'secret.md'), link); }
+  else if (shape === 'folder') { link = join(mem, 'decisions'); linkFolder(join(outside, 'dir'), link); }
   else if (shape === 'control-file') { link = join(mem, 'dc-009-linked-unit.md'); writeFileSync(link, secret); }
   else { link = join(mem, 'decisions'); mkdirSync(link); writeFileSync(join(link, 'dc-010-outside-folder.md'), unitText('dc-010-outside-folder', 'a folder unit')); }
   return { base, root, mem, outside, link, cleanup: () => rmSync(base, { recursive: true, force: true }) };
@@ -201,7 +201,7 @@ const DEEP_CASES = [
 
 for (const shape of ['file', 'folder']) {
   for (const [script, argsFor] of [...DEEP_CASES, ['priority.mjs', (p) => [join(p, '_memories'), '--top', '5']]]) {
-    test(`a ${shape} linked out from inside _memories: ${script} ${argsFor('<P>').join(' ')} refuses it, and no outside text is read into the project or the output`, { skip: isWin }, () => {
+    test(`a ${shape} linked out from inside _memories: ${script} ${argsFor('<P>').join(' ')} refuses it, and no outside text is read into the project or the output`, { skip: shape === 'file' && FILE_LINK_SKIP }, () => {
       const f = deepFixture(shape);
       try {
         const outsideBefore = treeSnapshot(f.outside);
@@ -230,7 +230,7 @@ for (const shape of ['file', 'folder']) {
   }
 }
 
-test('control: the same store with the linked file and folder made real runs every command without a link refusal', { skip: isWin }, () => {
+test('control: the same store with the linked file and folder made real runs every command without a link refusal', () => {
   for (const shape of ['control-file', 'control-folder']) {
     const f = deepFixture(shape);
     try {
@@ -243,7 +243,7 @@ test('control: the same store with the linked file and folder made real runs eve
   }
 });
 
-test('a linked _memories is refused by the priority listing, the summary index, retrieval, maintenance and the enrichment writer', { skip: isWin }, () => {
+test('a linked _memories is refused by the priority listing, the summary index, retrieval, maintenance and the enrichment writer', () => {
   for (const [script, argsFor] of [...DEEP_CASES.slice(CASES.length), ['priority.mjs', (p) => [join(p, '_memories')]]]) {
     if (script === 'graph-walk.mjs') continue;   // its seed would be read through the link; its own chain check is tested in graph-walk.test.mjs
     const f = fixture({ linked: true });

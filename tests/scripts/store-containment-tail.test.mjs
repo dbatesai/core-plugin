@@ -5,7 +5,7 @@
 // graph walk apply. A hard-linked unit file is accepted: its bytes are in the project tree.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, symlinkSync, readlinkSync, chmodSync, linkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, readlinkSync, chmodSync, linkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 import { storeBoundaryProblem, firstLinkUnder } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 const isWin = process.platform === 'win32';
 const isRoot = process.getuid?.() === 0;
@@ -67,13 +68,13 @@ function storeFixture(shape) {
   mkdirSync(join(outside, 'mem'), { recursive: true });
   writeFileSync(join(outside, 'mem', 'dc-011-outside-store.md'), unitText('dc-011-outside-store', `${MARK} store title widget`) + `${MARK} widget body\n`);
   let link = null;
-  if (shape === 'store') { mkdirSync(root); link = mem; symlinkSync(join(outside, 'mem'), mem); }
+  if (shape === 'store') { mkdirSync(root); link = mem; linkFolder(join(outside, 'mem'), mem); }
   else {
     mkdirSync(join(mem, '_validation', 'tests'), { recursive: true });
     writeFileSync(join(mem, 'dc-001-inside-decision.md'), unitText('dc-001-inside-decision', 'An inside decision widget'));
     writeFileSync(join(mem, '_validation', 'tests', 'test-1.yaml'), '---\nquery: widget store body\nexpected_memories: [dc-001-inside-decision]\n---\n');
-    if (shape === 'file') { link = join(mem, 'dc-009-linked-unit.md'); symlinkSync(join(outside, 'secret.md'), link); }
-    else if (shape === 'folder') { link = join(mem, 'decisions'); symlinkSync(join(outside, 'dir'), link); }
+    if (shape === 'file') { link = join(mem, 'dc-009-linked-unit.md'); linkFile(join(outside, 'secret.md'), link); }
+    else if (shape === 'folder') { link = join(mem, 'decisions'); linkFolder(join(outside, 'dir'), link); }
     else if (shape === 'control') { writeFileSync(join(mem, 'dc-009-linked-unit.md'), secret.replaceAll(MARK, 'inside')); }
   }
   writeFileSync(join(root, 'PROJECT.md'), PROJECT_MD('inside') + '\nBacked by: dc-009-linked-unit\n');
@@ -105,7 +106,7 @@ const SURVEY = [
 
 for (const shape of ['store', 'file', 'folder']) {
   for (const [script, argsFor] of SURVEY) {
-    test(`a ${shape} link under _memories: ${script} refuses it before reading, and no outside text reaches the output or the project`, { skip: isWin }, () => {
+    test(`a ${shape} link under _memories: ${script} refuses it before reading, and no outside text reaches the output or the project`, { skip: shape === 'file' && FILE_LINK_SKIP }, () => {
       const f = storeFixture(shape);
       try {
         const outsideBefore = treeSnapshot(f.outside);
@@ -127,7 +128,7 @@ for (const shape of ['store', 'file', 'folder']) {
   }
 }
 
-test('control: with the linked file made real, the surveyed scripts run without a link refusal', { skip: isWin }, () => {
+test('control: with the linked file made real, the surveyed scripts run without a link refusal', () => {
   const f = storeFixture('control');
   try {
     for (const [script, argsFor] of SURVEY) {
@@ -151,14 +152,14 @@ function synthesisFixture(which) {
   writeFileSync(join(outside, 'PROJECT-ARCHIVE.md'), `# Archive ${MARK}\n\n## §Moves\n\n## §State\n`);
   let link;
   if (which === 'PROJECT.md') {
-    link = join(root, 'PROJECT.md'); symlinkSync(join(outside, 'PROJECT.md'), link);
+    link = join(root, 'PROJECT.md'); linkFile(join(outside, 'PROJECT.md'), link);
     // A direct caller trying to adopt the linked bytes as a baseline (what a writer would need before
     // it rewrites PROJECT.md); the baseline writer refuses it, tested on its own below.
     stampCreatedBaseline(root, link, { kind: 'project', home: join(base, 'home') });
   } else {
     writeFileSync(join(root, 'PROJECT.md'), PROJECT_MD('inside'));
     stampCreatedBaseline(root, join(root, 'PROJECT.md'), { kind: 'project', home: join(base, 'home') });
-    link = join(root, 'PROJECT-ARCHIVE.md'); symlinkSync(join(outside, 'PROJECT-ARCHIVE.md'), link);
+    link = join(root, 'PROJECT-ARCHIVE.md'); linkFile(join(outside, 'PROJECT-ARCHIVE.md'), link);
   }
   return { base, root, outside, link, cleanup: () => rmSync(base, { recursive: true, force: true }) };
 }
@@ -182,7 +183,7 @@ const WRITERS = [
 for (const which of ['PROJECT.md', 'PROJECT-ARCHIVE.md']) {
   for (const [script, argsFor] of WRITERS) {
     if (which === 'PROJECT-ARCHIVE.md' && !script.startsWith('demote-')) continue;
-    test(`${which} linked out of the project: ${script} ${argsFor('<P>').join(' ')} refuses before reading it`, { skip: isWin }, () => {
+    test(`${which} linked out of the project: ${script} ${argsFor('<P>').join(' ')} refuses before reading it`, { skip: FILE_LINK_SKIP }, () => {
       const f = synthesisFixture(which);
       try {
         const outsideBefore = treeSnapshot(f.outside);
@@ -201,13 +202,13 @@ for (const which of ['PROJECT.md', 'PROJECT-ARCHIVE.md']) {
   }
 }
 
-test('the baseline writer refuses a linked target, so a direct caller cannot adopt outside bytes', { skip: isWin }, () => {
+test('the baseline writer refuses a linked target, so a direct caller cannot adopt outside bytes', { skip: FILE_LINK_SKIP }, () => {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-stamp-link-')));
   try {
     const root = join(base, 'project'), outside = join(base, 'outside.md');
     mkdirSync(join(root, '_memories'), { recursive: true }); mkdirSync(join(base, 'home', '.core'), { recursive: true });
     writeFileSync(outside, PROJECT_MD(MARK));
-    const link = join(root, 'PROJECT.md'); symlinkSync(outside, link);
+    const link = join(root, 'PROJECT.md'); linkFile(outside, link);
     const before = treeSnapshot(root);
     const stamp = stampCreatedBaseline(root, link, { kind: 'project', home: join(base, 'home') });
     assert.equal(stamp.stamped, false, JSON.stringify(stamp));
@@ -217,7 +218,7 @@ test('the baseline writer refuses a linked target, so a direct caller cannot ado
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
-test('control: a real PROJECT.md and archive are not refused by the writers', { skip: isWin }, () => {
+test('control: a real PROJECT.md and archive are not refused by the writers', { skip: FILE_LINK_SKIP }, () => {
   const f = synthesisFixture('PROJECT-ARCHIVE.md');
   try {
     rmSync(f.link); writeFileSync(f.link, '# Archive\n\n## §Moves\n\n## §State\n');
@@ -235,11 +236,11 @@ test('control: a real PROJECT.md and archive are not refused by the writers', { 
 // can't be entered either is passed over: nothing under it can be reached. Project-only memory
 // processing and the graph walk refuse both. A link inside the folder is never read.
 for (const mode of [0o100, 0o000]) {
-  test(`a subfolder of _memories with mode ${mode.toString(8)}: ${mode ? 'the shared check refuses it' : 'the shared check passes it over'}, retrieval says the search is incomplete, the graph walk and project-only refuse`, { skip: isWin || isRoot }, async () => {
+  test(`a subfolder of _memories with mode ${mode.toString(8)}: ${mode ? 'the shared check refuses it' : 'the shared check passes it over'}, retrieval says the search is incomplete, the graph walk and project-only refuse`, { skip: isWin || isRoot || FILE_LINK_SKIP }, async () => {
     const f = storeFixture('control');
     const sub = join(f.mem, 'observations');
     mkdirSync(sub);
-    symlinkSync(join(f.outside, 'secret.md'), join(sub, 'obs-linked.md'));
+    linkFile(join(f.outside, 'secret.md'), join(sub, 'obs-linked.md'));
     chmodSync(sub, mode);
     try {
       const problem = storeBoundaryProblem(f.root);
@@ -271,11 +272,11 @@ for (const mode of [0o100, 0o000]) {
 // The case the security review named: `_memories/_validation` can be entered but not listed, and
 // `tests/` inside it holds a link to an outside test file. The walk can't see the link; validate
 // opens `_validation/tests` by its known path and would read through it.
-test('a search-only folder on validate\'s fixed path, with a link inside: validate refuses and reads nothing through it', { skip: isWin || isRoot }, () => {
+test('a search-only folder on validate\'s fixed path, with a link inside: validate refuses and reads nothing through it', { skip: isWin || isRoot || FILE_LINK_SKIP }, () => {
   const f = storeFixture('control');
   const val = join(f.mem, '_validation');
   writeFileSync(join(f.outside, 'test-outside.yaml'), `---\nquery: ${MARK} widget\nexpected_memories: [dc-001-inside-decision]\n---\n`);
-  symlinkSync(join(f.outside, 'test-outside.yaml'), join(val, 'tests', 'test-2.yaml'));
+  linkFile(join(f.outside, 'test-outside.yaml'), join(val, 'tests', 'test-2.yaml'));
   chmodSync(val, 0o111);
   try {
     const projectBefore = (() => { chmodSync(val, 0o755); try { return treeSnapshot(f.root); } finally { chmodSync(val, 0o111); } })();
@@ -288,11 +289,11 @@ test('a search-only folder on validate\'s fixed path, with a link inside: valida
   } finally { chmodSync(val, 0o755); f.cleanup(); }
 });
 
-test('validate refuses a link on its fixed test path even without the shared walk', { skip: isWin }, async () => {
+test('validate refuses a link on its fixed test path even without the shared walk', { skip: FILE_LINK_SKIP }, async () => {
   const f = storeFixture('control');
   try {
     writeFileSync(join(f.outside, 'test-outside.yaml'), `---\nquery: ${MARK} widget\n---\n`);
-    symlinkSync(join(f.outside, 'test-outside.yaml'), join(f.mem, '_validation', 'tests', 'test-2.yaml'));
+    linkFile(join(f.outside, 'test-outside.yaml'), join(f.mem, '_validation', 'tests', 'test-2.yaml'));
     const { loadTests } = await import('../../plugins/core/skills/core/scripts/validate.mjs');
     assert.throws(() => loadTests(f.root), (e) => e.code === 'STORE_OUTSIDE_ROOT' && /test-2\.yaml is a link/.test(e.message));
   } finally { f.cleanup(); }
@@ -306,7 +307,7 @@ test('an unsearchable _memories still passes the shared check: nothing beneath i
   } finally { f.cleanup(); }
 });
 
-test('a hard-linked unit file is accepted: its bytes are in the project tree and CORE writes replace it by rename', { skip: isWin }, () => {
+test('a hard-linked unit file is accepted: its bytes are in the project tree and CORE writes replace it by rename', () => {
   const f = storeFixture('control');
   try {
     const twin = join(f.base, 'twin.md');

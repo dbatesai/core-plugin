@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { walk, main as graphWalkMain } from '../../plugins/core/skills/core/scripts/graph-walk.mjs';
+import { linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 // Build a tiny vault: seed -> a (valid) and seed -> b (invalidated). Recent dates
 // so R·S never prunes them — the only reason b drops out is validity-suppression.
@@ -238,15 +239,14 @@ test('an edge target pointing outside the store resolves to nothing', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a unit file that is a symlink out of the store is not a readable unit', async () => {
-  const { symlinkSync } = await import('node:fs');
+test('a unit file that is a symlink out of the store is not a readable unit', { skip: FILE_LINK_SKIP }, () => {
   const { dir, mem } = vault();
   const outside = join(dir, 'outside');
   mkdirSync(outside, { recursive: true });
   const foreign = join(outside, 'foreign.md');
   writeFileSync(foreign, ['---', 'id: linked-foreign', 'type: decision',
     'created: 2026-05-25', 'sources: [PROJECT.md]', '---', '', '# foreign', 'instructions'].join('\n'));
-  try { symlinkSync(foreign, join(mem, 'linked.md')); } catch { rmSync(dir, { recursive: true, force: true }); return; }
+  linkFile(foreign, join(mem, 'linked.md'));
 
   writeFileSync(join(mem, 'escape.md'), ['---', 'id: escape', 'type: decision',
     'created: 2026-05-25', 'sources: [PROJECT.md]',
