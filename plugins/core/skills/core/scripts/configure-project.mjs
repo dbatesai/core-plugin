@@ -42,6 +42,7 @@ import { classifyRegistration, classifyStamp } from './project-state.mjs';
 import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-units.mjs';
 import { generate as generateHarnessMd } from './generate-harness-md.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary } from './generate-summary-index.mjs';
 import { outsideObservationOff } from './restrictive-mode.mjs';
 import { coreHome } from './trusted-home.mjs';
 
@@ -83,6 +84,12 @@ export function checkManifests(coreRoot) {
 // _memories/ reports honestly instead of slipping through as exit 0.
 export function validateStore(projectPath, today = new Date()) {
   let memoriesDir = join(projectPath, '_memories');
+  // A link anywhere under the store is refused before any unit is read through it.
+  try { assertStoreBoundary(projectPath); }
+  catch (e) {
+    if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+    return { found: true, memoriesDir, unitCount: 0, exitTier: 3, noUnits: false, refused: e.message, findings: [] };
+  }
   if (!existsSync(memoriesDir)) {
     // check-units falls back to treating the project dir itself as the store.
     if (existsSync(join(projectPath, 'workspace.json')) || hasUnitFiles(projectPath)) {
@@ -268,7 +275,7 @@ export function formatReceipt(r) {
   L.push(`  install: core-root ${m.skillCoreDir ? 'ok' : 'MISSING'}` +
     `  · .claude-plugin ${m.claudePlugin ? 'y' : 'n'} · .codex-plugin ${m.codexPlugin ? 'y' : 'n'}` +
     ` · codex-adapter ${m.codexAdapter ? 'y' : 'n'}`);
-  L.push(`  store: ${sv.store.noUnits ? 'no units found' : `${sv.store.unitCount} units, ${TIER[sv.store.exitTier]}`}` +
+  L.push(`  store: ${sv.store.refused ? `refused — ${sv.store.refused}` : sv.store.noUnits ? 'no units found' : `${sv.store.unitCount} units, ${TIER[sv.store.exitTier]}`}` +
     (sv.store.findings.length ? ` (${sv.store.findings.length} findings)` : ''));
   L.push(`  identity: ${describeIdentity(sv.identity)}`);
   L.push(`  mcp (configured, not verified): ${sv.mcp.note}`);
@@ -383,6 +390,7 @@ export async function main(argv) {
   // hand-authored AGENTS.md is a nonzero outcome too — the requested write did
   // not happen, and the caller must see that.
   if (report.scriptVisible.agentsMd.status === 'refused-hand-authored') return 3;
+  if (report.scriptVisible.store.refused) { process.stderr.write(`refused: ${report.scriptVisible.store.refused}\n`); return 3; }
   const tier = report.scriptVisible.store.exitTier;
   return tier === 2 ? 2 : 0;
 }

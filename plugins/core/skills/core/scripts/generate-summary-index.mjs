@@ -30,7 +30,7 @@
  *   node generate-summary-index.mjs --store <storePath>
  */
 
-import { readdirSync, statSync, lstatSync, realpathSync,  readFileSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, lstatSync, realpathSync,  readFileSync, existsSync, writeSync } from 'node:fs';
 import { resolve, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
@@ -73,7 +73,7 @@ function isCandidateDir(name) {
  * too, never a pass.
  * @returns {null | { code: 'STORE_OUTSIDE_ROOT' | 'STORE_BOUNDARY_UNVERIFIED', path: string, reason?: string }}
  */
-export function storeBoundaryProblem(storePath) {
+export function storeBoundaryProblem(storePath, { listing = false } = {}) {
   const root = resolve(storePath);
   const mem = join(root, '_memories');
   const bad = (path) => ({ code: 'STORE_OUTSIDE_ROOT', path });
@@ -109,20 +109,30 @@ export function storeBoundaryProblem(storePath) {
   }
   // Not every reader skips links, so nothing anywhere under `_memories` may be one: a unit file or a
   // subfolder linked elsewhere is refused like a linked store.
-  return linkInStore(mem, bad, unproven);
+  return linkInStore(mem, bad, unproven, listing);
 }
 
 /** The first link anywhere under the store, judged from directory entries and never followed. A
- *  folder that is gone (a racing move) or can't be listed is passed over: nothing can enumerate what
- *  is under it, and the readers report it as unreadable. Any other listing failure is unproven. */
-function linkInStore(dir, bad, unproven) {
+ *  folder that is gone (a racing move) is passed over. A folder that can't be listed is passed over
+ *  only when it can't be entered either (nothing under it can be reached), or when the caller only
+ *  lists (`listing`: it skips the folder and reports the search incomplete). One that can be entered
+ *  but not listed is unproven: a reader opening a known path walks through it to a link this walk
+ *  never saw. Any other listing failure is unproven. */
+function linkInStore(dir, bad, unproven, listing) {
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); }
-  catch (e) { return ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes(e?.code) ? null : unproven(dir, e); }
+  catch (e) {
+    if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return null;
+    if (e?.code !== 'EACCES' && e?.code !== 'EPERM') return unproven(dir, e);
+    if (listing) return null;
+    // Can it be entered? Looking up a name that isn't there answers ENOENT only when it can.
+    try { lstatSync(join(dir, '.core-boundary-probe')); return unproven(dir, e); }
+    catch (p) { return p?.code === 'EACCES' || p?.code === 'EPERM' ? null : unproven(dir, e); }
+  }
   for (const e of entries) {
     const path = join(dir, e.name);
     if (e.isSymbolicLink()) return bad(path);
-    if (e.isDirectory()) { const inner = linkInStore(path, bad, unproven); if (inner) return inner; }
+    if (e.isDirectory()) { const inner = linkInStore(path, bad, unproven, listing); if (inner) return inner; }
   }
   return null;
 }
@@ -137,12 +147,38 @@ export function firstLinkUnder(dir) {
   return null;
 }
 
-/** Throws when the store or its cache folder leaves the project, or when that can't be established. */
-export function assertStoreBoundary(storePath) {
-  const problem = storeBoundaryProblem(storePath);
+/** `PROJECT.md` and `PROJECT-ARCHIVE.md` as links: a writer would read the linked file's text and
+ *  then rename a regular file over the link, bringing outside text into the project. Judged with
+ *  lstat; an absent file passes. A second name (a hard link) is accepted, as for unit files. */
+export function synthesisLinkProblem(projectRoot) {
+  for (const name of ['PROJECT.md', 'PROJECT-ARCHIVE.md']) {
+    const path = join(resolve(projectRoot), name);
+    let st;
+    try { st = lstatSync(path); } catch (e) {
+      if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') continue;
+      return { code: 'STORE_BOUNDARY_UNVERIFIED', path, reason: String(e?.code || e?.message || e) };
+    }
+    if (st.isSymbolicLink()) return { code: 'STORE_OUTSIDE_ROOT', path };
+  }
+  return null;
+}
+
+/** Throws when the store or its cache folder leaves the project, or when that can't be established.
+ *  With `synthesis`, a linked PROJECT.md or PROJECT-ARCHIVE.md is refused too (the writers of those
+ *  files pass it). */
+export function assertStoreBoundary(storePath, { synthesis = false, listing = false } = {}) {
+  const problem = storeBoundaryProblem(storePath, { listing }) || (synthesis ? synthesisLinkProblem(storePath) : null);
   if (!problem) return;
   const why = problem.code === 'STORE_OUTSIDE_ROOT' ? 'is a link or leaves the project folder' : `could not be checked (${problem.reason}), so it is not known to be inside the project folder`;
   throw Object.assign(new Error(`store refused: ${problem.path} ${why}`), problem);
+}
+
+/** The CLI form of a refusal: the `refused:` line on stderr and exit 3. Any other error is rethrown.
+ *  The line is written synchronously, so a caller may exit straight after. */
+export function refusalExit(e, write = (s) => writeSync(2, s)) {
+  if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
+  write(`refused: ${e.message}\n`);
+  return 3;
 }
 
 /**
@@ -198,7 +234,7 @@ function walkCandidateFiles(memoriesDir, onIoError = null) {
  * @returns {string}
  */
 export function computeSourceSignature(storePath) {
-  assertStoreBoundary(storePath);
+  assertStoreBoundary(storePath, { listing: true });   // finds units by listing; an unlistable folder is reported as an incomplete read
   const memoriesDir = join(resolve(storePath), '_memories');
   const parts = [];
   for (const f of walkCandidateFiles(memoriesDir)) {
@@ -239,7 +275,7 @@ export function validateIndexRecords(idx) {
  * enforced here, at the loader, not per-caller.
  */
 export function loadFreshIndex(storePath) {
-  assertStoreBoundary(storePath);
+  assertStoreBoundary(storePath, { listing: true });   // finds units by listing; an unlistable folder is reported as an incomplete read
   const root = resolve(storePath);
   const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
   // Validate from one honest capture: a signature-only walk drops I/O errors.
@@ -403,7 +439,7 @@ function authorityTier(fm, rel) {
  * not even the derived cache — so its reads must be side-effect free.
  */
 export function captureStore(storePath, { retainRaw = false, refreshCache = true } = {}) {
-  assertStoreBoundary(storePath);
+  assertStoreBoundary(storePath, { listing: true });   // finds units by listing; an unlistable folder is reported as an incomplete read
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
   let nextInvalidationAt = null; // earliest still-future t_invalid among included candidates
@@ -569,7 +605,7 @@ function basenameNoMd(rel) {
 }
 
 export function generateSummaryIndex(storePath) {
-  assertStoreBoundary(storePath);
+  assertStoreBoundary(storePath, { listing: true });   // finds units by listing; an unlistable folder is reported as an incomplete read
   // One capture — the written index's source_sig describes the exact bytes its
   // records were derived from (never signature-walk the store a second time;
   // that reopens the multi-walk gap captureStore exists to close).

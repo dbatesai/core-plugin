@@ -95,7 +95,7 @@ import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { ensureScratchFor } from './project-artifacts.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
+import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary, refusalExit } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
 import { gatherMetrics } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
@@ -1660,6 +1660,7 @@ async function main(argv) {
     }
     return 0;
   } catch (e) {
+    if (e.code === 'STORE_OUTSIDE_ROOT' || e.code === 'STORE_BOUNDARY_UNVERIFIED') return refusalExit(e);
     if (e.code === 'OUT_REQUIRED' || e.code === 'BAD_SCOPE' || e.code === 'OUT_IN_STORE' || e.code === 'CACHE_IN_STORE' || e.code === 'CACHE_OUTSIDE_PROJECT') {
       process.stderr.write(`render-browse-artifact: ${e.message}\n`);
       return 2;

@@ -50,7 +50,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodS
 import { resolve, join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
-import { loadSnapshot } from './generate-summary-index.mjs';
+import { loadSnapshot, assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 import { runHarness, validateGold } from './retrieval-harness.mjs';
 import { logEvent } from './log-event.mjs';
 import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality.mjs';
@@ -256,6 +256,7 @@ export function newRound(project, { quota } = {}) {
   if (!existsSync(join(root, '_memories'))) {
     throw new Error(`no _memories/ store at ${root} — nothing to author a self-test against`);
   }
+  assertStoreBoundary(root);   // before the round folder is made or a unit is read
   const round = (listRounds(project).slice(-1)[0] || 0) + 1;
   const dir = roundDir(project, round);
   makeRoundDir(dir, project);
@@ -899,6 +900,7 @@ async function main(argv) {
     process.stderr.write(`unknown command: ${cmd}\n`);
     return 2;
   } catch (e) {
+    if (e.code === 'STORE_OUTSIDE_ROOT' || e.code === 'STORE_BOUNDARY_UNVERIFIED') return refusalExit(e);
     process.stderr.write(`error: ${e.message}\n`);
     return 1;
   }

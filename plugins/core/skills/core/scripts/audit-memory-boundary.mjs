@@ -41,6 +41,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { claudeProjectsRoot, mapMemoryProjectPathToSlug } from './project-slug.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const DEFAULT_SAMPLE = 25;
@@ -141,6 +142,8 @@ if (isCliEntry(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const projectRoot = resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
+  // The unit text is read from `_memories`; a link anywhere under it is refused first.
+  try { assertStoreBoundary(projectRoot); } catch (e) { process.exit(refusalExit(e)); }
   // Default native surface on Claude Code: the project's auto-memory MEMORY.md.
   const nativePath = opt('native') || mappedNativePath(projectRoot);
   const nativeContent = existsSync(nativePath) ? readFileSync(nativePath, 'utf8') : '';

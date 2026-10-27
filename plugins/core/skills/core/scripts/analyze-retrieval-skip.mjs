@@ -39,6 +39,7 @@ import { join, resolve } from 'node:path';
 import { readTranscript } from './read-transcript.mjs';
 import { CORE_SURFACE_RE } from './capability/memory-accessed-probe.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 
@@ -186,6 +187,8 @@ export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = 
 
 /** Full pipeline: read transcript for the harness, build terms, classify. Fail-open. */
 export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'claude-code', home = homedir(), env = process.env, sessionId = null, transcriptPath = null } = {}) {
+  // The project terms are read from the units; a link anywhere under `_memories` is refused (throws) first.
+  assertStoreBoundary(projectRoot);
   const coreStorePresent = existsSync(join(projectRoot, '_memories')) || existsSync(join(projectRoot, 'PROJECT.md'));
   const t = readTranscript({ harness, cwd: projectRoot, home, override: transcriptPath, sessionId, env });
   // The producer (read-transcript) emits 'implemented' (codex, tools extractable) or
@@ -243,6 +246,7 @@ export function parseSkipArgs(args) {
 if (isCliEntry(import.meta.url)) {
   const { rawRoot, harness, transcriptPath, json } = parseSkipArgs(process.argv.slice(2));
   const projectRoot = resolve(rawRoot || process.cwd());
-  const report = analyzeRetrievalSkip({ projectRoot, harness, transcriptPath });
+  let report;
+  try { report = analyzeRetrievalSkip({ projectRoot, harness, transcriptPath }); } catch (e) { process.exit(refusalExit(e)); }
   process.stdout.write(json ? JSON.stringify(report, null, 2) + '\n' : formatReport(report) + '\n');
 }

@@ -30,6 +30,7 @@ import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 import { coreHome } from './trusted-home.mjs';
 
 export const DETECTOR_VERSION = '0.2.0';
@@ -379,6 +380,9 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home: home
   // transcripts; it defaults to the user's home, or to an explicit `home` (the single-root test seam).
   const home = homeIn ?? coreHome();
   const nativeRoot = nativeHome ?? homeIn ?? homedir();
+  // Unit names, dates and statuses are read from `_memories` into the records; a link anywhere under
+  // it is refused (throws) before anything is read.
+  assertStoreBoundary(project);
   if (!metricsEnabled({ project, env, home })) {
     return { status: 'DISABLED', reason: 'metrics opt-in not set' };
   }
@@ -478,7 +482,8 @@ if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
-  const r = runDetectors({ project, harness: opt('harness') || 'claude-code' });
+  let r;
+  try { r = runDetectors({ project, harness: opt('harness') || 'claude-code' }); } catch (e) { process.exit(refusalExit(e)); }
   if (argv.includes('--json')) process.stdout.write(JSON.stringify(r, null, 2) + '\n');
   else if (r.status !== 'OK') process.stdout.write(`metrics-detectors: ${r.status} (${r.reason})\n`);
   else {

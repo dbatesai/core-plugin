@@ -63,6 +63,7 @@ import { gatherMetrics, parseRecognitionSignal } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { refusalExit } from './generate-summary-index.mjs';
 import { ensureScratchFor } from './project-artifacts.mjs';
 import {
   generationReceiptLocation, runRecordCli, artifactContentDigest,
@@ -805,6 +806,7 @@ async function main(argv) {
     }
     return 0;
   } catch (e) {
+    if (e.code === 'STORE_OUTSIDE_ROOT' || e.code === 'STORE_BOUNDARY_UNVERIFIED') return refusalExit(e);
     if (e.code === 'OUT_REQUIRED' || e.code === 'OUT_IN_STORE' || e.code === 'BAD_JSON_IN') {
       process.stderr.write(`render-metrics-artifact: ${e.message}\n`);
       return 2;

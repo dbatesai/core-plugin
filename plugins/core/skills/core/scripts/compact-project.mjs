@@ -260,7 +260,7 @@ export function main(argv) {
 
   // A linked `_memories` is refused before units are read through it or the writer lock is taken
   // in it, so no title from outside the project reaches PROJECT.md.
-  try { assertStoreBoundary(projectDir); }
+  try { assertStoreBoundary(projectDir, { synthesis: true }); }
   catch (e) {
     if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
     process.stderr.write(`refused: ${e.message}\n`);

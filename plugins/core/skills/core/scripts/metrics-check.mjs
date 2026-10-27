@@ -75,6 +75,7 @@ import { evaluateTripwires } from './metrics-tripwires.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { ensureProjectArtifactDir } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 import { coreHome } from './trusted-home.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -683,6 +684,9 @@ export function renderReport(out, { workspaceName } = {}) {
 // ============================================================
 
 export async function gatherMetrics(cwd, { home = coreHome() } = {}) {
+  // The store census reads units from `_memories`; a link anywhere under it is refused (throws)
+  // before the probe's scratch folder is made or anything is read.
+  assertStoreBoundary(cwd);
   // THE canonical object. Its top-level structure IS the three-evidence-class
   // taxonomy (mechanics/regression/readiness) plus identity and run
   // metadata — the renderer consumes this exact object and --json emits it
@@ -1036,7 +1040,8 @@ if (isCliEntry(import.meta.url)) {
     process.stdout.write(renderAnswerView(gatherAnswers(cwd)) + '\n');
     process.exit(0);
   }
-  const out = await gatherMetrics(cwd);
+  let out;
+  try { out = await gatherMetrics(cwd); } catch (e) { process.exit(refusalExit(e)); }
   // --json emits EXACTLY ONE JSON document and nothing else: mixing the human
   // report and the JSON on one stream would make saved stdout invalid JSON,
   // and `render-metrics-artifact --json-in` could not consume the real

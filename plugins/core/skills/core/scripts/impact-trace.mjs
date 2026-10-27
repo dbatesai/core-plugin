@@ -26,6 +26,7 @@ import { join, basename } from 'node:path';
 import { extractEdges, isInvalidated } from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 
 export const IMPACT_VERSION = '1.0.0';
 
@@ -91,6 +92,8 @@ if (isCliEntry(import.meta.url)) {
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
   const today = new Date();
+  // Unit ids and edges are read from `_memories`; a link anywhere under it is refused first.
+  try { assertStoreBoundary(project); } catch (e) { process.exit(refusalExit(e)); }
   let units;
   try { units = iterActiveUnits(join(project, '_memories')); } catch { units = []; }
 

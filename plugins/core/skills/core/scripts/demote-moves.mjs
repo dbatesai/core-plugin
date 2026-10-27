@@ -32,7 +32,7 @@
  * The plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, lstatSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
@@ -50,6 +50,7 @@ import {
 export { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 export const CLOSE_AGE_DAYS = 30;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 
@@ -154,6 +155,8 @@ function looksLikeUnitId(id) {
 function readUnit(memoriesDir, id) {
   const path = join(memoriesDir, `${id}.md`);
   if (!existsSync(path)) return null;
+  // Opened by a known name: a link is refused before it is read.
+  if (lstatSync(path).isSymbolicLink()) throw Object.assign(new Error(`store refused: ${path} is a link or leaves the project folder`), { code: 'STORE_OUTSIDE_ROOT', path });
   let raw;
   try { raw = readFileSync(path, 'utf8'); } catch { return null; }
   const fm = parseFrontmatter(raw);
@@ -342,6 +345,9 @@ export function alreadyArchived(archivePath, bullet) {
 
 export function demoteMoves(projectDir, { today, dryRun = false, strict = false, applyLargeBatch = false } = {}) {
   const todayIso = today || todayUTC();
+  // Cited units are read from `_memories` and PROJECT.md and its archive are read and rewritten: a
+  // link under the store, or either file as a link, is refused (throws) before anything is read.
+  assertStoreBoundary(projectDir, { synthesis: true });
   const projectMdPath = join(projectDir, 'PROJECT.md');
   let text;
   try { text = readFileSync(projectMdPath, 'utf8'); }
@@ -548,6 +554,7 @@ export function main(argv) {
   let stats;
   try { stats = demoteMoves(projectDir, { dryRun, strict, applyLargeBatch }); }
   catch (e) {
+    if (e?.code === 'STORE_OUTSIDE_ROOT' || e?.code === 'STORE_BOUNDARY_UNVERIFIED') return refusalExit(e);
     process.stderr.write(`error: ${e.message}\n`);
     return 2;
   }

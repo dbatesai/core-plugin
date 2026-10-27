@@ -332,9 +332,10 @@ export async function processMemory(ctx, { apply = false } = {}) {
   const mem = join(ctx.root, '_memories');
   try { const st = lstatSync(mem); if (!st.isDirectory()) throw Object.assign(new Error('no store'), { code: 'ENOENT' }); }
   catch (e) { return e.code === 'ENOENT' ? { status: 'refused', state: 'no-store', reason: 'no _memories/ in this folder' } : { status: 'refused', state: 'unreadable', reason: e.code }; }
-  // The steps below read every unit and rewrite lock, index and cache files, and not all of their
-  // readers skip links. So nothing anywhere under `_memories` may be a link, and neither may the
-  // synthesis files beside it: a link is refused and named before any step runs.
+  // The steps below read every unit and rewrite lock, index and cache files. This mode is stricter
+  // than the shared check: a folder anywhere under `_memories` that can't be listed is refused too,
+  // whether or not it can be entered, and so is a link; the synthesis files beside it may not be
+  // links either.
   let link;
   try { link = firstLinkUnder(mem); } catch (e) { return { status: 'refused', state: 'boundary-unverified', reason: `${e.code || e.message}: part of _memories could not be listed` }; }
   if (link) return { status: 'refused', state: 'refused-link', reason: outside(link).message };

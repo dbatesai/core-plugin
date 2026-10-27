@@ -67,6 +67,7 @@
 import { watch as fsWatch, readdirSync, statSync, existsSync, writeSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { collectUnits } from './render-browse-artifact.mjs';
+import { storeBoundaryProblem, assertStoreBoundary } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { isAccountCorePayloadPath, requireTrustedHome } from './trusted-home.mjs';
@@ -322,6 +323,13 @@ export function startWatcher({
     diag(`no _memories store at ${memoriesDir}`);
     exit(1);
     return null; // only reachable when `exit` is an injected non-throwing stub
+  }
+  // A link anywhere under the store is refused before the watch or a sweep touches what it leads
+  // to. Exit 1 (a config error): 3 already means "stopped by a signal".
+  if (storeBoundaryProblem(root)) {
+    try { assertStoreBoundary(root); } catch (e) { diag(`refused: ${e.message}`); }
+    exit(1);
+    return null;
   }
 
   let baseline = baselineSnapshot || null;

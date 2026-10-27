@@ -38,6 +38,7 @@ import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { ensureRealFolders, assertOrdinaryLeaf } from './store-ignores.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 import { coreHome } from './trusted-home.mjs';
 
 // Version stamp for classification BEHAVIOR. Any behavior-affecting change
@@ -269,6 +270,9 @@ export function runClassification({ project, harness = 'claude-code', cwd, home:
   // transcripts; it defaults to the user's home, or to an explicit `home` (the single-root test seam).
   const home = homeIn ?? coreHome();
   const nativeRoot = nativeHome ?? homeIn ?? homedir();
+  // Unit heads and PROJECT.md are read and excerpts of them go into the records; a link anywhere
+  // under `_memories`, or PROJECT.md as a link, is refused (throws) before anything is read.
+  assertStoreBoundary(project, { synthesis: true });
   // Capture gate (spec §18, metrics policy): default-on, opt-out. Captures nothing
   // — reads no transcript content, writes no records — when the user has opted out.
   if (!metricsEnabled({ project, env, home })) {
@@ -369,7 +373,8 @@ if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
-  const r = runClassification({ project, harness: opt('harness') || 'claude-code' });
+  let r;
+  try { r = runClassification({ project, harness: opt('harness') || 'claude-code' }); } catch (e) { process.exit(refusalExit(e)); }
   if (argv.includes('--json')) process.stdout.write(JSON.stringify(r, null, 2) + '\n');
   else {
     process.stdout.write(`classify-turns [PROVISIONAL — not calibrated] ${r.status}\n`);

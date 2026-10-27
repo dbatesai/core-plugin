@@ -621,8 +621,9 @@ export function main(argv) {
   }
   const args = parseArgs(rest);
   // A linked `_memories` is refused before any subcommand lists units through it or takes the
-  // PROJECT.md writer lock or stamp in it.
-  try { assertStoreBoundary(resolveProjectDir(args.positionals[0])); }
+  // PROJECT.md writer lock or stamp in it. `candidates` only lists, so a folder it can't list is
+  // reported as incomplete coverage; the writing subcommands refuse it.
+  try { assertStoreBoundary(resolveProjectDir(args.positionals[0]), { synthesis: true, listing: sub === 'candidates' }); }
   catch (e) {
     if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
     process.stderr.write(`refused: ${e.message}\n`);

@@ -61,7 +61,9 @@ function safeUnitPath(value) {
 }
 
 function loadRawSidecar(store) {
-  assertStoreBoundary(store);
+  // Runs inside the listing readers' capture; the sidecar sits in `_lib`, whose own checks don't
+  // depend on `listing`, so a unit folder that can't be listed stays an incomplete read here.
+  assertStoreBoundary(store, { listing: true });
   const path = enrichmentSidecarPath(store);
   if (!existsSync(path)) return { schema: ENRICHMENT_SCHEMA, records: {} };
   const parsed = JSON.parse(readFileSync(path, 'utf8'));

@@ -37,7 +37,9 @@ export const ENRICHMENT_WEIGHT = 0.6;
 // existsSync also returns false on EACCES. Only ENOENT proves a missing store;
 // other errors must reach captureStore so health and the pack report incomplete.
 function hasMemoryStore(root) {
-  assertStoreBoundary(root);   // a linked store is refused before anything follows the link
+  // A linked store is refused before anything follows the link. Retrieval finds units by listing,
+  // so a folder it can't list is reported as an incomplete search rather than refused.
+  assertStoreBoundary(root, { listing: true });
   try { statSync(join(root, '_memories')); return true; }
   catch (error) { return error.code !== 'ENOENT'; }
 }

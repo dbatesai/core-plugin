@@ -19,9 +19,10 @@
  * The plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, lstatSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 
 export function parseFrontmatter(content) {
   content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance
@@ -64,13 +65,30 @@ export function parseFrontmatter(content) {
   return result;
 }
 
+/** Each part of a known path under the project, and the entry itself, judged with lstat: a link is
+ *  refused before anything is read through it. An absent part ends the walk (null). */
+function linkOnFixedPath(root, parts) {
+  let p = root;
+  for (const part of parts) {
+    p = join(p, part);
+    let st;
+    try { st = lstatSync(p); } catch (e) { if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return null; throw Object.assign(new Error(`store refused: ${p} could not be checked (${e?.code}), so it is not known to be inside the project folder`), { code: 'STORE_BOUNDARY_UNVERIFIED', path: p }); }
+    if (st.isSymbolicLink()) throw Object.assign(new Error(`store refused: ${p} is a link or leaves the project folder`), { code: 'STORE_OUTSIDE_ROOT', path: p });
+  }
+  return p;
+}
+
 export function loadTests(projectPath) {
   const testsDir = join(projectPath, '_memories/_validation/tests');
   const tests = [];
+  // The tests are opened by a known path, not found by walking the store, so each folder on that
+  // path and each test file is checked for a link before it is read.
+  if (!linkOnFixedPath(projectPath, ['_memories', '_validation', 'tests'])) return tests;
   let entries;
   try { entries = readdirSync(testsDir).sort(); } catch { return tests; }
   for (const fname of entries) {
     if (!fname.startsWith('test-') || !fname.endsWith('.yaml')) continue;
+    if (!linkOnFixedPath(testsDir, [fname])) continue;
     const content = readFileSync(join(testsDir, fname), 'utf8');
     const fm = parseFrontmatter(content);
     if (fm && fm.query) tests.push(fm);
@@ -181,7 +199,10 @@ export function main(argv) {
   }
 
   const projectPath = resolve(argv[0]);
-  const tests = loadTests(projectPath);
+  // The tests and the units are read from `_memories`; a link anywhere under it is refused first.
+  try { assertStoreBoundary(projectPath); } catch (e) { process.exit(refusalExit(e)); }
+  let tests;
+  try { tests = loadTests(projectPath); } catch (e) { process.exit(refusalExit(e)); }
 
   if (!tests.length) {
     console.log(`No tests found in ${projectPath}/_memories/_validation/tests/`);

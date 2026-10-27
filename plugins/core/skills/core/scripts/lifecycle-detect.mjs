@@ -96,7 +96,7 @@
  * Ships with the plugin as prescriptive code; .mjs only.
  */
 
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync, lstatSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { readProjectCache, hashText, stampFile, importLegacyProjectCache, CACHE_CORRUPT, CACHE_UNREADABLE, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
@@ -189,6 +189,10 @@ export function recordSessionStart(projectDir, { sessionId = null, now = new Dat
  */
 export function stampCreatedBaseline(projectDir, absPath, { kind = 'unit', lastWrittenBy, now, home, written } = {}) {
   const abs = resolve(absPath);
+  // A link is never adopted: its bytes are wherever it points. Judged with lstat before the read, so
+  // a direct caller can't stamp outside bytes as this project's baseline.
+  try { if (lstatSync(abs).isSymbolicLink()) return { stamped: false, outcome: 'refused', recovery: 'reconcile', reason: 'target-is-a-link' }; }
+  catch { /* absent or unreadable: the read below reports it as before */ }
   const text = readFileSync(abs, 'utf8');
   // With `written`, only the bytes the creator wrote can become its baseline; without it (the
   // --stamp-created command), the current bytes are adopted as they stand.
@@ -390,7 +394,9 @@ function main(argv) {
   }
   const projectDir = resolve(positionals[0] || process.cwd());
   // A linked `_memories` is refused before any action lists, reads or stamps through it.
-  try { assertStoreBoundary(projectDir); }
+  // Every action reads PROJECT.md (detection hashes it; stamping and adoption take its bytes as the
+  // baseline), so a PROJECT.md or PROJECT-ARCHIVE.md that is a link is refused too.
+  try { assertStoreBoundary(projectDir, { synthesis: true }); }
   catch (e) {
     if (e?.code !== 'STORE_OUTSIDE_ROOT' && e?.code !== 'STORE_BOUNDARY_UNVERIFIED') throw e;
     process.stderr.write(`refused: ${e.message}\n`);

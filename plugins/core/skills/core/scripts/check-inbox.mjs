@@ -36,6 +36,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { isCliEntry } from './cli-entry.mjs';
+import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
 import { INBOX_DRAFT_STATUS, VALID_CONFIDENCE_LEVELS } from './unit-vocab.mjs';
 
 export { INBOX_DRAFT_STATUS };
@@ -209,6 +210,8 @@ function main(argv) {
   const projectDir = args[0] ? resolve(args[0]) : null;
   if (!projectDir) { process.stderr.write('usage: node check-inbox.mjs <project-path> [--json]\n'); return 3; }
   if (!existsSync(projectDir)) { process.stderr.write(`setup error: ${projectDir} does not exist\n`); return 3; }
+  // The store is listed for id collisions; a link anywhere under it is refused first.
+  try { assertStoreBoundary(projectDir); } catch (e) { return refusalExit(e); }
 
   const inboxPath = join(projectDir, 'inbox.md');
   if (!existsSync(inboxPath) || !readFileSync(inboxPath, 'utf8').trim()) {
