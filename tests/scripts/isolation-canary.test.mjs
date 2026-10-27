@@ -47,7 +47,8 @@ test('CORE resolves the runner\'s disposable account home, a default registratio
   const testRoot = join(coreHome, '.core', '.test-tmp');
   mkdirSync(testRoot, { recursive: true });
   const base = mkdtempSync(join(testRoot, 'isolation-canary-'));
-  const proj = realpathSync(mkdtempSync(join(tmpdir(), 'isolation-canary-proj-')));
+  // The native realpath, as CORE canonicalizes roots: on Windows it expands an 8.3 short name in the temp path.
+  const proj = realpathSync.native(mkdtempSync(join(tmpdir(), 'isolation-canary-proj-')));
   t.after(() => { rmSync(base, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); });
   const home = join(base, 'home');
   mkdirSync(home);
