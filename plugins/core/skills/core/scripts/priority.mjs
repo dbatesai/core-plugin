@@ -27,7 +27,7 @@
  * rendering names the suggested log location.
  */
 
-import { readFileSync, readdirSync, appendFileSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync, lstatSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { isActiveStatus } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -608,6 +608,9 @@ export function main(argv) {
   }
 
   const memoriesDir = resolve(memoriesDirArg);
+  // A store that is itself a link is refused before it is listed; links inside it are never followed
+  // and are named in the coverage line.
+  try { if (lstatSync(memoriesDir).isSymbolicLink()) { process.stderr.write(`refused: ${memoriesDir} is a link\n`); return 3; } } catch { /* reported below */ }
   try { readdirSync(memoriesDir); } catch {
     process.stderr.write(`error: ${memoriesDir} is not a directory\n`);
     return 2;

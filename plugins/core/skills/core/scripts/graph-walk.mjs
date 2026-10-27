@@ -26,7 +26,6 @@
 import { existsSync, readdirSync, lstatSync } from 'node:fs';
 import { resolve, join, dirname, basename, relative, isAbsolute, sep } from 'node:path';
 import { firstLinkUnder } from './generate-summary-index.mjs';
-import { projectOnlyHint } from './project-only.mjs';
 import {
   loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
   SCORE_PRUNE_THRESHOLD,
@@ -271,11 +270,11 @@ export function main(argv) {
     try { st = lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') { process.stderr.write(`refused: ${p} could not be checked (${e.code}); the walk stays in the folder it was given\n`); return 3; } }
     if (st?.isSymbolicLink()) { process.stderr.write(`refused: ${p} is a link; the walk stays in the folder it was given\n`); return 3; }
   }
-  // In a folder working project-only, hops must not meet a link either: nothing under the store may be one.
-  if (projectOnlyHint(dirname(memoriesDir))) {
+  // Hops must not meet a link either: nothing under the store may be one.
+  {
     let link = null;
     try { link = firstLinkUnder(memoriesDir); } catch (e) { process.stderr.write(`refused: part of ${memoriesDir} could not be listed (${e.code}); the walk stays in the folder it was given\n`); return 3; }
-    if (link) { process.stderr.write(`refused: ${link} is a link; in project-only mode nothing under the store may be one\n`); return 3; }
+    if (link) { process.stderr.write(`refused: ${link} is a link; nothing under the store may be one\n`); return 3; }
   }
   if (!existsSync(seedPath)) { process.stderr.write(`error: seed unit not found: ${seedPath}\n`); return 2; }
 

@@ -22,7 +22,7 @@ import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
-import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
+import { generateSummaryIndex, computeSourceSignature, assertStoreBoundary } from './generate-summary-index.mjs';
 import { hashText, stampFiles, stampNeedsRecovery, stampRecoveryMessage } from './state-cache.mjs';
 import { purgeTurnCapture } from './turn-capture.mjs';
 import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
@@ -64,6 +64,7 @@ function findGhostDuplicates(memoriesDir) {
  */
 export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home, env = process.env, metrics = true } = {}) {
   const root = resolve(projectPath);
+  assertStoreBoundary(root);   // before the ignore files are written or any unit is read
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
   const ignoreProblems = apply ? [...ensureStoreIgnores(root, { families: [...STORE_IGNORES, ...PROJECT_IGNORES] }), ...trackedGenerated(root)] : [];

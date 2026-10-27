@@ -81,6 +81,7 @@ export function writeEnrichment(store, {
   generatedAt = new Date().toISOString(),
 } = {}) {
   const root = resolve(store);
+  assertStoreBoundary(root);   // before the unit is read: a linked unit or store is refused, never followed
   const rel = safeUnitPath(unitPath);
   const sourcePath = join(root, '_memories', ...rel.split('/'));
   const source = readFileSync(sourcePath);

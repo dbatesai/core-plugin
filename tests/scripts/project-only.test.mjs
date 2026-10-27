@@ -531,14 +531,15 @@ test('explicit retrieval: a regular store answers; a store or cache folder that 
       assert.deepEqual(r.violations, []);
       assert.deepEqual(readdirSync(out), [], 'nothing was written outside');
     } finally { b.cleanup(); }
-    // a unit file, and a subfolder, that are links out: never read, and the real units still answer
+    // a unit file, and a subfolder, that are links out: refused like a linked store, never read
     const d2 = project();
     try {
       const out = planted(d2.base);
       symlinkSync(join(out, 'dc-9-planted.md'), join(d2.root, '_memories', 'dc-9-planted.md'));
       symlinkSync(out, join(d2.root, '_memories', 'observations'));
       const r = run(d2.root, [RC, d2.root, 'synthetic widget colour purple']);
-      assert.equal(r.status, 0);
+      assert.equal(r.status, 3);
+      assert.match(r.stderr, /refused: store refused: .*_memories\/(dc-9-planted\.md|observations) is a link/);
       assert.doesNotMatch(r.stdout, /dc-9-planted/);
       assert.deepEqual(r.violations, []);
     } finally { d2.cleanup(); }
@@ -947,7 +948,7 @@ test('graph-walk: a seed under a linked dated folder is refused; in a project-on
     confined(b.root, [join(CORE, 'scripts/project-only.mjs'), 'startup', '--root', b.root, '--session', 's']);
     const r = confined(b.root, args);
     assert.equal(r.status, 3);
-    assert.match(r.stderr, /in project-only mode nothing under the store may be one/);
+    assert.match(r.stderr, /nothing under the store may be one/);
     assert.deepEqual(r.violations, [], 'no outside folder was scanned');
   } finally { b.cleanup(); }
 });
@@ -987,7 +988,7 @@ test('the project-only hint is "no" when the marker is plainly absent and "yes" 
       assert.equal(projectOnlyHint(p.root), true, 'unreadable marker: unknown, so it restricts');
       const r = spawnSync(process.execPath, [join(CORE, 'scripts/graph-walk.mjs'), join(mem, 'dc-1-seed.md'), '--memories', mem], { encoding: 'utf8' });
       assert.equal(r.status, 3);
-      assert.match(r.stderr, /in project-only mode nothing under the store may be one/);
+      assert.match(r.stderr, /nothing under the store may be one/);
     } finally { chmodSync(marker, 0o755); }
   } finally { p.cleanup(); }
 });

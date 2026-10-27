@@ -65,7 +65,7 @@ function isCandidateDir(name) {
 
 /**
  * The store and its derived-cache folder must be real directories inside the project. A project can
- * arrive with `_memories` or `_memories/_lib` (or a file in `_lib`) as a link to somewhere else,
+ * arrive with `_memories`, `_memories/_lib`, or any file or folder beneath them as a link to somewhere else,
  * which would bring outside content into retrieval and send cache writes out of the project. Links
  * are judged with lstat, before anything follows them. Only a path that is plainly absent (ENOENT)
  * passes unchecked. When a check fails while the content could still be reached (the path can't be
@@ -86,20 +86,43 @@ export function storeBoundaryProblem(storePath) {
   const lib = join(mem, '_lib');
   // `_memories` is proven real and inside. If it can't be searched, nothing beneath it can be reached
   // either, so nothing can cross the boundary: the capture reports that store as incomplete.
-  try { st = lstatSync(lib); } catch (e) { return e?.code === 'ENOENT' || e?.code === 'EACCES' ? null : unproven(lib, e); }
-  if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
+  try { st = lstatSync(lib); } catch (e) {
+    if (e?.code === 'EACCES') return null;
+    if (e?.code !== 'ENOENT') return unproven(lib, e);
+    st = null;   // no cache folder yet; the units are still checked below
+  }
+  if (st) {
+    if (st.isSymbolicLink() || !st.isDirectory()) return bad(lib);
+    let entries;
+    try { entries = readdirSync(lib, { withFileTypes: true }); } catch (e) { return unproven(lib, e); }
+    // Every cache file is CORE's own: an ordinary file with one name, or a folder. A link, a second
+    // name elsewhere, or a pipe/device is refused before any reader opens it. Lock files are checked
+    // by the lock itself, whose acquisition briefly gives a lock file a second name in this folder.
+    for (const e of entries) {
+      const path = join(lib, e.name);
+      if (e.isSymbolicLink()) return bad(path);
+      if (e.isDirectory() || e.name.includes('.lock')) continue;
+      let leaf;
+      try { leaf = lstatSync(path); } catch (err) { if (err?.code === 'ENOENT') continue; return unproven(path, err); }
+      if (!leaf.isFile() || leaf.nlink !== 1) return bad(path);
+    }
+  }
+  // Not every reader skips links, so nothing anywhere under `_memories` may be one: a unit file or a
+  // subfolder linked elsewhere is refused like a linked store.
+  return linkInStore(mem, bad, unproven);
+}
+
+/** The first link anywhere under the store, judged from directory entries and never followed. A
+ *  folder that is gone (a racing move) or can't be listed is passed over: nothing can enumerate what
+ *  is under it, and the readers report it as unreadable. Any other listing failure is unproven. */
+function linkInStore(dir, bad, unproven) {
   let entries;
-  try { entries = readdirSync(lib, { withFileTypes: true }); } catch (e) { return unproven(lib, e); }
-  // Every cache file is CORE's own: an ordinary file with one name, or a folder. A link, a second
-  // name elsewhere, or a pipe/device is refused before any reader opens it. Lock files are checked
-  // by the lock itself, whose acquisition briefly gives a lock file a second name in this folder.
+  try { entries = readdirSync(dir, { withFileTypes: true }); }
+  catch (e) { return ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes(e?.code) ? null : unproven(dir, e); }
   for (const e of entries) {
-    const path = join(lib, e.name);
+    const path = join(dir, e.name);
     if (e.isSymbolicLink()) return bad(path);
-    if (e.isDirectory() || e.name.includes('.lock')) continue;
-    let leaf;
-    try { leaf = lstatSync(path); } catch (err) { if (err?.code === 'ENOENT') continue; return unproven(path, err); }
-    if (!leaf.isFile() || leaf.nlink !== 1) return bad(path);
+    if (e.isDirectory()) { const inner = linkInStore(path, bad, unproven); if (inner) return inner; }
   }
   return null;
 }

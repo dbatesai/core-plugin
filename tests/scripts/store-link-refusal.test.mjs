@@ -6,7 +6,7 @@
 // reaches MEMORY.md, PROJECT.md or a package.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, symlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, symlinkSync, existsSync, readlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -132,4 +132,129 @@ test('control: with a real _memories folder the same commands run and are not re
     assert.match(readFileSync(join(f.base, 'MEMORY.md'), 'utf8'), /An outside decision/, 'the priority block lists store titles');
     assert.match(readFileSync(join(f.root, 'PROJECT.md'), 'utf8'), new RegExp(DC1 + ': An outside decision\\*\\* → `_memories/dc-001-outside-decision\\.md`'), 'the compactor writes the unit title into PROJECT.md');
   } finally { f.cleanup(); }
+});
+
+// A real `_memories` with a link deeper inside it: a unit file linked to a file outside the project,
+// or a subfolder linked to an outside folder. Every reader refuses (the priority listing, which
+// never follows a link, names it as skipped instead). The outside bytes are unchanged, and the
+// outside text reaches neither the output nor any file in the project.
+const MARK = 'OUTSIDE-BODY-6b1f';
+const unitText = (id, title, extra = '') => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [store]\n${extra}---\n# ${title}\n\nbody\n`;
+
+function deepFixture(shape) {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-deep-link-')));
+  const root = join(base, 'project'), outside = join(base, 'outside-target'), mem = join(root, '_memories');
+  mkdirSync(mem, { recursive: true }); mkdirSync(join(outside, 'dir'), { recursive: true });
+  writeFileSync(join(root, 'PROJECT.md'), PROJECT_MD);
+  writeFileSync(join(base, 'MEMORY.md'), MEMORY_MD);
+  mkdirSync(join(base, 'home', '.core'), { recursive: true });
+  writeFileSync(join(base, 'enrich.json'), JSON.stringify({ aliases: ['a'], paraphrases: ['p'], likely_questions: ['q'] }));
+  writeFileSync(join(mem, 'dc-001-inside-decision.md'), unitText('dc-001-inside-decision', 'An inside decision', 'edges:\n  - { type: cites, target: dc-009-linked-unit }\n'));
+  writeFileSync(join(mem, 'risk-001-inside-risk.md'), '---\nid: risk-001-inside-risk\ntype: risk\nstatus: active\ncreated: 2026-01-01\n---\n# An inside risk\n\nbody\n');
+  const secret = unitText('dc-009-linked-unit', `${MARK} file title`) + `${MARK} file body\n`;
+  writeFileSync(join(outside, 'secret.md'), secret);
+  writeFileSync(join(outside, 'dir', 'dc-010-outside-folder.md'), unitText('dc-010-outside-folder', `${MARK} folder title`) + `${MARK} folder body\n`);
+  let link;
+  if (shape === 'file') { link = join(mem, 'dc-009-linked-unit.md'); symlinkSync(join(outside, 'secret.md'), link); }
+  else if (shape === 'folder') { link = join(mem, 'decisions'); symlinkSync(join(outside, 'dir'), link); }
+  else if (shape === 'control-file') { link = join(mem, 'dc-009-linked-unit.md'); writeFileSync(link, secret); }
+  else { link = join(mem, 'decisions'); mkdirSync(link); writeFileSync(join(link, 'dc-010-outside-folder.md'), unitText('dc-010-outside-folder', 'a folder unit')); }
+  return { base, root, mem, outside, link, cleanup: () => rmSync(base, { recursive: true, force: true }) };
+}
+
+/** Every path under `dir` with its bytes' sha1, judged with lstat: a link is recorded by its target, never read. */
+function treeSnapshot(dir) {
+  const out = [];
+  const walk = (d, rel) => {
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(d, e.name), r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isSymbolicLink()) out.push(`${r} -> link:${readlinkSync(p)}`);
+      else if (e.isDirectory()) { out.push(`${r}/`); walk(p, r); }
+      else out.push(`${r}:${createHash('sha1').update(readFileSync(p)).digest('hex')}`);
+    }
+  };
+  walk(dir, '');
+  return out;
+}
+
+/** The text of every regular file under `dir`, never through a link. */
+function treeText(dir) {
+  let text = '';
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isSymbolicLink()) continue;
+    text += e.isDirectory() ? treeText(p) : readFileSync(p, 'latin1');
+  }
+  return text;
+}
+
+const DEEP_CASES = [
+  ...CASES,
+  ['generate-summary-index.mjs', (p) => [p]],
+  ['retrieve-context.mjs', (p) => [p, 'decision']],
+  ['retrieve-context.mjs', (p) => [p, 'decision', '--pack']],
+  ['maintenance-run.mjs', (p) => [p, '--json']],
+  ['graph-walk.mjs', (p) => [join(p, '_memories', 'dc-001-inside-decision.md'), '--memories', join(p, '_memories'), '--hops', '2']],
+  ['enrichment-sidecar.mjs', (p) => [p, 'dc-001-inside-decision.md', '--input', join(dirname(p), 'enrich.json'), '--writer-family', 'a', '--answer-family', 'b']],
+  ['enrichment-sidecar.mjs', (p) => [p, 'dc-009-linked-unit.md', '--input', join(dirname(p), 'enrich.json'), '--writer-family', 'a', '--answer-family', 'b']],
+];
+
+for (const shape of ['file', 'folder']) {
+  for (const [script, argsFor] of [...DEEP_CASES, ['priority.mjs', (p) => [join(p, '_memories'), '--top', '5']]]) {
+    test(`a ${shape} linked out from inside _memories: ${script} ${argsFor('<P>').join(' ')} refuses it, and no outside text is read into the project or the output`, { skip: isWin }, () => {
+      const f = deepFixture(shape);
+      try {
+        const outsideBefore = treeSnapshot(f.outside);
+        const projectBefore = treeSnapshot(f.root);
+        const memoryMdBefore = readFileSync(join(f.base, 'MEMORY.md'), 'utf8');
+        const r = run(script, argsFor(f.root), f.base);
+        const named = new RegExp(`${f.link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\n]*(is a link|symlink-or-junction-not-followed)`);
+        if (script === 'priority.mjs') {
+          // The ranking never follows a link; it names each one as a path it did not read.
+          assert.match(r.stdout, /COVERAGE INCOMPLETE/, `priority names the coverage gap\n${r.stdout}`);
+          assert.match(r.stdout, named, `priority names the link\n${r.stdout}`);
+        } else {
+          assert.notEqual(r.status, 0, `${script} exits nonzero\n${r.stdout}\n${r.stderr}`);
+          assert.match(r.stderr, named, `${script} names the link it refused\n${r.stderr}`);
+        }
+        assert.ok(!r.stdout.includes(MARK) && !r.stderr.includes(MARK), `${script} printed nothing read through the link\n${r.stdout}\n${r.stderr}`);
+        assert.deepEqual(treeSnapshot(f.outside), outsideBefore, 'the outside target keeps its listing and bytes');
+        assert.ok(!treeText(f.root).includes(MARK), 'no outside text reached any file in the project');
+        assert.ok(!readFileSync(join(f.base, 'MEMORY.md'), 'utf8').includes(MARK), 'no outside text reached MEMORY.md');
+        if (script !== 'priority.mjs') {
+          assert.deepEqual(treeSnapshot(f.root), projectBefore, `${script} wrote nothing in the project before refusing`);
+          assert.equal(readFileSync(join(f.base, 'MEMORY.md'), 'utf8'), memoryMdBefore, 'MEMORY.md is unchanged');
+        }
+      } finally { f.cleanup(); }
+    });
+  }
+}
+
+test('control: the same store with the linked file and folder made real runs every command without a link refusal', { skip: isWin }, () => {
+  for (const shape of ['control-file', 'control-folder']) {
+    const f = deepFixture(shape);
+    try {
+      stampCreatedBaseline(f.root, join(f.root, 'PROJECT.md'), { kind: 'project', home: join(f.base, 'home') });
+      for (const [script, argsFor] of DEEP_CASES) {
+        const r = run(script, argsFor(f.root), f.base);
+        assert.doesNotMatch(r.stderr, /is a link|store refused/, `${shape}: ${script} ${argsFor('<P>').join(' ')}\n${r.stderr}`);
+      }
+    } finally { f.cleanup(); }
+  }
+});
+
+test('a linked _memories is refused by the priority listing, the summary index, retrieval, maintenance and the enrichment writer', { skip: isWin }, () => {
+  for (const [script, argsFor] of [...DEEP_CASES.slice(CASES.length), ['priority.mjs', (p) => [join(p, '_memories')]]]) {
+    if (script === 'graph-walk.mjs') continue;   // its seed would be read through the link; its own chain check is tested in graph-walk.test.mjs
+    const f = fixture({ linked: true });
+    try {
+      writeFileSync(join(f.base, 'enrich.json'), JSON.stringify({ aliases: ['a'] }));
+      const before = snapshot(f.outside);
+      const r = run(script, argsFor(f.root), f.base);
+      assert.notEqual(r.status, 0, `${script} exits nonzero\n${r.stdout}`);
+      assert.match(r.stderr, /_memories is a link/, `${script} names the refusal\n${r.stderr}`);
+      assert.ok(!/outside the project|An outside/.test(r.stdout), `${script} printed nothing read through the link\n${r.stdout}`);
+      assert.deepEqual(snapshot(f.outside), before, 'the outside folder keeps its listing and bytes');
+    } finally { f.cleanup(); }
+  }
 });
