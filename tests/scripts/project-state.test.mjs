@@ -325,28 +325,82 @@ function caseInsensitiveAt(dir) {
   try { return existsSync(join(dir, 'caseprobe')); } finally { rmSync(probe, { recursive: true, force: true }); }
 }
 
-test('a folder renamed by letter case only reads as moved, not copied; its state is kept and re-stamped; a real copy beside it still reads as copied', async (t) => {
-  const { stateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+test('a folder renamed by letter case only reads as moved, not copied; its state, opt-outs, registry row, file baseline and metrics pin follow it; a real copy beside it still reads as copied', async (t) => {
+  const { updateManifest, readManifest, writePinSigned, readPinSigned } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { touchProject } = await import('../../plugins/core/skills/core/scripts/index-registry.mjs');
+  const { stampFile, readProjectCache } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   const s = sandbox();
   try {
     const parent = mk(s.base, 'Projects');
     if (!caseInsensitiveAt(parent)) return t.skip('case-sensitive filesystem: a case-only rename is a rename to a different name');
+    const harness = 'claude-code';
+    const env = { CORE_HARNESS: harness };
     const p = mk(parent, 'Proj');
-    writeStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir });
-    const ws = join(p, '_core', 'claude-code', 'workspace.json');
-    writeFileSync(ws, '{"project_id":"abc"}');
     register(s.coreDir, [p]);
+    writeStamp({ root: p, harness, coreDir: s.coreDir });
+    // the project's opt-outs, in its signed manifest
+    const seeded = updateManifest({ root: p, harness, coreDir: s.coreDir, fields: { metrics_enabled: false, turn_capture: false } });
+    const ws = join(p, '_core', harness, 'workspace.json');
+    const wsBytes = readFileSync(ws, 'utf8');
+    // a file baseline keyed by the old spelling
+    const unit = join(p, 'notes.md');
+    writeFileSync(unit, 'hello\n');
+    assert.equal(stampFile(p, unit, 'h-notes', 'seed-writer', { now: '2026-10-01T00:00:00Z' }).stamped, true, 'precondition: baseline seeded');
+    const oldEntry = readProjectCache(p).files[unit];
+    assert.ok(oldEntry, 'precondition: baseline keyed by the old spelling');
+    // the metrics storage pin, signed for the old spelling
+    mk(p, '_metrics');
+    const meta = mk(p, '_core', harness, 'metrics');
+    writePinSigned({ dir: meta, path: join(p, '_metrics'), root: p, coreDir: s.coreDir });
+    assert.equal(readPinSigned({ dir: meta, root: p, coreDir: s.coreDir }), join(p, '_metrics'), 'precondition: pin seeded');
+
     const renamed = join(parent, 'proj');
     renameSync(p, renamed);
     assert.equal(realpathSync.native(p), renamed, 'precondition: the old spelling now resolves to the renamed folder');
-    const r = classifyStamp({ root: renamed, harness: 'claude-code', coreDir: s.coreDir });
+    const r = classifyStamp({ root: renamed, harness, coreDir: s.coreDir });
     assert.equal(r.status, 'moved', 'the same folder under a new spelling is a move');
     assert.equal(r.oldPath, p);
-    const w = stateDir({ root: renamed, harness: 'claude-code', coreDir: s.coreDir, forWrite: true });
-    assert.equal(w.status, 'moved');
-    assert.equal(w.setAside, undefined, 'nothing is set aside');
-    assert.equal(readFileSync(join(renamed, '_core', 'claude-code', 'workspace.json'), 'utf8'), '{"project_id":"abc"}', 'the project keeps its identity');
-    assert.equal(classifyStamp({ root: renamed, harness: 'claude-code', coreDir: s.coreDir }).status, 'verified', 'the re-stamp names the new spelling');
+
+    // the normal moved handling: state opened for write, registry follows
+    const touched = touchProject(s.coreDir, { root: renamed, harness });
+    const moves = touched.events.filter((e) => e.kind === 'state-moved');
+    assert.equal(moves.length, 1, 'one move is reported');
+    assert.equal(moves[0].oldPath, p);
+    assert.deepEqual(touched.events.filter((e) => e.kind !== 'state-moved'), [], 'nothing is set aside, copied or asked');
+    assert.equal(existsSync(join(renamed, '_core', harness, 'superseded')), false, 'nothing is set aside');
+    assert.equal(classifyStamp({ root: renamed, harness, coreDir: s.coreDir }).status, 'verified', 'the re-stamp names the new spelling');
+
+    // (a) identity and opt-outs kept, still verified
+    assert.equal(readFileSync(join(renamed, '_core', harness, 'workspace.json'), 'utf8'), wsBytes, 'the manifest bytes are kept');
+    const m = readManifest({ root: renamed, harness, coreDir: s.coreDir });
+    assert.ok(m, 'the manifest still verifies under the new spelling');
+    assert.equal(m.project_id, seeded.project_id, 'the project keeps its identity');
+    assert.equal(m.metrics_enabled, false, 'the metrics opt-out is kept');
+    assert.equal(m.turn_capture, false, 'the turn-capture opt-out is kept');
+    assert.equal(metricsEnabled({ project: renamed, env, home: s.home }), false, 'metrics stay off');
+    assert.equal(turnCaptureEnabled({ project: renamed, env, home: s.home }), false, 'turn capture stays off');
+
+    // (b) the registry row names the new spelling, once; the old spelling is gone
+    const rows = JSON.parse(readFileSync(join(s.coreDir, 'projects.json'), 'utf8'));
+    assert.equal(rows.filter((e) => e.path === renamed).length, 1, 'one row names the new spelling');
+    assert.deepEqual(rows.filter((e) => e.path === p), [], 'no row names the old spelling');
+    assert.equal(rows.length, 1, 'no second row was added');
+
+    // (c) the file baseline is keyed by the new spelling, hash and writer kept
+    assert.equal(moves[0].repointed.cache.status, 'repointed');
+    const cache = readProjectCache(renamed);
+    assert.deepEqual(cache.files[join(renamed, 'notes.md')], oldEntry, 'the baseline entry moved to the new key unchanged');
+    assert.equal(Object.hasOwn(cache.files, unit), false, 'no baseline entry keeps the old spelling');
+
+    // (d) the metrics pin is re-signed for the new spelling and reads for it
+    const metaNow = join(renamed, '_core', harness, 'metrics');
+    assert.notEqual(readPinSigned({ dir: metaNow, root: renamed, coreDir: s.coreDir }), null, 'the pin still verifies for the new root');
+    assert.deepEqual(moves[0].repointed.pins, [{ folder: metaNow, status: 'repointed' }], 'the pin is re-signed for the new root');
+    const pinBody = JSON.parse(readFileSync(join(metaNow, 'storage-path.txt'), 'utf8'));
+    assert.deepEqual(pinBody, { path: join(renamed, '_metrics'), root: renamed }, 'the signed pin names the new spelling');
+    assert.equal(readPinSigned({ dir: metaNow, root: renamed, coreDir: s.coreDir }), join(renamed, '_metrics'), 'the pin reads for the new root');
 
     // control: a real copy beside the renamed folder is still a copy
     const copy = join(parent, 'Proj-copy');
