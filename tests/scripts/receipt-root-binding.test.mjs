@@ -4,12 +4,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, exist
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { registerProject, touchProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
-import { writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writeSignedFile, readSignedFileAt } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { acquireFileLock, releaseFileLock, currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs', import.meta.url));
@@ -86,6 +86,74 @@ test('a migrated project that is then moved still passes startup\'s apply and dr
     const drift = cli(s, '--drift-check', moved);
     process.stdout.write(`# (a) --drift-check after move: exit ${drift.status} ${JSON.stringify(drift.json)}\n`);
     assert.equal(drift.status, 0, `drift check after a move exits 0\n${drift.stdout}${drift.stderr}`);
+    assert.ok(['unchanged', 'brought-in'].includes(drift.json.status), drift.stdout);
+  } finally { s.cleanup(); }
+});
+
+/** Whether `dir` is on a filesystem that treats two spellings differing only in case as one name. */
+function caseInsensitiveAt(dir) {
+  const probe = join(dir, 'CaseProbe');
+  mkdirSync(probe, { recursive: true });
+  try { return existsSync(join(dir, 'caseprobe')); } finally { rmSync(probe, { recursive: true, force: true }); }
+}
+
+test('a migrated project renamed by letter case only still passes startup\'s apply and drift check, its receipt carried to the new spelling', (t) => {
+  const s = sandbox();
+  try {
+    const parent = s.mk('Projects');
+    if (!caseInsensitiveAt(parent)) return t.skip('case-sensitive filesystem: a case-only rename is a rename to a different name');
+    const p = s.mk('Projects', 'Proj');
+    const legacyLog = join(s.coreDir, 'workspaces', 'legacy', 'capability-history.jsonl');
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([
+      legacyWorkspace(s, 'legacy', { path: p, files: {
+        'workspace.json': JSON.stringify({ workspace_id: 'legacy', agent_name: 'Plover' }),
+        'capability-history.jsonl': '{"row":1}\n',
+        'hot-section-draft.md': 'draft\n',
+      } }),
+    ], null, 2));
+    writeFileSync(join(s.coreDir, 'migrate-harness-table.json'), JSON.stringify({ version: 1, entries: { legacy: { harness: H, evidence: 'fixture' } } }));
+    registerProject(s.coreDir, p);
+
+    const applied = cli(s, '--apply', p);
+    assert.equal(applied.json?.status, 'migrated', applied.stdout + applied.stderr);
+    const before = cli(s, '--drift-check', p);
+    assert.equal(before.status, 0, 'control: the receipt verifies at the path it was written for\n' + before.stdout);
+    assert.equal(before.json.status, 'unchanged');
+    const seeded = JSON.parse(readFileSync(join(p, '_core', H, RECEIPT), 'utf8'));
+    assert.equal(seeded.root, p, 'fixture: the receipt names the old spelling');
+    const underState = seeded.files.filter((f) => typeof f?.to === 'string' && f.to.startsWith(p + sep));
+    assert.ok(underState.length > 0, 'fixture: the receipt lists destinations under the project');
+
+    const renamed = join(parent, 'proj');
+    renameSync(p, renamed);
+    assert.equal(realpathSync.native(p), renamed, 'precondition: the old spelling now resolves to the renamed folder');
+    registerProject(s.coreDir, renamed);
+    const touched = touchProject(s.coreDir, { root: renamed, harness: H });
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.equal(ev.oldPath, p);
+    const nowState = join(renamed, '_core', H);
+    process.stdout.write(`# (c) receipts after case-only rename: ${JSON.stringify(ev.repointed.receipts)}\n`);
+    assert.deepEqual(ev.repointed.receipts, [{ folder: nowState, status: 'repointed', count: underState.length }], 'the receipt is carried to the new spelling');
+
+    const raw = readSignedFileAt({ dir: nowState, name: RECEIPT, coreDir: s.coreDir });
+    assert.notEqual(raw, null, 'the carried receipt verifies');
+    const carried = JSON.parse(raw);
+    assert.equal(carried.root, renamed, 'the receipt names the new spelling');
+    for (const f of carried.files) {
+      if (typeof f?.to === 'string') assert.ok(f.to.startsWith(renamed + sep), `destination under the new spelling: ${f.to}`);
+    }
+    assert.deepEqual(carried.files.map((f) => f.from), seeded.files.map((f) => f.from), 'sources are not rewritten');
+
+    const apply = cli(s, '--apply', renamed);
+    process.stdout.write(`# (c) --apply after case-only rename: exit ${apply.status} ${JSON.stringify(apply.json)}\n`);
+    assert.equal(apply.status, 0, apply.stdout + apply.stderr);
+
+    writeFileSync(legacyLog, '{"row":1}\n{"row":"older-build-2"}\n');
+    const drift = cli(s, '--drift-check', renamed);
+    process.stdout.write(`# (c) --drift-check after case-only rename: exit ${drift.status} ${JSON.stringify(drift.json)}\n`);
+    assert.notEqual(drift.json?.status, 'receipt-unverified', `the carried receipt is accepted\n${drift.stdout}${drift.stderr}`);
+    assert.equal(drift.status, 0, `drift check after a case-only rename exits 0\n${drift.stdout}${drift.stderr}`);
     assert.ok(['unchanged', 'brought-in'].includes(drift.json.status), drift.stdout);
   } finally { s.cleanup(); }
 });
