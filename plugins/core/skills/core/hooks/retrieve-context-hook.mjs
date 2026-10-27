@@ -31,12 +31,16 @@
  * one); retrieval then reads that project's root. Before the first `/core` registers a
  * project, automatic retrieval is off.
  * Output is byte-capped. Any error is swallowed to a clean exit 0 — a retrieval hook
- * must never block the user's turn.
+ * must never block the user's turn. One error is not silent: when the store fails CORE's
+ * boundary check (a link under `_memories`, or a path that could not be checked), retrieval
+ * is off for every turn, so the hook prints REFUSAL_NOTICE once per session. The notice is
+ * fixed text: the refused path is chosen by whoever committed the link, so it never reaches
+ * injected context or the receipt.
  *
  * Ships with the plugin by design; the plugin ships .mjs only.
  */
 
-import { readFileSync, existsSync, statSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
@@ -50,6 +54,7 @@ import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { thinSignal, shouldEscalate, buildReasoningShards, renderEscalationPack, escalationByteCap, packAllowed } from '../scripts/reasoning-shortlist.mjs';
 import { logHookEvent, PRODUCER_VERSION, PRODUCER_SHA } from './hook-log.mjs';
+import { ensureProjectArtifactDir, assertArtifactFile, projectArtifactRoot } from '../scripts/project-artifacts.mjs';
 import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
@@ -82,7 +87,7 @@ export function truncateUtf8(str, maxBytes) {
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
-export const RETRIEVAL_REASONS = ['ok', 'import-failed', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed', 'migration-in-progress', 'state-untrusted', 'state-uninspectable'];
+export const RETRIEVAL_REASONS = ['ok', 'import-failed', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-refused', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed', 'migration-in-progress', 'state-untrusted', 'state-uninspectable'];
 
 // Which harness invoked this hook. CORE_HOOK_HARNESS is the explicit signal, set by the harness's
 // own wrapper; the ambient variables are the fallback for a direct invocation. Null when unknown.
@@ -92,6 +97,36 @@ export function resolveHookHarness(env = process.env) {
   if (env.CLAUDE_CODE_SESSION_ID || env.CLAUDECODE) return 'claude-code';
   if (env.CODEX_SESSION_ID || env.CODEX_PLUGIN_ROOT) return 'codex';
   return null;
+}
+
+// The store boundary refusals (validate.mjs, generate-summary-index.mjs assertStoreBoundary).
+const STORE_REFUSAL_CODES = new Set(['STORE_OUTSIDE_ROOT', 'STORE_BOUNDARY_UNVERIFIED']);
+
+// The one line injected when the store is refused. Fixed text, with no path or error message.
+export const REFUSAL_NOTICE = "CORE notice: automatic memory retrieval is off for this project because its memory folder failed CORE's boundary check (a link, or a folder that could not be checked). Tell the user, and suggest running check-units.mjs --integrity to see which path.\n";
+
+const REFUSAL_MARKER = 'retrieval-refused.json';
+
+/**
+ * Whether this session still needs the refusal notice, and record that it got it. The marker holds
+ * the last session told, in the project's `_core/_hooks` folder under the same containment checks
+ * as the hook log. 'sent' when the notice is due: no session id, a different session, or a marker
+ * that can't be read or written (the notice repeats rather than going silent). 'already-sent' only
+ * when the marker names this session.
+ */
+export function refusalNoticeDue(projectRoot, sessionId) {
+  if (!sessionId) return 'sent';
+  try {
+    const dir = ensureProjectArtifactDir(projectArtifactRoot(projectRoot), '_hooks');
+    const file = join(dir, REFUSAL_MARKER);
+    assertArtifactFile(dir, file);
+    let prior = null;
+    try { prior = JSON.parse(readFileSync(file, 'utf8'))?.session_id ?? null; } catch { prior = null; }
+    if (prior === sessionId) return 'already-sent';
+    assertArtifactFile(dir, file);
+    writeFileSync(file, JSON.stringify({ session_id: sessionId }) + '\n', { mode: 0o600 });
+  } catch { /* unmarkable: say it anyway */ }
+  return 'sent';
 }
 
 export function receipt(action, reason, extra = {}) {
@@ -159,6 +194,8 @@ export async function main() {
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
   let trace = null;
+  // Session identity, resolved here, never fabricated: no session id in the payload means null.
+  const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
   const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
@@ -169,7 +206,14 @@ export async function main() {
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
-  } catch { return receipt('failed', 'pipeline-error', { projectRoot: store, cwd: store }); }
+  } catch (e) {
+    if (!STORE_REFUSAL_CODES.has(e?.code)) return receipt('failed', 'pipeline-error', { projectRoot: store, cwd: store });
+    // Retrieval stays off until the store passes, so the session is told once. Only the closed
+    // error code is recorded; the path is attacker-chosen and goes nowhere.
+    const notice = refusalNoticeDue(store, sessionId);
+    if (notice === 'sent') { try { process.stdout.write(REFUSAL_NOTICE); } catch { /* fail-open */ } }
+    return receipt('failed', 'store-refused', { projectRoot: store, cwd: store, error_code: e.code, refusal_notice: notice });
+  }
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
@@ -260,10 +304,7 @@ export async function main() {
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
 
-      // Session + harness identity ride the evidence capture below — resolved
-      // here, never fabricated: no session id in the payload means null, not
-      // an alias.
-      const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
+      // Session + harness identity ride the evidence capture below (sessionId is resolved above).
       // Harness resolution: CORE_HOOK_HARNESS
       // is the EXPLICIT, authoritative signal — set by the harness-specific
       // wrapper entry file (retrieve-context-hook-codex.mjs sets it to 'codex'

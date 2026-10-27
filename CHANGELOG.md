@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `capability-probe.mjs --out <file>` writes the startup JSON to the file, replacing the shell redirect startup used; the file must be `capability-state.json` inside an existing `_core` state folder, since the call runs pre-approved.
 - `configure-project.mjs --permissions` prints the one standing allow rule for every later turn, written against the live install path with the version folder replaced by `*` (a `*` matches anywhere in a Bash rule), and the settings file it belongs in (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`). It is print-only: a script that runs pre-approved under the skill's own `allowed-tools` must not write the user's permissions, so the user pastes the rule in. The receipt names the rule's limit: `*` also matches `..`, so deny and ask rules and any user command gate still stand above it.
 
+### Fixed
+- Per-turn retrieval no longer goes quiet when the store fails the boundary check (a link under `_memories`, or a path that could not be checked). The hook receipt records `store-refused` with the error code instead of `pipeline-error`, and the first prompt of each session carries one fixed line telling the agent that automatic retrieval is off and to tell the user. The line names no path, since the link's name is chosen by whoever committed it. Startup's `refused:` instruction now says the same.
+
 ### Tests
 - `plain-invocation-doc-guard` walks every bash block in the shipped skills and refuses chaining, variables, pipes, redirects, continuations and bare `Bash` grants; the `coreroot-resolver-doc-guard` it replaces is removed. `--out` and `--permissions` have CLI and unit coverage.
+- `retrieve-hook`: a refused store gives the notice on a session's first prompt, not its second, and again for a new session; a link name holding a newline and an instruction-shaped marker never reaches the notice, the receipt or stderr; an unwritable marker still lets the notice through; an ordinary pipeline error stays `pipeline-error` with no notice.
 
 ## [3.20.1] — 2026-10-17
 

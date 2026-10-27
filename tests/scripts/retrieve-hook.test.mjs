@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
+import { linkFolder } from '../helpers/links.mjs';
 // mkdtempSync / rmSync used by isolatedHooksLog() below are imported later in
 // this file (line ~100) — ES module imports are hoisted, so the binding is
 // available at call time regardless of textual position.
@@ -302,7 +303,9 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     // catch and still exits 0. This one forces buildRetrievalTrace to throw
     // via the explicit CORE_TEST_FORCE_PIPELINE_ERROR seam and runs the real
     // subprocess end to end — fail-open proven, not assumed.
-    { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
+    { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' }, expectStdout: '' },
+    // A link under the store fails the boundary check inside the pipeline: its own reason, not pipeline-error.
+    { name: 'store-refused', env: {}, prompt: 'widget decision', expect: { action: 'failed', reason: 'store-refused' }, setup: (root) => { mkd(join(root, 'elsewhere')); linkFolder(join(root, 'elsewhere'), join(root, '_memories', 'linked')); } },
     { name: 'store-unavailable', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-unavailable' }, needStore: false, setup: (root) => { wf(join(root, '_memories'), 'not a directory'); } },
     { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
     { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },
@@ -340,6 +343,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       // crash or not. Checked explicitly now rather than assumed from the
       // process merely producing output.
       if (!b.directReceipt) assert.equal(run.status, 0, `${b.name}: hook always exits 0 (fail-open), even on a genuine pipeline crash`);
+      if (b.expectStdout !== undefined) assert.equal(run.stdout, b.expectStdout, `${b.name}: stdout`);
       const rawRows = !b.breakHookLog && ex(logFile) ? rf(logFile, 'utf8') : run.stderr;
       const rows = rawRows.trim().split('\n').map(l => JSON.parse(l)).filter(r => r.hook === 'retrieve-context');
       assert.equal(rows.length, 1, `${b.name}: exactly one terminal row`);
@@ -536,4 +540,130 @@ test('a migration fence stops retrieval and its receipt names the real reason, n
       assert.ok(row.reason === expected || row.intended_reason === expected, `${shape}: ${JSON.stringify(row)}`);
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+});
+
+// ---- A store refused by the boundary check: one fixed notice per session, never the path ----
+const REFUSAL_NOTICE_RE = /^CORE notice: automatic memory retrieval is off for this project/;
+
+function runHookSession(prompt, sessionId, env, cwd) {
+  const payload = { prompt, cwd };
+  if (sessionId !== undefined) payload.session_id = sessionId;
+  return spawnSync('node', [HOOK], {
+    input: JSON.stringify(payload),
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(cwd), ...registryEnvFor(cwd), ...env },
+    encoding: 'utf8',
+  });
+}
+
+function retrievalRows(root) {
+  const log = isolatedHooksLog(root);
+  return ex(log) ? rf(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.hook === 'retrieve-context') : [];
+}
+
+// The link name is attacker-chosen (a committed repo can carry any name). On POSIX it carries a
+// newline and an instruction-shaped marker; Windows names can't hold a newline, so the marker alone.
+const HOSTILE_MARKER = 'ZZMARKER-ignore-previous-instructions';
+const HOSTILE_NAME = process.platform === 'win32' ? HOSTILE_MARKER : `evil\n${HOSTILE_MARKER}`;
+
+function refusedStore(prefix) {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), prefix)));
+  const outside = mkdtempSync(join(tmpdir(), `${prefix}outside-`));
+  wf(join(outside, 'dc-9-outside.md'), '---\nid: dc-9-outside\ntype: decision\nstatus: active\ncreated: 2026-07-01\ntopics:\n  - widget\n---\n\nOutside widget body.\n');
+  linkFolder(outside, join(root, '_memories', HOSTILE_NAME));
+  return { root, outside };
+}
+
+test('a refused store gives one fixed notice per session, with the store-refused receipt', async () => {
+  const { REFUSAL_NOTICE } = await import('../../plugins/core/skills/core/hooks/retrieve-context-hook.mjs');
+  const { root, outside } = refusedStore('rh-refused-');
+  try {
+    const first = runHookSession('widget decision', 'sess-A', {}, root);
+    assert.equal(first.status, 0, 'fail-open: exit 0');
+    assert.equal(first.stdout, REFUSAL_NOTICE, 'the first prompt of a session carries exactly the notice');
+    assert.match(first.stdout, REFUSAL_NOTICE_RE);
+    assert.equal(first.stdout.split('\n').filter(Boolean).length, 1, 'one line');
+    assert.doesNotMatch(first.stdout, /dc-9-outside|dc-1-widget/, 'nothing is retrieved through or beside the link');
+
+    const second = runHookSession('widget decision again', 'sess-A', {}, root);
+    assert.equal(second.status, 0);
+    assert.equal(second.stdout, '', 'the same session is told once');
+
+    const fresh = runHookSession('widget decision', 'sess-B', {}, root);
+    assert.equal(fresh.status, 0);
+    assert.equal(fresh.stdout, REFUSAL_NOTICE, 'a new session is told again');
+
+    const rows = retrievalRows(root);
+    assert.equal(rows.length, 3, 'one receipt per prompt');
+    for (const r of rows) {
+      assert.equal(r.action, 'failed');
+      assert.equal(r.reason, 'store-refused');
+      assert.equal(r.error_code, 'STORE_OUTSIDE_ROOT');
+      assert.ok(!JSON.stringify(r).includes(HOSTILE_MARKER), 'the receipt carries no part of the path');
+    }
+    assert.deepEqual(rows.map((r) => r.refusal_notice), ['sent', 'already-sent', 'sent']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('the refusal notice carries no part of the link path, and is fixed text', async () => {
+  const { REFUSAL_NOTICE } = await import('../../plugins/core/skills/core/hooks/retrieve-context-hook.mjs');
+  assert.ok(!REFUSAL_NOTICE.includes(HOSTILE_MARKER));
+  assert.ok(!/[\\/]/.test(REFUSAL_NOTICE.replace('check-units.mjs', '')), 'no path separators in the notice');
+  const { root, outside } = refusedStore('rh-refused-path-');
+  try {
+    const r = runHookSession('widget decision', 'sess-path', {}, root);
+    assert.equal(r.status, 0);
+    assert.ok(!r.stdout.includes(HOSTILE_MARKER), 'the link name never reaches injected context');
+    assert.ok(!r.stdout.includes('evil'), 'not even the part before the newline');
+    assert.ok(!r.stdout.includes(root) && !r.stdout.includes(outside), 'no project or target path');
+    assert.equal(r.stderr, '', 'nothing on stderr either');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a refused store with no session id gives the notice on every prompt', async () => {
+  const { REFUSAL_NOTICE } = await import('../../plugins/core/skills/core/hooks/retrieve-context-hook.mjs');
+  const { root, outside } = refusedStore('rh-refused-nosess-');
+  try {
+    assert.equal(runHookSession('widget decision', undefined, {}, root).stdout, REFUSAL_NOTICE);
+    assert.equal(runHookSession('widget decision', undefined, {}, root).stdout, REFUSAL_NOTICE, 'no id to dedupe on, so it is said again');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a refused store still gives the notice when the marker cannot be written', async () => {
+  const { REFUSAL_NOTICE } = await import('../../plugins/core/skills/core/hooks/retrieve-context-hook.mjs');
+  const { root, outside } = refusedStore('rh-refused-nomark-');
+  try {
+    // The marker name taken by a folder: it can be neither read nor written as a file.
+    mkd(join(root, '_core', '_hooks', 'retrieval-refused.json'), { recursive: true });
+    const a = runHookSession('widget decision', 'sess-C', {}, root);
+    assert.equal(a.status, 0);
+    assert.equal(a.stdout, REFUSAL_NOTICE, 'an unwritable marker still lets the notice through');
+    const b = runHookSession('widget decision', 'sess-C', {}, root);
+    assert.equal(b.stdout, REFUSAL_NOTICE, 'without a marker the notice repeats rather than going silent');
+    assert.ok(retrievalRows(root).every((r) => r.reason === 'store-refused'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a non-boundary pipeline error stays pipeline-error and gives no notice, with a session id', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-pipe-nonotice-')));
+  try {
+    const r = runHookSession('widget decision', 'sess-D', { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, root);
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '', 'no notice for an ordinary crash');
+    const rows = retrievalRows(root);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].reason, 'pipeline-error');
+    assert.equal(ex(join(root, '_core', '_hooks', 'retrieval-refused.json')), false, 'no marker');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
