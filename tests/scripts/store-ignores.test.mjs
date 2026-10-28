@@ -14,8 +14,13 @@ import { recordSessionStart } from '../../plugins/core/skills/core/scripts/lifec
 import { decorateStoreLocked } from '../../plugins/core/skills/core/scripts/decorate-graph.mjs';
 import { withProjectMdWriterLock } from '../../plugins/core/skills/core/scripts/lifecycle-core.mjs';
 import { acquireLock, releaseLock } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
+import { FILE_LINK_SKIP, linkFile, linkFolder } from '../helpers/links.mjs';
 
 const isWin = process.platform === 'win32';
+const NO_FIFO = isWin && 'Windows has no FIFO files';
+// A shell-script git first on PATH shows whether git ran. Without a shell, Node on Windows starts a bare
+// `git` only as git, git.com or git.exe, so the script is never found there.
+const NO_FAKE_GIT = isWin && 'the fake git is a shell script, which Node does not start on Windows';
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
 const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { env, encoding: 'utf8' });
 
@@ -36,7 +41,7 @@ function files(dir) {
 }
 const ignored = (root, rel) => spawnSync('git', ['-C', root, 'check-ignore', '-q', '--no-index', rel], { env }).status === 0;
 
-test('every CORE working file a store writer creates is ignored before anything ran startup; project content is not', { skip: isWin }, () => {
+test('every CORE working file a store writer creates is ignored before anything ran startup; project content is not', () => {
   const root = project();
   try {
     stampFile(root, join(root, '_memories', 'u1.md'), 'h', 'test');
@@ -58,7 +63,7 @@ test('every CORE working file a store writer creates is ignored before anything 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a store's existing .gitignore is left byte-identical, and a second call changes nothing", { skip: isWin }, () => {
+test("a store's existing .gitignore is left byte-identical, and a second call changes nothing", () => {
   const root = project();
   try {
     const mine = '# mine\n!keep-this.json\n';
@@ -71,8 +76,7 @@ test("a store's existing .gitignore is left byte-identical, and a second call ch
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('no store, nothing written; a store that is a link is reported, not written through', { skip: isWin }, async () => {
-  const { symlinkSync, existsSync } = await import('node:fs');
+test('no store, nothing written; a store that is a link is reported, not written through', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
   try {
     assert.deepEqual(ensureStoreIgnores(root), []);
@@ -82,13 +86,13 @@ test('no store, nothing written; a store that is a link is reported, not written
     assert.equal(existsSync(join(root, '_memories', '_lib')), false, 'no _lib is created by the rules alone');
     rmSync(join(root, '_memories'), { recursive: true });
     mkdirSync(join(root, 'elsewhere'));
-    symlinkSync(join(root, 'elsewhere'), join(root, '_memories'));
+    linkFolder(join(root, 'elsewhere'), join(root, '_memories'));
     assert.match(ensureStoreIgnores(root).join(), /not a real folder/);
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('generated self-test rounds and their trigger state are ignored once a round is made; curated gold sets are not', { skip: isWin }, async () => {
+test('generated self-test rounds and their trigger state are ignored once a round is made; curated gold sets are not', async () => {
   const { newRound, markAutoAuthorTriggered } = await import('../../plugins/core/skills/core/scripts/self-test-round.mjs');
   const root = project();
   try {
@@ -105,7 +109,7 @@ test('generated self-test rounds and their trigger state are ignored once a roun
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('the trigger-state writer alone adds the rules before its first write', { skip: isWin }, async () => {
+test('the trigger-state writer alone adds the rules before its first write', async () => {
   const { markAutoAuthorTriggered } = await import('../../plugins/core/skills/core/scripts/self-test-round.mjs');
   const root = project();
   try {
@@ -114,14 +118,13 @@ test('the trigger-state writer alone adds the rules before its first write', { s
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a linked parent never leads the rules outside the project: _memories or _tests as a link to a folder with the child inside', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('a linked parent never leads the rules outside the project: _memories or _tests as a link to a folder with the child inside', () => {
   for (const [parent, child] of [['_memories', '_lib'], ['_tests', 'self-test']]) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-outside-')));
     try {
       mkdirSync(join(outside, child));
-      symlinkSync(outside, join(root, parent));
+      linkFolder(outside, join(root, parent));
       const problems = ensureStoreIgnores(root);
       assert.match(problems.join(), new RegExp(`${parent} is not a real folder`), parent);
       assert.deepEqual(readdirSync(outside), [child], `${parent}: nothing written where the link leads`);
@@ -130,7 +133,7 @@ test('a linked parent never leads the rules outside the project: _memories or _t
   }
 });
 
-test("an existing ignore file that leaves CORE's working files visible is reported, kept byte-identical, and named in the maintenance notes; one the repository's rules cover is not reported", { skip: isWin }, async () => {
+test("an existing ignore file that leaves CORE's working files visible is reported, kept byte-identical, and named in the maintenance notes; one the repository's rules cover is not reported", async () => {
   const { runMaintenance } = await import('../../plugins/core/skills/core/scripts/maintenance-run.mjs');
   const root = project();
   try {
@@ -151,13 +154,12 @@ test("an existing ignore file that leaves CORE's working files visible is report
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('the self-test writers create nothing through a linked _tests folder', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('the self-test writers create nothing through a linked _tests folder', async () => {
   const { newRound, markAutoAuthorTriggered } = await import('../../plugins/core/skills/core/scripts/self-test-round.mjs');
   const root = project();
   const outside = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-outside-')));
   try {
-    symlinkSync(outside, join(root, '_tests'));
+    linkFolder(outside, join(root, '_tests'));
     assert.equal(markAutoAuthorTriggered(root), false);
     assert.throws(() => newRound(root), (e) => e.code === 'SELF_TEST_UNSAFE');
     assert.deepEqual(readdirSync(outside), [], 'nothing written where the link leads');
@@ -167,7 +169,7 @@ test('the self-test writers create nothing through a linked _tests folder', { sk
 const CONTENT = new Set(['_memories/u1.md', '_memories/INDEX-decisions.md', '_memories/inbox.md', '_memories/.gitignore', '_memories/_lib/.gitignore']);
 const generatedIn = (root) => files(join(root, '_memories')).map((p) => relative(root, p).split('\\').join('/')).filter((r) => !CONTENT.has(r) && !/^_memories\/INDEX-[^/]+\.md$/.test(r));
 
-test('each store writer, run alone in a fresh project, leaves every file it creates ignored', { skip: isWin }, async () => {
+test('each store writer, run alone in a fresh project, leaves every file it creates ignored', async () => {
   const { runMaintenance } = await import('../../plugins/core/skills/core/scripts/maintenance-run.mjs');
   const writers = {
     'state-cache stamp': (r) => assert.equal(stampFile(r, join(r, '_memories', 'u1.md'), 'h', 'test').stamped, true),
@@ -192,14 +194,13 @@ test('each store writer, run alone in a fresh project, leaves every file it crea
   }
 });
 
-test('the cache folder is refused, before any write, when git would track what goes in it', { skip: isWin }, async () => {
-  const { symlinkSync } = await import('node:fs');
+test('the cache folder is refused, before any write, when git would track what goes in it', async (t) => {
   const cases = {
     're-included file': (r, lib) => writeFileSync(join(lib, '.gitignore'), '*\n!state-cache.json\n'),
     'already tracked': (r, lib) => { writeFileSync(join(lib, '.gitignore'), '*\n'); writeFileSync(join(lib, 'state-cache.json'), '{"tracked":true}'); git(r, 'add', '-f', '_memories/_lib/state-cache.json'); },
-    'ignore file is a link': (r, lib) => { writeFileSync(join(r, 'elsewhere-ignore'), '*\n'); symlinkSync(join(r, 'elsewhere-ignore'), join(lib, '.gitignore')); },
+    'ignore file is a link': (r, lib) => { writeFileSync(join(r, 'elsewhere-ignore'), '*\n'); linkFile(join(r, 'elsewhere-ignore'), join(lib, '.gitignore')); },
   };
-  for (const [name, plant] of Object.entries(cases)) {
+  for (const [name, plant] of Object.entries(cases)) await t.test(name, { skip: name === 'ignore file is a link' && FILE_LINK_SKIP }, () => {
     const root = project();
     try {
       const lib = join(root, '_memories', '_lib'); mkdirSync(lib);
@@ -214,7 +215,7 @@ test('the cache folder is refused, before any write, when git would track what g
       const after = Object.fromEntries(readdirSync(lib).map((n) => [n, readFileSync(join(lib, n), 'utf8')]));
       assert.deepEqual(after, before, `${name}: nothing in the cache folder changed`);
     } finally { rmSync(root, { recursive: true, force: true }); }
-  }
+  });
 });
 
 // Watches every file write while a writer runs: a CORE working file written into _memories or its cache
@@ -244,7 +245,7 @@ async function firstWriteViolations(root, run) {
   return violations;
 }
 
-test('no CORE working file is written into the store before its ignore file exists, writer by writer', { skip: isWin }, async () => {
+test('no CORE working file is written into the store before its ignore file exists, writer by writer', async () => {
   const { runMaintenance } = await import('../../plugins/core/skills/core/scripts/maintenance-run.mjs');
   const writers = {
     'state-cache stamp': (r) => stampFile(r, join(r, '_memories', 'u1.md'), 'h', 'test'),
@@ -266,7 +267,7 @@ test('no CORE working file is written into the store before its ignore file exis
   }
 });
 
-test('an ignore file that is a FIFO is reported without being opened', { skip: isWin }, () => {
+test('an ignore file that is a FIFO is reported without being opened', { skip: NO_FIFO }, () => {
   const root = project();
   try {
     execFileSync('mkfifo', [join(root, '_memories', '.gitignore')]);
@@ -277,7 +278,7 @@ test('an ignore file that is a FIFO is reported without being opened', { skip: i
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a project with no repository of its own never asks git, even inside a parent repository', { skip: isWin }, async () => {
+test('a project with no repository of its own never asks git, even inside a parent repository', { skip: NO_FAKE_GIT }, async () => {
   const { chmodSync } = await import('node:fs');
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-parent-')));
   const bin = join(parent, 'bin'); mkdirSync(bin);
@@ -294,7 +295,7 @@ test('a project with no repository of its own never asks git, even inside a pare
   } finally { process.env.PATH = path; rmSync(parent, { recursive: true, force: true }); }
 });
 
-test('an exact exception the user wrote for one of the names CORE writes is reported', { skip: isWin }, () => {
+test('an exact exception the user wrote for one of the names CORE writes is reported', () => {
   const root = project();
   try {
     writeFileSync(join(root, '_memories', '.gitignore'), '_close.lock*\n._close.lock*\n.*.lock*\n.*.tmp-*\n_close-marker.json\n_maintenance-state.json\n_pm-state.json\n_capability-drift-log.md\n!_close.lock.g1.done\n');
@@ -302,7 +303,7 @@ test('an exact exception the user wrote for one of the names CORE writes is repo
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a .git that cannot be examined is unknown: the cache folder is refused and the check says it could not run', { skip: isWin }, async () => {
+test('a .git that cannot be examined is unknown: the cache folder is refused and the check says it could not run', async () => {
   const fs = (await import('node:fs')).default;
   const { syncBuiltinESMExports } = await import('node:module');
   const { ensureLibDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
@@ -317,7 +318,7 @@ test('a .git that cannot be examined is unknown: the cache folder is refused and
   } finally { fs.lstatSync = orig; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a later lock generation or round re-included by the user is seen: present files are checked, and re-includes are named as unchecked', { skip: isWin }, async () => {
+test('a later lock generation or round re-included by the user is seen: present files are checked, and re-includes are named as unchecked', async () => {
   const root = project();
   try {
     const all = '_close.lock*\n._close.lock*\n.*.lock*\n.*.tmp-*\n_close-marker.json\n_maintenance-state.json\n_pm-state.json\n_capability-drift-log.md\n';
@@ -333,7 +334,7 @@ test('a later lock generation or round re-included by the user is seen: present 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a .git that is a link or a pointer file keeps its repository outside: git is not run, a custom ignore file is reported as not checked, and the cache folder is not refused', { skip: isWin }, async () => {
+test('a .git that is a link or a pointer file keeps its repository outside: git is not run, a custom ignore file is reported as not checked, and the cache folder is not refused', { skip: NO_FAKE_GIT }, async () => {
   const { symlinkSync, chmodSync } = await import('node:fs');
   const { ensureLibDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
   for (const shape of ['link', 'pointer file']) {
@@ -360,7 +361,7 @@ test('a .git that is a link or a pointer file keeps its repository outside: git 
   }
 });
 
-test('a positive-only custom policy that covers the samples but not the family is reported as unproven; a listing failure is reported', { skip: isWin }, async () => {
+test('a positive-only custom policy that covers the samples but not the family is reported as unproven; a listing failure is reported', async () => {
   const fs = (await import('node:fs')).default;
   const { syncBuiltinESMExports } = await import('node:module');
   const root = project();
@@ -412,7 +413,7 @@ test('maintenance reports a re-include in _core and CORE files git already track
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a per-turn writer only makes sure the ignore file is there: git is never run on that path', { skip: isWin }, async () => {
+test('a per-turn writer only makes sure the ignore file is there: git is never run on that path', { skip: NO_FAKE_GIT }, async () => {
   const { chmodSync } = await import('node:fs');
   const { logEvent } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const root = project();
