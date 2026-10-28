@@ -421,6 +421,57 @@ test('a restore write that fails is reported as restored: false, naming the file
   } finally { s.cleanup(); }
 });
 
+test('a carried receipt whose close lock cannot be released is reported repointed, naming the lock that may still be live', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const lockFile = join(m.now, '_memories', '_close.lock');
+    // The release's rename of the carry's own lock generation to its tombstone fails, once.
+    let failed = 0;
+    const touched = withRename((rename, from, to, ...rest) => {
+      if (String(from).startsWith(lockFile) && String(to).endsWith('.done') && !failed++) throw Object.assign(new Error('synthetic rename failure'), { code: 'EIO' });
+      return rename(from, to, ...rest);
+    }, () => touchProject(s.coreDir, { root: m.now, harness: H }));
+    assert.equal(failed, 1, 'fixture: the close lock release was reached');
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'repointed', count: 1, lock: `release-failed: ${lockFile}` }]);
+    assert.equal(JSON.parse(m.bytes()[0]).root, m.now, 'the carry itself landed');
+    assert.notEqual(currentLockFile(lockFile), null, 'the unreleased generation is still on disk');
+  } finally { s.cleanup(); }
+});
+
+/** Run `fn` with `fs.readFileSync` replaced by `patched(original, path, ...rest)`, as every module importing node:fs sees it. */
+function withReadFile(patched, fn) {
+  const original = fs.readFileSync;
+  fs.readFileSync = (path, ...rest) => patched(original, path, ...rest);
+  syncBuiltinESMExports();
+  try { return fn(); }
+  finally { fs.readFileSync = original; syncBuiltinESMExports(); }
+}
+
+test('a carry that fails reading the original receipt pair after the signed read reports held and leaves the receipt as it was', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const before = m.bytes();
+    const mac = join(m.nowState, `${RECEIPT}.mac`);
+    const lockFile = join(m.now, '_memories', '_close.lock');
+    // The signed read takes the MAC as text; the copy kept for a restore reads it as bytes, and that read fails once.
+    let failed = 0;
+    const touched = withReadFile((read, path, ...rest) => {
+      if (path === mac && rest[0] === undefined && !failed++) throw Object.assign(new Error('synthetic read failure'), { code: 'EIO' });
+      return read(path, ...rest);
+    }, () => touchProject(s.coreDir, { root: m.now, harness: H }));
+    assert.equal(failed, 1, 'fixture: the MAC read for the restore copy was reached');
+    const ev = touched.events.find((e) => e.kind === 'state-moved');
+    assert.ok(ev, 'CORE\'s own move handling ran');
+    assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'held', reason: 'EIO' }]);
+    assert.deepEqual(m.bytes(), before, 'the receipt and its MAC are untouched');
+    assert.equal(currentLockFile(lockFile), null, 'the close lock was released');
+  } finally { s.cleanup(); }
+});
+
 test('a signed receipt with an empty file list, copied into another project, is refused and imports nothing', { todo: 'receipt root binding' }, () => {
   const s = sandbox();
   try {

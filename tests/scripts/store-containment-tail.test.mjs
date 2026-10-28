@@ -6,13 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, readlinkSync, chmodSync, linkSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
-import { storeBoundaryProblem, firstLinkUnder } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { storeBoundaryProblem, firstLinkUnder, synthesisLinkProblem, assertStoreBoundary } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 const isWin = process.platform === 'win32';
@@ -269,6 +271,23 @@ for (const mode of [0o100, 0o000]) {
   });
 }
 
+// The entry test asks for a name that is not there; a folder holding that very name still answers
+// that it can be entered, and is unproven like any other search-only folder.
+test('a search-only subfolder of _memories that holds an entry with the probe\'s own name is still refused', { skip: isWin || isRoot }, () => {
+  const f = storeFixture('control');
+  const sub = join(f.mem, 'observations');
+  mkdirSync(sub);
+  writeFileSync(join(sub, '.core-boundary-probe'), 'x\n');
+  chmodSync(sub, 0o100);
+  try {
+    const problem = storeBoundaryProblem(f.root);
+    assert.deepEqual(problem, { code: 'STORE_BOUNDARY_UNVERIFIED', path: sub, reason: 'EACCES' });
+    const cu = run('check-units.mjs', ['--store', f.root], f.base);
+    assert.equal(cu.status, 3, cu.stderr);
+    assert.match(cu.stderr, /refused: store refused: .*observations could not be checked \(EACCES\)/);
+  } finally { chmodSync(sub, 0o755); f.cleanup(); }
+});
+
 // The case the security review named: `_memories/_validation` can be entered but not listed, and
 // `tests/` inside it holds a link to an outside test file. The walk can't see the link; validate
 // opens `_validation/tests` by its known path and would read through it.
@@ -299,6 +318,23 @@ test('validate refuses a link on its fixed test path even without the shared wal
   } finally { f.cleanup(); }
 });
 
+// A `_validation` with no access at all passes the shared walk (nothing under it can be reached),
+// but validate opens `_validation/tests` by its known path, and that path can't be checked.
+test('a _validation folder with no access: validate refuses its fixed test path as unchecked and writes nothing', { skip: isWin || isRoot }, () => {
+  const f = storeFixture('control');
+  const val = join(f.mem, '_validation');
+  const before = treeSnapshot(f.root);
+  chmodSync(val, 0o000);
+  try {
+    assert.equal(storeBoundaryProblem(f.root), null, 'fixture: the shared walk passes it over');
+    const r = run('validate.mjs', [f.root], f.base);
+    assert.equal(r.status, 3, `${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /refused: store refused: .*_validation\/tests could not be checked \(EACCES\), so it is not known to be inside the project folder/);
+    chmodSync(val, 0o755);
+    assert.deepEqual(treeSnapshot(f.root), before, 'no report was written');
+  } finally { chmodSync(val, 0o755); f.cleanup(); }
+});
+
 test('an unsearchable _memories still passes the shared check: nothing beneath it can be reached', { skip: isWin || isRoot }, () => {
   const f = storeFixture('control');
   try {
@@ -315,5 +351,53 @@ test('a hard-linked unit file is accepted: its bytes are in the project tree and
     assert.equal(storeBoundaryProblem(f.root), null);
     const r = run('check-units.mjs', ['--store', f.root, '--schema'], f.base);
     assert.doesNotMatch(r.stderr, /refused/);
+  } finally { f.cleanup(); }
+});
+
+/** Run `fn` with `fs[name]` replaced by `patched(original, ...args)`, as every module importing node:fs sees it. */
+function withFs(name, patched, fn) {
+  const original = fs[name];
+  fs[name] = (...args) => patched(original, ...args);
+  syncBuiltinESMExports();
+  try { return fn(); }
+  finally { fs[name] = original; syncBuiltinESMExports(); }
+}
+
+const eio = () => Object.assign(new Error('synthetic read failure'), { code: 'EIO' });
+
+test('a store whose listing fails with an unexpected error is unproven, for listing readers too', () => {
+  const f = storeFixture('control');
+  try {
+    for (const listing of [false, true]) {
+      let hits = 0;
+      const problem = withFs('readdirSync', (readdir, path, ...rest) => {
+        if (path === f.mem) { hits++; throw eio(); }
+        return readdir(path, ...rest);
+      }, () => storeBoundaryProblem(f.root, { listing }));
+      assert.equal(hits, 1, 'fixture: the store listing was reached once');
+      assert.deepEqual(problem, { code: 'STORE_BOUNDARY_UNVERIFIED', path: f.mem, reason: 'EIO' }, `listing: ${listing}`);
+    }
+    assert.throws(() => withFs('readdirSync', (readdir, path, ...rest) => {
+      if (path === f.mem) throw eio();
+      return readdir(path, ...rest);
+    }, () => assertStoreBoundary(f.root)), (e) => e.code === 'STORE_BOUNDARY_UNVERIFIED' && e.message === `store refused: ${f.mem} could not be checked (EIO), so it is not known to be inside the project folder`);
+    assert.equal(storeBoundaryProblem(f.root, { listing: true }), null, 'control: the same store lists cleanly without the fault');
+  } finally { f.cleanup(); }
+});
+
+test('a PROJECT.md that cannot be examined is unproven, and the PROJECT.md writers\' check refuses it', () => {
+  const f = storeFixture('control');
+  const project = join(f.root, 'PROJECT.md');
+  try {
+    let hits = 0;
+    const lstatFails = (lstat, path, ...rest) => {
+      if (path === project) { hits++; throw eio(); }
+      return lstat(path, ...rest);
+    };
+    assert.deepEqual(withFs('lstatSync', lstatFails, () => synthesisLinkProblem(f.root)), { code: 'STORE_BOUNDARY_UNVERIFIED', path: project, reason: 'EIO' });
+    assert.equal(hits, 1, 'fixture: the PROJECT.md check was reached');
+    assert.throws(() => withFs('lstatSync', lstatFails, () => assertStoreBoundary(f.root, { synthesis: true })),
+      (e) => e.code === 'STORE_BOUNDARY_UNVERIFIED' && e.message === `store refused: ${project} could not be checked (EIO), so it is not known to be inside the project folder`);
+    assert.equal(synthesisLinkProblem(f.root), null, 'control: the same PROJECT.md passes without the fault');
   } finally { f.cleanup(); }
 });
