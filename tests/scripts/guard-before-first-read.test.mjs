@@ -79,11 +79,12 @@ const REFUSERS = [
   ['audit-memory-boundary.mjs', (p, b) => [p, '--native', join(b, 'MEMORY.md'), '--json']],
   ['audit-memory-boundary.mjs', (p, b) => [p, '--native', join(b, 'MEMORY.md')]],
 ];
-const skip = isWin || FILE_LINK_SKIP;
+// A file link runs wherever this account can make one; a named pipe also needs mkfifo, which is POSIX.
+const pipeSkip = isWin ? 'mkfifo is POSIX' : FILE_LINK_SKIP;
 
 for (const [script, argsFor] of REFUSERS) {
   const label = `${script} ${argsFor('<P>', '<B>').join(' ')}`;
-  test(`PROJECT.md linked to outside text: ${label} refuses, and the text reaches no output or project file`, { skip }, () => {
+  test(`PROJECT.md linked to outside text: ${label} refuses, and the text reaches no output or project file`, { skip: FILE_LINK_SKIP }, () => {
     const f = fixture('file');
     try {
       const before = treeSnapshot(f.root);
@@ -97,7 +98,7 @@ for (const [script, argsFor] of REFUSERS) {
     } finally { f.cleanup(); }
   });
 
-  test(`PROJECT.md linked to a named pipe: ${label} refuses without opening it`, { skip }, () => {
+  test(`PROJECT.md linked to a named pipe: ${label} refuses without opening it`, { skip: pipeSkip }, () => {
     const f = fixture('pipe');
     try {
       const r = run(script, argsFor(f.root, f.base), f.base, PIPE_TIMEOUT_MS);
@@ -128,7 +129,7 @@ test('control: a real PROJECT.md is read by every mode, with no refusal', { skip
 // appears. The per-prompt hook runs this same pipeline (buildRetrievalTrace).
 for (const target of ['pipe', 'file']) {
   for (const extra of [[], ['--pack']]) {
-    test(`retrieve-context ${extra.join(' ')} with PROJECT.md linked to ${target === 'pipe' ? 'a named pipe' : 'outside text'}: it answers and never opens the link`, { skip }, () => {
+    test(`retrieve-context ${extra.join(' ')} with PROJECT.md linked to ${target === 'pipe' ? 'a named pipe' : 'outside text'}: it answers and never opens the link`, { skip: target === 'pipe' ? pipeSkip : FILE_LINK_SKIP }, () => {
       const f = fixture(target);
       try {
         const r = run('retrieve-context.mjs', [f.root, 'inside decision widget', ...extra], f.base, PIPE_TIMEOUT_MS);
