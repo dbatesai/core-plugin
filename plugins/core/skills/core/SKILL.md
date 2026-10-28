@@ -36,10 +36,6 @@ If the user's task explicitly says "skip startup" or "don't bootstrap" — they 
 
 The scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts`. Wherever a protocol writes `<scripts>`, type that path out in full. (If the line above shows the variable unexpanded, the harness didn't substitute it: use this skill's base directory from the header with `/scripts` appended.) One `node <scripts>/<name>.mjs …` per Bash call — nothing chained, no `cd`, no variable prefix, no redirect, no `\` continuation. The `allowed-tools` in this file's frontmatter pre-approves exactly that shape for the turn that invokes `/core`; for every later turn, the two standing rules that `/configure-project --permissions` prints cover it (one for a call with arguments, one for a call without). A chained or variable-prefixed command matches no rule and asks every time.
 
-## Running CORE's scripts
-
-The scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts`. Wherever a protocol writes `<scripts>`, type that path out in full. (If the line above shows the variable unexpanded, the harness didn't substitute it: use this skill's base directory from the header with `/scripts` appended.) One `node <scripts>/<name>.mjs …` per Bash call — nothing chained, no `cd`, no variable prefix, no redirect, no `\` continuation. The `allowed-tools` in this file's frontmatter pre-approves exactly that shape for the turn that invokes `/core`; for every later turn, the two standing rules that `/configure-project --permissions` prints cover it (one for a call with arguments, one for a call without). A chained or variable-prefixed command matches no rule and asks every time.
-
 ---
 
 ## Voice
