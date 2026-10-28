@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { importAgentNotes } from '../../plugins/core/skills/core/scripts/import-agent-notes.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 function setup() {
@@ -212,31 +213,43 @@ test('a pending family publishes the snapshot it recorded, even if the old folde
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
-test('a file named __proto__ is hashed like any other; a saved folder holding a link is not reported readable', { skip: process.platform === 'win32' }, async () => {
-  const { spawnSync } = await import('node:child_process');
+test('a file named __proto__ is hashed like any other', () => {
   const { base, home, root, agent } = setup();
   try {
     writeFileSync(join(home, '.core', 'agents', '__proto__'), 'odd name\n');
     importAgentNotes({ root, home });
     const text = readFileSync(join(agent, 'import-receipt.json'), 'utf8');
     assert.equal(JSON.parse(text).families.agents.files.__proto__, sha('odd name\n'));
-    writeFileSync(join(base, 'outside.md'), 'x\n');
-    symlinkSync(join(base, 'outside.md'), join(agent, 'agents', 'linked.md'));
-    const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../plugins/core/skills/core/scripts/import-agent-notes.mjs'), '--root', root, '--check'], { encoding: 'utf8', env: { ...process.env, HOME: join(base, 'nowhere') } });
-    assert.equal(out.status, 0, out.stderr);
-    assert.match(out.stdout, /do not read: agents \(contains-link\)/);
-    assert.match(out.stdout, /readable: dm-profile\.md, topics\.md/);
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
-test('--check refuses a linked notes folder without reading through it', { skip: process.platform === 'win32' }, async () => {
+const LINKS_IN_AGENTS = {
+  file: [FILE_LINK_SKIP, (base, agent) => { writeFileSync(join(base, 'outside.md'), 'x\n'); linkFile(join(base, 'outside.md'), join(agent, 'agents', 'linked.md')); }],
+  folder: [false, (base, agent) => { mkdirSync(join(base, 'outside')); linkFolder(join(base, 'outside'), join(agent, 'agents', 'linked')); }],
+};
+for (const [shape, [skip, plant]] of Object.entries(LINKS_IN_AGENTS)) {
+  test(`--check: a saved folder holding a ${shape} link is not reported readable`, { skip }, async () => {
+    const { spawnSync } = await import('node:child_process');
+    const { base, home, root, agent } = setup();
+    try {
+      importAgentNotes({ root, home });
+      plant(base, agent);
+      const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../plugins/core/skills/core/scripts/import-agent-notes.mjs'), '--root', root, '--check'], { encoding: 'utf8', env: { ...process.env, HOME: join(base, 'nowhere') } });
+      assert.equal(out.status, 0, out.stderr);
+      assert.match(out.stdout, /do not read: agents \(contains-link\)/);
+      assert.match(out.stdout, /readable: dm-profile\.md, topics\.md/);
+    } finally { rmSync(base, { recursive: true, force: true }); }
+  });
+}
+
+test('--check refuses a linked notes folder without reading through it', async () => {
   const { spawnSync } = await import('node:child_process');
   const { base, root } = setup();
   try {
     mkdirSync(join(base, 'elsewhere'));
     writeFileSync(join(base, 'elsewhere', 'topics.md'), 'outside\n');
     mkdirSync(join(root, '_core'));
-    symlinkSync(join(base, 'elsewhere'), join(root, '_core', '_agent'));
+    linkFolder(join(base, 'elsewhere'), join(root, '_core', '_agent'));
     const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../plugins/core/skills/core/scripts/import-agent-notes.mjs'), '--root', root, '--check'], { encoding: 'utf8' });
     assert.equal(out.status, 1);
     assert.match(out.stderr, /not checked: _agent is not a real folder/);

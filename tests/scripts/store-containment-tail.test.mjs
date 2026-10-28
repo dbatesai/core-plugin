@@ -19,6 +19,7 @@ import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 const isWin = process.platform === 'win32';
 const isRoot = process.getuid?.() === 0;
+const MODES_SKIP = isWin ? 'folder permission modes are POSIX' : isRoot ? 'root is not bound by folder permission modes' : false;
 const SCRIPTS = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/', import.meta.url));
 const MARK = 'OUTSIDE-TEXT-9c2e';
 const OLD = '2025-01-02';
@@ -238,7 +239,7 @@ test('control: a real PROJECT.md and archive are not refused by the writers', { 
 // can't be entered either is passed over: nothing under it can be reached. Project-only memory
 // processing and the graph walk refuse both. A link inside the folder is never read.
 for (const mode of [0o100, 0o000]) {
-  test(`a subfolder of _memories with mode ${mode.toString(8)}: ${mode ? 'the shared check refuses it' : 'the shared check passes it over'}, retrieval says the search is incomplete, the graph walk and project-only refuse`, { skip: isWin || isRoot || FILE_LINK_SKIP }, async () => {
+  test(`a subfolder of _memories with mode ${mode.toString(8)}: ${mode ? 'the shared check refuses it' : 'the shared check passes it over'}, retrieval says the search is incomplete, the graph walk and project-only refuse`, { skip: MODES_SKIP || FILE_LINK_SKIP }, async () => {
     const f = storeFixture('control');
     const sub = join(f.mem, 'observations');
     mkdirSync(sub);
@@ -273,7 +274,7 @@ for (const mode of [0o100, 0o000]) {
 
 // The entry test asks for a name that is not there; a folder holding that very name still answers
 // that it can be entered, and is unproven like any other search-only folder.
-test('a search-only subfolder of _memories that holds an entry with the probe\'s own name is still refused', { skip: isWin || isRoot }, () => {
+test('a search-only subfolder of _memories that holds an entry with the probe\'s own name is still refused', { skip: MODES_SKIP }, () => {
   const f = storeFixture('control');
   const sub = join(f.mem, 'observations');
   mkdirSync(sub);
@@ -291,7 +292,7 @@ test('a search-only subfolder of _memories that holds an entry with the probe\'s
 // The case the security review named: `_memories/_validation` can be entered but not listed, and
 // `tests/` inside it holds a link to an outside test file. The walk can't see the link; validate
 // opens `_validation/tests` by its known path and would read through it.
-test('a search-only folder on validate\'s fixed path, with a link inside: validate refuses and reads nothing through it', { skip: isWin || isRoot || FILE_LINK_SKIP }, () => {
+test('a search-only folder on validate\'s fixed path, with a link inside: validate refuses and reads nothing through it', { skip: MODES_SKIP || FILE_LINK_SKIP }, () => {
   const f = storeFixture('control');
   const val = join(f.mem, '_validation');
   writeFileSync(join(f.outside, 'test-outside.yaml'), `---\nquery: ${MARK} widget\nexpected_memories: [dc-001-inside-decision]\n---\n`);
@@ -320,7 +321,7 @@ test('validate refuses a link on its fixed test path even without the shared wal
 
 // A `_validation` with no access at all passes the shared walk (nothing under it can be reached),
 // but validate opens `_validation/tests` by its known path, and that path can't be checked.
-test('a _validation folder with no access: validate refuses its fixed test path as unchecked and writes nothing', { skip: isWin || isRoot }, () => {
+test('a _validation folder with no access: validate refuses its fixed test path as unchecked and writes nothing', { skip: MODES_SKIP }, () => {
   const f = storeFixture('control');
   const val = join(f.mem, '_validation');
   const before = treeSnapshot(f.root);
@@ -335,7 +336,7 @@ test('a _validation folder with no access: validate refuses its fixed test path 
   } finally { chmodSync(val, 0o755); f.cleanup(); }
 });
 
-test('an unsearchable _memories still passes the shared check: nothing beneath it can be reached', { skip: isWin || isRoot }, () => {
+test('an unsearchable _memories still passes the shared check: nothing beneath it can be reached', { skip: MODES_SKIP }, () => {
   const f = storeFixture('control');
   try {
     chmodSync(f.mem, 0o000);
