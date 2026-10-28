@@ -318,7 +318,7 @@ jobs:
           tests/scripts/store-link-refusal.test.mjs tests/scripts/store-containment-tail.test.mjs
           tests/scripts/project-only.test.mjs tests/scripts/graph-walk.test.mjs
           tests/scripts/guard-before-first-read.test.mjs tests/scripts/metrics-package.test.mjs
-          tests/scripts/store-ignores.test.mjs
+          tests/scripts/store-ignores.test.mjs tests/scripts/in-project-state.test.mjs
 
       - name: The suite must not have written to the real account ~/.core
         shell: bash
