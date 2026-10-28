@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { registerProject, touchProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
-import { writeSignedFile, readSignedFileAt } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writeSignedFile, readSignedFileAt, repointMovedState } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { acquireFileLock, releaseFileLock, currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs', import.meta.url));
@@ -158,15 +158,19 @@ test('a migrated project renamed by letter case only still passes startup\'s app
   } finally { s.cleanup(); }
 });
 
-/** A project registered and touched at `old`, holding a signed receipt with `root`, then moved to `now`. */
-function movedWithReceipt(s, root) {
+/**
+ * A project registered and touched at `old`, holding a signed receipt with `root`, then moved to `now`.
+ * `seed(state, body)` replaces the signed write of the receipt, for receipts this install would not carry.
+ */
+function movedWithReceipt(s, root, { seed } = {}) {
   const old = s.mk('Projects', 'Old');
   registerProject(s.coreDir, old);
   touchProject(s.coreDir, { root: old, harness: H });
   const state = join(old, '_core', H);
   const body = JSON.stringify({ complete: true, migrated_at: '2026-10-01T00:00:00.000Z', harness: H, root: root(old), live: 'legacy', superseded: [],
     files: [{ from: join(s.coreDir, 'workspaces', 'legacy', 'notes.md'), to: join(state, 'notes.md'), sha256: '0'.repeat(64), length: 1 }] }, null, 2) + '\n';
-  writeSignedFile({ dir: state, name: RECEIPT, body, coreDir: s.coreDir });
+  if (seed) seed(state, body);
+  else writeSignedFile({ dir: state, name: RECEIPT, body, coreDir: s.coreDir });
   writeFileSync(join(state, 'notes.md'), 'n\n');
   const now = join(s.base, 'Projects', 'New');
   renameSync(old, now);
@@ -188,6 +192,88 @@ test('a moved project whose receipt names a third folder keeps that receipt exac
     assert.deepEqual(ev.repointed.receipts, [{ folder: m.nowState, status: 'left-root-mismatch' }]);
     assert.deepEqual(m.bytes(), before, 'receipt and its MAC are untouched');
     assert.equal(JSON.parse(before[0]).root, third);
+  } finally { s.cleanup(); }
+});
+
+/** Move handling on `m`, returning the receipt reports after checking the receipt pair is byte-identical. */
+function carryLeavesReceipt(s, m) {
+  const before = m.bytes();
+  const touched = touchProject(s.coreDir, { root: m.now, harness: H });
+  const ev = touched.events.find((e) => e.kind === 'state-moved');
+  assert.ok(ev, 'CORE\'s own move handling ran');
+  assert.deepEqual(m.bytes(), before, 'receipt and its MAC are untouched');
+  return ev.repointed.receipts;
+}
+
+test('a moved project whose receipt is tracked by git keeps that receipt exactly as it was', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    const git = (...args) => spawnSync('git', ['-C', m.now, ...args], { encoding: 'utf8' });
+    assert.equal(git('init', '-q').status, 0, 'fixture: git init');
+    const added = git('add', '-f', `_core/${H}/${RECEIPT}`);
+    assert.equal(added.status, 0, `fixture: the receipt is in the index\n${added.stderr}`);
+    assert.deepEqual(carryLeavesReceipt(s, m), [{ folder: m.nowState, status: 'left-tracked' }]);
+  } finally { s.cleanup(); }
+});
+
+test('a moved project whose receipt does not verify against its MAC keeps that receipt exactly as it was', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old, { seed: (state, body) => {
+      writeSignedFile({ dir: state, name: RECEIPT, body, coreDir: s.coreDir });
+      // Same length, one changed byte: the MAC no longer matches the body.
+      writeFileSync(join(state, RECEIPT), body.replace('"complete": true', '"complete": fals'));
+    } });
+    assert.equal(readSignedFileAt({ dir: m.nowState, name: RECEIPT, coreDir: s.coreDir }), null, 'fixture: the receipt does not verify');
+    assert.deepEqual(carryLeavesReceipt(s, m), [{ folder: m.nowState, status: 'left-unsigned' }]);
+  } finally { s.cleanup(); }
+});
+
+test('a moved project whose signed receipt is not JSON keeps that receipt exactly as it was', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old, { seed: (state, body) => {
+      writeSignedFile({ dir: state, name: RECEIPT, body: body.slice(0, -5), coreDir: s.coreDir });
+    } });
+    assert.notEqual(readSignedFileAt({ dir: m.nowState, name: RECEIPT, coreDir: s.coreDir }), null, 'fixture: the receipt verifies');
+    assert.deepEqual(carryLeavesReceipt(s, m), [{ folder: m.nowState, status: 'left-unreadable' }]);
+  } finally { s.cleanup(); }
+});
+
+test('a moved project whose signed receipt lacks a string root or a file list keeps that receipt exactly as it was', () => {
+  for (const shape of [(r, old) => ({ ...r, root: [old] }), (r) => ({ ...r, files: {} }), () => null]) {
+    const s = sandbox();
+    try {
+      const m = movedWithReceipt(s, (old) => old, { seed: (state, body) => {
+        const old = dirname(dirname(state));
+        writeSignedFile({ dir: state, name: RECEIPT, body: JSON.stringify(shape(JSON.parse(body), old), null, 2) + '\n', coreDir: s.coreDir });
+      } });
+      assert.notEqual(readSignedFileAt({ dir: m.nowState, name: RECEIPT, coreDir: s.coreDir }), null, 'fixture: the receipt verifies');
+      assert.deepEqual(carryLeavesReceipt(s, m), [{ folder: m.nowState, status: 'left-unreadable' }]);
+    } finally { s.cleanup(); }
+  }
+});
+
+test('a moved project whose _memories is not a folder cannot take the close lock, and keeps its receipt exactly as it was', () => {
+  const s = sandbox();
+  try {
+    const m = movedWithReceipt(s, (old) => old);
+    rmSync(join(m.now, '_memories'), { recursive: true, force: true });
+    writeFileSync(join(m.now, '_memories'), 'not a folder\n');
+    assert.deepEqual(carryLeavesReceipt(s, m), [{ folder: m.nowState, status: 'held', reason: 'FOLDER_UNSAFE' }]);
+    assert.equal(readFileSync(join(m.now, '_memories'), 'utf8'), 'not a folder\n', 'the file in the folder\'s place is left as it was');
+  } finally { s.cleanup(); }
+});
+
+test('a carry whose state locations cannot be listed reports the receipts held instead of throwing', () => {
+  const s = sandbox();
+  try {
+    const now = s.mk('Projects', 'New');
+    // An unusable harness name makes the state-location listing throw; the caller's move has already landed.
+    const r = repointMovedState({ root: now, harness: '../x', coreDir: s.coreDir, oldPath: join(s.base, 'Projects', 'Old') });
+    assert.deepEqual(r.receipts, [{ folder: null, status: 'held', reason: 'UNSAFE_HARNESS' }]);
+    assert.deepEqual(r.pins, [{ folder: null, status: 'held: UNSAFE_HARNESS' }]);
   } finally { s.cleanup(); }
 });
 

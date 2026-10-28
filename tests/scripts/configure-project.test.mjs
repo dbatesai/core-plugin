@@ -9,6 +9,7 @@ import {
   resolveCoreRoot, detectHarness, checkManifests, validateStore, detectIdentity,
   readConfiguredMcp, readConnectorMap, planAgentsMd, configureProject, formatReceipt,
 } from '../../plugins/core/skills/core/scripts/configure-project.mjs';
+import { linkFolder } from '../helpers/links.mjs';
 
 const NOW = new Date('2026-06-01T00:00:00Z');
 
@@ -343,6 +344,22 @@ test('CLI: a hard-fail store -> exit 2', async () => {
       '---\nid: bad\ntype: not-a-real-type\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\n---\n# bad\n');
     const child = runCli(['--project', projectPath, '--core-root', coreRoot, '--harness', 'claude-code'], { home });
     assert.equal(child.status, 2, `stdout: ${child.stdout}\nstderr: ${child.stderr}`);
+  });
+});
+
+test('CLI: a linked store -> exit 3, and the plain receipt says the store was refused and names the link', async () => {
+  await withFixture({ units: [] }, async ({ projectPath, coreRoot, home, base }) => {
+    const outside = join(base, 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'dc-1-outside.md'), `${UNIT('dc-1-outside')}OUTSIDE-TEXT\n`);
+    const mem = join(projectPath, '_memories');
+    rmSync(mem, { recursive: true, force: true });
+    linkFolder(outside, mem);
+    const child = runCli(['--project', projectPath, '--core-root', coreRoot, '--harness', 'claude-code'], { home });
+    assert.equal(child.status, 3, `stdout: ${child.stdout}\nstderr: ${child.stderr}`);
+    const line = child.stdout.split(/\r?\n/).find((l) => l.startsWith('  store: '));
+    assert.equal(line, `  store: refused — store refused: ${mem} is a link or leaves the project folder`, child.stdout);
+    assert.ok(!child.stdout.includes('OUTSIDE-TEXT') && !child.stderr.includes('OUTSIDE-TEXT'), 'nothing read through the link is printed');
   });
 });
 

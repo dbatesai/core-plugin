@@ -9,6 +9,7 @@ import {
 } from '../../plugins/core/skills/core/scripts/demote-moves.mjs';
 import { PROJECT_MD_CAP_BYTES } from '../../plugins/core/skills/core/scripts/compact-project.mjs';
 import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
+import { FILE_LINK_SKIP, linkFile } from '../helpers/links.mjs';
 
 const TODAY = '2026-06-02';
 
@@ -137,6 +138,26 @@ test('strict mode keeps a completed item with no backing-unit citation', () => {
   const dir = scratchProject();
   const b = bullet('- [x] **No-unit item 2026-03-01**');
   assert.equal(classifyBullet(b, dir, { today: TODAY, strict: true }).reason, 'no-backing-units');
+});
+
+// ---------- a cited unit is opened by name, so a link there is refused ----------
+
+test('classifyBullet refuses a cited unit that is a link before reading it, in both gates', { skip: FILE_LINK_SKIP }, () => {
+  const dir = scratchProject();
+  const outside = mkdtempSync(join(tmpdir(), 'demote-moves-outside-'));
+  try {
+    // Read through, the outside file would date the item and demote it from the backing unit.
+    const target = join(outside, 'dc-50-old.md');
+    writeFileSync(target, '---\nid: dc-50-old\nstatus: archived\nupdated: 2026-03-01\n---\n\n# dc-50-old\n');
+    const link = join(dir, '_memories', 'dc-50-old.md');
+    linkFile(target, link);
+    const refused = (e) => e.code === 'STORE_OUTSIDE_ROOT' && e.path === link && /^store refused: .* is a link or leaves the project folder$/.test(e.message);
+    assert.throws(() => classifyBullet(bullet('- [x] **Closed an old decision** — see `dc-50-old`.'), dir, { today: TODAY }), refused);
+    assert.throws(() => classifyBullet(bullet('- [x] **Closed an old decision 2026-03-01** — see `dc-50-old`.'), dir, { today: TODAY, strict: true }), refused);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 // ---------- end-to-end demoteMoves writes archive + stub ----------

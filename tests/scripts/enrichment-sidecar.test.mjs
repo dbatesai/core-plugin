@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import {
 } from '../../plugins/core/skills/core/scripts/enrichment-sidecar.mjs';
 import { loadSnapshot } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 import { productRankedIds } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
+import { linkFolder } from '../helpers/links.mjs';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
@@ -41,6 +42,24 @@ test('writer fails closed on same-family generation and persists a hash-keyed si
     assert.equal(raw.records[written.source_sha256].writer_model_family, 'fable');
     assert.equal(raw.records[written.source_sha256].answer_model_family, 'opus');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the writer refuses a linked store before it reads the unit: with no unit where the link leads, the refusal is what it reports, not the failed read', () => {
+  const root = store();
+  const outside = mkdtempSync(join(tmpdir(), 'core-enrichment-outside-'));
+  try {
+    // The outside folder holds no unit, so a read through the link would fail with ENOENT
+    // before any later check could refuse the store.
+    const mem = join(root, '_memories');
+    rmSync(mem, { recursive: true, force: true });
+    linkFolder(outside, mem);
+    assert.throws(() => writeEnrichment(root, payload),
+      (e) => e.code === 'STORE_OUTSIDE_ROOT' && e.message === `store refused: ${mem} is a link or leaves the project folder`);
+    assert.deepEqual(readdirSync(outside), [], 'nothing was written where the link leads');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('edited units invalidate stale enrichment and change the captured product identity', () => {

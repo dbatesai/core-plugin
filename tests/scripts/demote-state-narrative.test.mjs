@@ -8,6 +8,7 @@ import {
   LARGE_BATCH_WARNING_THRESHOLD, ARCHIVE_FILE,
 } from '../../plugins/core/skills/core/scripts/demote-state-narrative.mjs';
 import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
+import { FILE_LINK_SKIP, linkFile } from '../helpers/links.mjs';
 
 const TODAY = '2026-06-09';
 
@@ -91,6 +92,24 @@ test('a bullet citing a still-active unit is kept', () => {
     assert.equal(result.decision, 'keep');
     assert.equal(result.reason, 'cited-unit-still-active');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('classifyStateBullet refuses a cited unit that is a link before reading it', { skip: FILE_LINK_SKIP }, () => {
+  const dir = project([STALE_BULLET]);
+  const outside = mkdtempSync(join(tmpdir(), 'demote-state-outside-'));
+  try {
+    // Read through, the outside file is an archived, aged unit and the bullet would demote.
+    const target = join(outside, 'dc-9-old-fact.md');
+    writeFileSync(target, unit('archived', '2026-01-01'));
+    const link = join(dir, '_memories', 'dc-9-old-fact.md');
+    linkFile(target, link);
+    const bullets = parseStateBullets(extractStateSection(readFileSync(join(dir, 'PROJECT.md'), 'utf8')));
+    assert.throws(() => classifyStateBullet(bullets[0], dir, { today: TODAY }),
+      (e) => e.code === 'STORE_OUTSIDE_ROOT' && e.path === link && /^store refused: .* is a link or leaves the project folder$/.test(e.message));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('a bullet with no Backed-by footer never demotes', () => {
