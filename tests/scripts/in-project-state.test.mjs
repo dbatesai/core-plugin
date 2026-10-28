@@ -3,7 +3,7 @@
 // cross-machine locks, and the no-hand-built-path gate. Every test runs in temp dirs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, chmodSync, statSync, utimesSync, symlinkSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, chmodSync, statSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname, sep } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -17,12 +17,18 @@ import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { appendRows } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 import { acquireFileLock, inspectFileLock, releaseFileLock } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/', import.meta.url));
 const HOOKS = fileURLToPath(new URL('../../plugins/core/skills/core/hooks/', import.meta.url));
 const REGISTRY_CLI = join(SCRIPTS, 'index-registry.mjs');
 const isWin = process.platform === 'win32';
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+// chmod cannot take read access away on Windows, and root reads through it anywhere.
+const MODE_BITS_SKIP = isWin ? 'POSIX mode bits are not enforceable on Windows' : false;
+const UNREADABLE_SKIP = MODE_BITS_SKIP || (isRoot ? 'root reads through chmod 0o000' : false);
+const FIFO_SKIP = isWin ? 'mkfifo is POSIX' : false;
+const norm = (p) => p.split(sep).join('/');
 
 function sandbox() {
   const base = realpathSync(realpathSync.native(mkdtempSync(join(tmpdir(), 'in-project-state-'))));
@@ -212,7 +218,7 @@ test('a git-tracked root pointer is left alone even after every harness has migr
   } finally { s.cleanup(); }
 });
 
-test('a migration interrupted mid-copy leaves no receipt, and the next run completes it', { skip: isWin || isRoot }, () => {
+test('a migration interrupted mid-copy leaves no receipt, and the next run completes it', { skip: UNREADABLE_SKIP }, () => {
   const { s, p, table } = migrationFixture();
   const blocker = join(s.coreDir, 'workspaces', 'legacy', 'hot-section-draft.md');
   try {
@@ -374,7 +380,7 @@ test('no script or hook builds a ~/.core/workspaces path by hand (the migration 
   assert.deepEqual(offenders, []);
 });
 
-test('ensureInstallIdentity keeps the secret owner-only', { skip: isWin }, () => {
+test('ensureInstallIdentity keeps the secret owner-only', { skip: MODE_BITS_SKIP }, () => {
   const s = sandbox();
   try {
     ensureInstallIdentity({ coreDir: s.coreDir });
@@ -497,7 +503,7 @@ test('a force-added .core file that git tracks is ignored, even with a valid MAC
   } finally { s.cleanup(); }
 });
 
-test('a force-added tracked file still reads as absent when git ls-files itself errors (index unreadable)', { skip: isWin || isRoot }, () => {
+test('a force-added tracked file still reads as absent when git ls-files itself errors (index unreadable)', { skip: UNREADABLE_SKIP }, () => {
   // Regression guard: trackedStateFiles() used to fall back to "nothing
   // tracked" whenever the git spawn failed, so an error mid-check (not just a clean
   // "untracked" answer) would let a force-added, validly-MACed control file be read
@@ -627,7 +633,7 @@ test('a manifest whose MAC breaks keeps its turn-capture opt-out too, before and
 
 const RECEIPT_NAME = 'migrated-from.json';
 
-test('a copy that fails part-way keeps every reader and writer out of the half-copied state until a later run finishes it', { skip: isWin || isRoot }, () => {
+test('a copy that fails part-way keeps every reader and writer out of the half-copied state until a later run finishes it', { skip: UNREADABLE_SKIP }, () => {
   const { s, p, table } = migrationFixture();
   const blocker = join(s.coreDir, 'workspaces', 'legacy', 'hot-section-draft.md');
   const inProject = join(p, '_core', H);
@@ -677,12 +683,12 @@ test('a signed receipt whose listed file is gone is not trusted, and is not repa
   } finally { s.cleanup(); }
 });
 
-test('a git-tracked receipt is not trusted', { skip: isWin }, () => {
+test('a git-tracked receipt is not trusted', () => {
   const { s, p, table } = migrationFixture();
   try {
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
     git(p, 'init', '-q');
-    git(p, 'add', '-f', join('_core', H, RECEIPT_NAME));
+    assert.equal(git(p, 'add', '-f', `_core/${H}/${RECEIPT_NAME}`).status, 0);
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'receipt-unverified');
     assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
   } finally { s.cleanup(); }
@@ -713,7 +719,7 @@ test('drift never appends to a destination outside the state, whether the receip
   } finally { s.cleanup(); }
 });
 
-test('an unreadable legacy folder stops the migration: no receipt, no release, state fenced, and a later run completes it', { skip: isWin || isRoot }, () => {
+test('an unreadable legacy folder stops the migration: no receipt, no release, state fenced, and a later run completes it', { skip: UNREADABLE_SKIP }, () => {
   const { s, p, table } = migrationFixture();
   const legacy = join(s.coreDir, 'workspaces', 'legacy');
   const nested = join(legacy, 'metrics', 'classified');
@@ -736,13 +742,13 @@ test('an unreadable legacy folder stops the migration: no receipt, no release, s
   } finally { try { chmodSync(nested, 0o755); } catch { /* gone */ } s.cleanup(); }
 });
 
-test('a symlink inside the legacy workspace is refused, and its target is never copied', { skip: isWin }, () => {
+test('a symlink inside the legacy workspace is refused, and its target is never copied', { skip: FILE_LINK_SKIP }, () => {
   const { s, p, table } = migrationFixture();
   const legacy = join(s.coreDir, 'workspaces', 'legacy');
   try {
     const outside = join(s.base, 'outside-secret.txt');
     writeFileSync(outside, 'not part of the workspace\n');
-    symlinkSync(outside, join(legacy, 'linked-secret.txt'));
+    linkFile(outside, join(legacy, 'linked-secret.txt'));
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
     assert.equal(r.status, 'legacy-held');
     assert.equal(r.code, 'LEGACY_SYMLINK');
@@ -755,7 +761,7 @@ test('a symlink inside the legacy workspace is refused, and its target is never 
   } finally { s.cleanup(); }
 });
 
-test('drift refuses to run over a legacy symlink or unreadable folder and leaves the copies and the receipt as they were', { skip: isWin || isRoot }, () => {
+test('drift refuses to run over a legacy symlink or unreadable folder and leaves the copies and the receipt as they were', () => {
   const { s, p, table } = migrationFixture();
   const legacy = join(s.coreDir, 'workspaces', 'legacy');
   try {
@@ -766,7 +772,7 @@ test('drift refuses to run over a legacy symlink or unreadable folder and leaves
     const projectLog = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === legacyLog).to;
     const logBefore = sha(projectLog);
     writeFileSync(legacyLog, '{"row":1}\n{"row":"old-2"}\n');
-    symlinkSync(join(s.base, 'nowhere'), join(legacy, 'dangling'));
+    linkFolder(join(s.base, 'nowhere'), join(legacy, 'dangling'));
     const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
     assert.equal(d.status, 'legacy-held');
     assert.equal(sha(receiptFile), receiptBefore, 'the receipt is untouched');
@@ -822,10 +828,10 @@ test('a synced project\'s hot state lives in the project and is fenced by the mi
   } finally { s.cleanup(); }
 });
 
-test('the migration CLI exits 3 with its JSON when it could not finish, so startup cannot mistake it for a clean run', { skip: isWin }, () => {
+test('the migration CLI exits 3 with its JSON when it could not finish, so startup cannot mistake it for a clean run', () => {
   const { s, p, table } = migrationFixture();
   try {
-    symlinkSync(join(s.base, 'nowhere'), join(s.coreDir, 'workspaces', 'legacy', 'dangling'));
+    linkFolder(join(s.base, 'nowhere'), join(s.coreDir, 'workspaces', 'legacy', 'dangling'));
     writeFileSync(join(s.coreDir, 'migrate-harness-table.json'), JSON.stringify(table));
     const r = spawnSync(process.execPath, [join(SCRIPTS, 'migrate-workspace-state.mjs'), '--apply', '--root', p, '--harness', H, '--core-dir', s.coreDir], { encoding: 'utf8' });
     assert.equal(r.status, 3);
@@ -1311,7 +1317,7 @@ test("a legacy workspace whose own manifest changes its harness invalidates the 
   } finally { s.cleanup(); }
 });
 
-test('a registry that could not be read while classifying is never recorded as nothing to migrate', { skip: isWin || isRoot }, () => {
+test('a registry that could not be read while classifying is never recorded as nothing to migrate', { skip: UNREADABLE_SKIP }, () => {
   const { s, p, table } = migrationFixture();
   const index = join(s.coreDir, 'index.json');
   try {
@@ -1353,48 +1359,48 @@ test('a legacy manifest that changes between being classified and being fingerpr
 
 const treeOf = (dir) => { const o = {}; const walk = (d, pre) => { for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { if (e.isDirectory()) { o[pre + e.name + '/'] = 'dir'; walk(join(d, e.name), pre + e.name + '/'); } else if (e.isFile()) o[pre + e.name] = readFileSync(join(d, e.name), 'utf8'); else o[pre + e.name] = 'other'; } }; walk(dir, ''); return o; };
 
-test('a legacy workspace folder that is a link is held: nothing is copied into the project and nothing is written where the link leads', { skip: isWin }, () => {
+test('a legacy workspace folder that is a link is held: nothing is copied into the project and nothing is written where the link leads', () => {
   const { s, p, table } = migrationFixture();
   const legacy = join(s.coreDir, 'workspaces', 'legacy');
   const foreign = join(s.coreDir, '..', 'foreign-legacy');
   try {
     renameSync(legacy, foreign);            // the real content now lives somewhere else…
-    symlinkSync(foreign, legacy);           // …and the legacy name is only a link to it
+    linkFolder(foreign, legacy);            // …and the legacy name is only a link to it
     const before = treeOf(foreign);
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
     assert.equal(r.status, 'legacy-held');
     assert.equal(r.code, 'LEGACY_SYMLINK');
-    assert.equal(r.path, legacy);
+    assert.equal(norm(r.path), norm(legacy));
     assert.deepEqual(treeOf(foreign), before, 'no MOVED note or anything else was written there');
     assert.equal(existsSync(join(p, '_core', H, RECEIPT_NAME)), false, 'no completion receipt');
     assert.equal(existsSync(join(p, '_core', H, '.migrating')), false, 'refused before the marker: the project is as it was');
   } finally { s.cleanup(); }
 });
 
-test('a legacy workspaces folder that is itself a link is held before it is listed', { skip: isWin }, () => {
+test('a legacy workspaces folder that is itself a link is held before it is listed', () => {
   const { s, p, table } = migrationFixture();
   const ws = join(s.coreDir, 'workspaces');
   const foreign = join(s.coreDir, '..', 'foreign-workspaces');
   try {
     renameSync(ws, foreign);
-    symlinkSync(foreign, ws);
+    linkFolder(foreign, ws);
     const before = treeOf(foreign);
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
     assert.equal(r.status, 'legacy-held');
     assert.equal(r.code, 'LEGACY_SYMLINK');
-    assert.equal(r.path, ws);
+    assert.equal(norm(r.path), norm(ws));
     assert.deepEqual(treeOf(foreign), before);
     assert.equal(existsSync(join(p, '_core', H, RECEIPT_NAME)), false);
   } finally { s.cleanup(); }
 });
 
-test('a late-registered workspace that is a link is held: the earlier receipt is unchanged, nothing is copied, and nothing is written where the link leads', { skip: isWin }, () => {
+test('a late-registered workspace that is a link is held: the earlier receipt is unchanged, nothing is copied, and nothing is written where the link leads', () => {
   const { s, p, table } = migrationFixture();
   const foreign = join(s.coreDir, '..', 'foreign-late');
   try {
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
     mkdirSync(foreign); writeFileSync(join(foreign, 'workspace.json'), JSON.stringify({ workspace_id: 'legacy-late' })); writeFileSync(join(foreign, 'notes-late.md'), 'FOREIGN\n'); writeFileSync(join(foreign, 'last-active'), '2026-10-01T00:00:00Z\n');
-    symlinkSync(foreign, join(s.coreDir, 'workspaces', 'legacy-late'));
+    linkFolder(foreign, join(s.coreDir, 'workspaces', 'legacy-late'));
     const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
     writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([...index, { workspace_id: 'legacy-late', name: 'legacy-late', path: p }]));
     const table2 = { ...table, entries: { ...table.entries, 'legacy-late': { harness: H, evidence: 'fixture' } } };
@@ -1410,13 +1416,13 @@ test('a late-registered workspace that is a link is held: the earlier receipt is
   } finally { s.cleanup(); }
 });
 
-test('a registered workspace name that is a link is never read through while the migration plan is built', { skip: isWin }, async () => {
+test('a registered workspace name that is a link is never read through while the migration plan is built', async () => {
   const { buildManifest } = await import('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs');
   const { s, p, table } = migrationFixture();
   const foreign = join(s.coreDir, '..', 'foreign-plan');
   try {
     mkdirSync(foreign); writeFileSync(join(foreign, 'last-active'), '2031-01-01T00:00:00Z\n'); writeFileSync(join(foreign, 'workspace.json'), JSON.stringify({ workspace_id: 'linked', agent_name: 'Foreign' }));
-    symlinkSync(foreign, join(s.coreDir, 'workspaces', 'linked'));
+    linkFolder(foreign, join(s.coreDir, 'workspaces', 'linked'));
     const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
     writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([...index, { workspace_id: 'linked', name: 'linked', path: p, last_active: '2026-02-02T00:00:00Z' }]));
     const m = buildManifest({ coreDir: s.coreDir, table });
@@ -1427,7 +1433,7 @@ test('a registered workspace name that is a link is never read through while the
 });
 
 // The fast repeat check must not open a file under a legacy name that has since become a link.
-test('a repeat run after a covered legacy workspace, or the legacy store, became a link opens nothing under it and does not take the fast path', { skip: isWin }, async () => {
+test('a repeat run after a covered legacy workspace, or the legacy store, became a link opens nothing under it and does not take the fast path', async () => {
   const { spawnSync } = await import('node:child_process');
   const { pathToFileURL, fileURLToPath } = await import('node:url');
   const mod = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs')).href;
@@ -1439,7 +1445,7 @@ test('a repeat run after a covered legacy workspace, or the legacy store, became
       assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).fast, true, 'control: an unchanged repeat is fast');
       const name = which === 'workspace' ? join(s.coreDir, 'workspaces', 'legacy') : join(s.coreDir, 'workspaces');
       const foreign = join(s.coreDir, '..', `foreign-${which}`);
-      renameSync(name, foreign); symlinkSync(foreign, name);   // same bytes, now reached only through a link
+      renameSync(name, foreign); linkFolder(foreign, name);   // same bytes, now reached only through a link
       const before = treeOf(foreign);
       const watched = join(s.coreDir, 'workspaces', 'legacy', 'workspace.json');
       const preload = 'data:text/javascript,' + encodeURIComponent(`import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module'; globalThis.opens = 0; for (const k of ['readFileSync', 'openSync']) { const o = fs[k]; fs[k] = (f, ...a) => { if (String(f) === ${JSON.stringify(watched)}) globalThis.opens++; return o(f, ...a); }; } syncBuiltinESMExports();`);
@@ -1470,7 +1476,8 @@ async function runMigrationChild({ p, coreDir, table, watched = null, preloadExt
 }
 
 for (const shape of ['a link', 'a second hard link', 'a FIFO']) {
-  test(`a legacy manifest file that is ${shape} is never opened: the plan skips it, a first migration is held with nothing copied, and a repeat is not fast`, { skip: isWin }, async () => {
+  const skip = shape === 'a FIFO' ? FIFO_SKIP : shape === 'a link' ? FILE_LINK_SKIP : false;
+  test(`a legacy manifest file that is ${shape} is never opened: the plan skips it, a first migration is held with nothing copied, and a repeat is not fast`, { skip }, async () => {
     const { execFileSync } = await import('node:child_process');
     const { linkSync } = await import('node:fs');
     const plant = (leaf, foreignDir) => {
@@ -1478,7 +1485,7 @@ for (const shape of ['a link', 'a second hard link', 'a FIFO']) {
       const moved = join(foreignDir, 'workspace.json');
       if (shape === 'a FIFO') { rmSync(leaf); execFileSync('mkfifo', [leaf]); return; }
       renameSync(leaf, moved);
-      if (shape === 'a link') symlinkSync(moved, leaf); else linkSync(moved, leaf);
+      if (shape === 'a link') linkFile(moved, leaf); else linkSync(moved, leaf);
     };
     // plan + first migration
     const a = migrationFixture();
@@ -1488,7 +1495,7 @@ for (const shape of ['a link', 'a second hard link', 'a FIFO']) {
       assert.equal((await runMigrationChild({ ...a, coreDir: a.s.coreDir, watched: leaf, call: 'manifest' })).opens, 0, 'the plan did not open it');
       const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, watched: leaf });
       assert.equal(r.status, 'legacy-held');
-      assert.equal(r.path, leaf);
+      assert.equal(norm(r.path), norm(leaf));
       assert.equal(r.opens, 0, 'the migration did not open or copy it');
       const inProject = join(a.p, '_core', H);
       assert.equal(existsSync(join(inProject, RECEIPT_NAME)), false, 'no completion receipt');
@@ -1545,21 +1552,21 @@ test("the project's tracked root workspace.json is kept when git cannot say whet
   } finally { c.s.cleanup(); }
 });
 
-test('a last-active file that is a link or a FIFO is never opened while the plan is built; an ordinary one is read', { skip: isWin }, async () => {
+test('a last-active file that is a link or a FIFO is never opened while the plan is built; an ordinary one is read', async (t) => {
   const { execFileSync } = await import('node:child_process');
-  for (const shape of ['ordinary', 'a link', 'a FIFO']) {
+  for (const [shape, skip] of [['ordinary', false], ['a link', FILE_LINK_SKIP], ['a FIFO', FIFO_SKIP]]) await t.test(shape, { skip }, async () => {
     const a = migrationFixture();
     try {
       const leaf = join(a.s.coreDir, 'workspaces', 'legacy', 'last-active');
       rmSync(leaf, { force: true });
       if (shape === 'ordinary') writeFileSync(leaf, '2026-01-01T00:00:00Z\n');
-      if (shape === 'a link') { writeFileSync(join(a.s.coreDir, '..', 'foreign-stamp'), '2031-01-01T00:00:00Z\n'); symlinkSync(join(a.s.coreDir, '..', 'foreign-stamp'), leaf); }
+      if (shape === 'a link') { writeFileSync(join(a.s.coreDir, '..', 'foreign-stamp'), '2031-01-01T00:00:00Z\n'); linkFile(join(a.s.coreDir, '..', 'foreign-stamp'), leaf); }
       if (shape === 'a FIFO') execFileSync('mkfifo', [leaf]);
       const r = await runMigrationChild({ ...a, coreDir: a.s.coreDir, watched: leaf, call: 'manifest' });
       if (shape === 'ordinary') assert.ok(r.opens >= 1, 'control: the ordinary file is read, so the counter sees this path');
       else assert.equal(r.opens, 0, `${shape} was not opened`);
     } finally { a.s.cleanup(); }
-  }
+  });
 });
 
 test('a root pointer kept because git could not say is re-inspected and reported on every repeat, never served from the record', async () => {
@@ -1584,7 +1591,7 @@ test('a root pointer kept because git could not say is re-inspected and reported
   } finally { a.s.cleanup(); }
 });
 
-test('a tracked root pointer survives damaged git metadata and an inherited alternate index; with no repository at all it is replaced', { skip: isWin }, async () => {
+test('a tracked root pointer survives damaged git metadata and an inherited alternate index; with no repository at all it is replaced', async () => {
   const { execFileSync } = await import('node:child_process');
   const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore' });
   // .git replaced by a pointer to a missing git dir: git says "not a git repository", but metadata exists
@@ -1650,12 +1657,9 @@ test('a git index that git itself rejects is never read as "nothing tracked": ge
   }
 });
 
-test('a last-active that cannot be trusted never decides between duplicates: the pair is held and says why; a genuinely absent one falls back to the registry date', { skip: isWin }, async () => {
+test('a last-active that cannot be trusted never decides between duplicates: the pair is held and says why; a genuinely absent one falls back to the registry date', async (t) => {
   const { buildManifest } = await import('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs');
-  const { chmodSync } = await import('node:fs');
-  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
-  const shapes = ['ordinary', 'absent', 'a link', ...(isRoot ? [] : ['unreadable'])];
-  for (const shape of shapes) {
+  for (const [shape, skip] of [['ordinary', false], ['absent', false], ['a link', FILE_LINK_SKIP], ['unreadable', UNREADABLE_SKIP]]) await t.test(shape, { skip }, () => {
     const { s, p, table } = migrationFixture();
     try {
       rmSync(join(p, 'workspace.json'));   // no project pointer, so last-active is the tiebreak
@@ -1667,7 +1671,7 @@ test('a last-active that cannot be trusted never decides between duplicates: the
       const foreign = join(s.coreDir, '..', 'foreign-stamp');
       writeFileSync(foreign, '2031-01-01T00:00:00Z\n');
       if (shape === 'ordinary') writeFileSync(leaf, '2031-01-01T00:00:00Z\n');
-      if (shape === 'a link') symlinkSync(foreign, leaf);
+      if (shape === 'a link') linkFile(foreign, leaf);
       if (shape === 'unreadable') { writeFileSync(leaf, '2031-01-01T00:00:00Z\n'); chmodSync(leaf, 0o000); }
       const m = buildManifest({ coreDir: s.coreDir, table });
       const old = m.entries.find((e) => e.workspace_id === 'legacy-old'), cur = m.entries.find((e) => e.workspace_id === 'legacy');
@@ -1680,7 +1684,7 @@ test('a last-active that cannot be trusted never decides between duplicates: the
         assert.equal(readFileSync(foreign, 'utf8'), '2031-01-01T00:00:00Z\n');
       }
     } finally { s.cleanup(); }
-  }
+  });
 });
 
 test('with GIT_DIR or GIT_WORK_TREE set, a project with no repository of its own keeps its root pointer; one with its own repository still gets a real answer', async () => {
@@ -1787,12 +1791,12 @@ test("the account's own .core is never renamed: the home folder, the passed core
   } finally { s.cleanup(); }
 });
 
-test('a linked .core is left alone, and the project-only hint sees a folder not yet renamed', { skip: isWin }, () => {
+test('a linked .core is left alone, and the project-only hint sees a folder not yet renamed', () => {
   const s = sandbox();
   try {
     const p = s.mk('Projects', 'Linked');
     const elsewhere = s.mk('elsewhere');
-    symlinkSync(elsewhere, join(p, '.core'));
+    linkFolder(elsewhere, join(p, '.core'));
     assert.equal(settleStateFolderName(p), 'legacy-not-a-folder');
     assert.equal(existsSync(join(p, '_core')), false);
     const q = s.mk('Projects', 'Pending');
@@ -1943,16 +1947,16 @@ test('a registered project that already has _core and gets an older .core restor
   } finally { s.cleanup(); }
 });
 
-test('hot writers refuse a linked _sessions or _metrics and write nothing through it; an older marker is never removed', { skip: isWin }, async () => {
+test('hot writers refuse a linked _sessions or _metrics and write nothing through it; an older marker is never removed', async () => {
   const { logEvent, prepareStorageDir } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
   const s = sandbox();
   try {
     const p = s.mk('Projects', 'Hot');
     const away = s.mk('away');
-    symlinkSync(away, join(p, '_sessions'));
+    linkFolder(away, join(p, '_sessions'));
     assert.equal(logEvent(p, 'retrieval-log.jsonl', { k: 1 }, { today: '2026-10-05' }).reason, 'sessions-folder-unsafe');
-    symlinkSync(away, join(p, '_metrics'));
+    linkFolder(away, join(p, '_metrics'));
     assert.throws(() => prepareStorageDir(p), (e) => e.code === 'STORAGE_UNSAFE');
     assert.deepEqual(readdirSync(away), []);
     const q = s.mk('Projects', 'Marker2');
@@ -1965,7 +1969,7 @@ test('hot writers refuse a linked _sessions or _metrics and write nothing throug
   } finally { s.cleanup(); }
 });
 
-test('a session log that is a link is not appended through', { skip: isWin }, async () => {
+test('a session log that is a link is not appended through', { skip: FILE_LINK_SKIP }, async () => {
   const { logEvent } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const s = sandbox();
   try {
@@ -1973,7 +1977,7 @@ test('a session log that is a link is not appended through', { skip: isWin }, as
     mkdirSync(join(p, '_sessions', '2026-10-05'), { recursive: true });
     const outside = join(s.base, 'outside.jsonl');
     writeFileSync(outside, 'untouched\n');
-    symlinkSync(outside, join(p, '_sessions', '2026-10-05', 'retrieval-log.jsonl'));
+    linkFile(outside, join(p, '_sessions', '2026-10-05', 'retrieval-log.jsonl'));
     assert.equal(logEvent(p, 'retrieval-log.jsonl', { k: 1 }, { today: '2026-10-05' }).reason, 'legacy-append-failed');
     assert.equal(readFileSync(outside, 'utf8'), 'untouched\n');
     assert.equal(logEvent(p, 'hygiene-log.jsonl', { k: 1 }, { today: '2026-10-05' }).legacy, true, 'an ordinary log still appends');
@@ -2001,12 +2005,12 @@ test('a session log line is written whole even when the system writes it in piec
 
 const entries = (dir) => readdirSync(dir).sort();
 
-test('a linked _memories holds migration and drift before the lock, leaving the folder it points to untouched', { skip: isWin }, () => {
+test('a linked _memories holds migration and drift before the lock, leaving the folder it points to untouched', () => {
   const s = sandbox();
   try {
     const p = s.mk('Projects', 'NoLegacy');
     const away = s.mk('away-memories');
-    symlinkSync(away, join(p, '_memories'));
+    linkFolder(away, join(p, '_memories'));
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir });
     assert.equal(r.status, 'legacy-held');
     assert.equal(r.code, 'DESTINATION_UNSAFE');
@@ -2019,7 +2023,7 @@ test('a linked _memories holds migration and drift before the lock, leaving the 
     assert.equal(applyMigration({ root: p2, harness: H, coreDir: s2.coreDir, table }).status, 'migrated');
     renameSync(join(p2, '_memories'), join(s2.base, 'memories-kept'));
     const away = s2.mk('away-memories');
-    symlinkSync(away, join(p2, '_memories'));
+    linkFolder(away, join(p2, '_memories'));
     const d = checkLegacyDrift({ root: p2, harness: H, coreDir: s2.coreDir });
     assert.equal(d.status, 'legacy-held');
     assert.equal(d.code, 'DESTINATION_UNSAFE');
@@ -2027,12 +2031,12 @@ test('a linked _memories holds migration and drift before the lock, leaving the 
   } finally { s2.cleanup(); }
 });
 
-test('a linked destination folder holds the copy before any byte lands outside, and no receipt is written', { skip: isWin }, () => {
+test('a linked destination folder holds the copy before any byte lands outside, and no receipt is written', () => {
   const { s, p, table } = migrationFixture();
   try {
     const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
     const away = s.mk('away-metrics');
-    symlinkSync(away, join(hot, 'metrics'));
+    linkFolder(away, join(hot, 'metrics'));
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
     assert.equal(r.status, 'legacy-held');
     assert.equal(r.code, 'DESTINATION_UNSAFE');
@@ -2041,7 +2045,7 @@ test('a linked destination folder holds the copy before any byte lands outside, 
   } finally { s.cleanup(); }
 });
 
-test('drift refuses a new destination under a linked folder, for an append and for a set-aside copy', { skip: isWin }, () => {
+test('drift refuses a new destination under a linked folder, for an append and for a set-aside copy', () => {
   const now = new Date('2026-10-08T12:00:00Z');
   for (const variant of ['append', 'aside']) {
     const { s, p, table } = migrationFixture();
@@ -2055,10 +2059,10 @@ test('drift refuses a new destination under a linked folder, for an append and f
       if (variant === 'append') {
         mkdirSync(join(legacy, 'notes'));
         writeFileSync(join(legacy, 'notes', 'new.jsonl'), '{"row":"new"}\n');
-        symlinkSync(away, join(durable, 'notes'));
+        linkFolder(away, join(durable, 'notes'));
       } else {
         writeFileSync(join(legacy, 'hot-section-draft.md'), 'changed after migration\n');
-        symlinkSync(away, join(durable, 'superseded', 'legacy-2026-10-08'));
+        linkFolder(away, join(durable, 'superseded', 'legacy-2026-10-08'));
       }
       const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir, now });
       assert.equal(d.status, 'legacy-held', variant);
@@ -2069,7 +2073,7 @@ test('drift refuses a new destination under a linked folder, for an append and f
   }
 });
 
-test('drift refuses a replaced legacy workspace or workspaces folder before listing it', { skip: isWin }, () => {
+test('drift refuses a replaced legacy workspace or workspaces folder before listing it', () => {
   for (const which of ['workspace', 'workspaces']) {
     const { s, p, table } = migrationFixture();
     try {
@@ -2080,7 +2084,7 @@ test('drift refuses a replaced legacy workspace or workspaces folder before list
       const foreign = join(s.base, `foreign-${which}`);
       renameSync(target, foreign);
       writeFileSync(join(which === 'workspace' ? foreign : join(foreign, 'legacy'), 'new.jsonl'), '{"foreign":true}\n');
-      symlinkSync(foreign, target);
+      linkFolder(foreign, target);
       const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
       assert.equal(d.status, 'legacy-held', which);
       assert.equal(d.code, 'LEGACY_SYMLINK', which);
@@ -2114,7 +2118,7 @@ test('a sibling receipt missing a listed file does not count toward release; rep
   } finally { s.cleanup(); }
 });
 
-test('the scaffold refuses a linked operational metrics folder, a linked subfolder or a linked _metrics, writing nothing through it', { skip: isWin }, async () => {
+test('the scaffold refuses a linked operational metrics folder, a linked subfolder or a linked _metrics, writing nothing through it', async () => {
   const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
   const env = { CORE_HARNESS: H };
   for (const which of ['metrics', 'classified', '_metrics']) {
@@ -2125,9 +2129,9 @@ test('the scaffold refuses a linked operational metrics folder, a linked subfold
       updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
       const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
       const away = s.mk(`away-${which}`);
-      if (which === 'metrics') symlinkSync(away, join(hot, 'metrics'));
-      else if (which === 'classified') { mkdirSync(join(hot, 'metrics')); symlinkSync(away, join(hot, 'metrics', 'classified')); }
-      else symlinkSync(away, join(p, '_metrics'));
+      if (which === 'metrics') linkFolder(away, join(hot, 'metrics'));
+      else if (which === 'classified') { mkdirSync(join(hot, 'metrics')); linkFolder(away, join(hot, 'metrics', 'classified')); }
+      else linkFolder(away, join(p, '_metrics'));
       const r = initMetrics({ projectDir: p, home: s.home, env });
       assert.equal(r.ok, false, which);
       assert.deepEqual(entries(away), [], `${which}: nothing written through the link`);
@@ -2171,7 +2175,7 @@ test('an older account manifest marking a damaged sibling migrated does not rele
   } finally { s.cleanup(); }
 });
 
-test('a scaffold.log that is a link is not written through, and the scaffold says the log did not land', { skip: isWin }, async () => {
+test('a scaffold.log that is a link is not written through, and the scaffold says the log did not land', { skip: FILE_LINK_SKIP }, async () => {
   const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
   const s = sandbox();
   try {
@@ -2183,7 +2187,7 @@ test('a scaffold.log that is a link is not written through, and the scaffold say
     mkdirSync(join(hot, 'metrics'));
     const outside = join(s.base, 'outside.log');
     writeFileSync(outside, 'kept\n');
-    symlinkSync(outside, join(hot, 'metrics', 'scaffold.log'));
+    linkFile(outside, join(hot, 'metrics', 'scaffold.log'));
     const r = initMetrics({ projectDir: p, home: s.home, env });
     assert.equal(r.ok, true, 'the log stays best-effort');
     assert.match(r.scaffold_log, /^not-written/);
