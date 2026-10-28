@@ -109,7 +109,7 @@ for (const [script, argsFor] of REFUSERS) {
   });
 }
 
-test('control: a real PROJECT.md is read by every mode, with no refusal', { skip: isWin }, () => {
+test('control: a real PROJECT.md is read by every mode, with no refusal', () => {
   const f = fixture('real');
   try {
     for (const [script, argsFor] of REFUSERS) {
