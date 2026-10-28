@@ -59,12 +59,13 @@ function migratedMoved(s) {
   return { old, now, state, stampPath, oldStamp: readFileSync(stampPath), receiptFiles: seeded.files.length, receiptBytes };
 }
 
-const normalize = (s, v) => JSON.parse(JSON.stringify(v).split(s.base).join('<BASE>'));
+// Paths are matched in their JSON-escaped form, then written with forward slashes, so Windows paths compare too.
+const normalize = (s, v) => JSON.parse(JSON.stringify(v).split(JSON.stringify(s.base).slice(1, -1)).join('<BASE>').replaceAll('\\\\', '/'));
 
 /** Registry, cache, pin, receipt and stamp as parsed values, with the sandbox path replaced so two sandboxes compare. */
 function endState(s, m) {
   const rows = JSON.parse(readFileSync(join(s.coreDir, 'projects.json'), 'utf8'))
-    .map(({ registered_at, last_seen, ...rest }) => rest);
+    .map(({ registered_at: _registered, last_seen: _seen, ...rest }) => rest);
   const cache = readProjectCache(m.now);
   const pinFile = join(m.state, 'metrics', 'storage-path.txt');
   const receipt = JSON.parse(readFileSync(join(m.state, RECEIPT), 'utf8'));
@@ -94,7 +95,7 @@ function startup(s, m) {
   return {
     cache: ev.repointed.cache.status,
     pins: ev.repointed.pins.map((p) => p.status),
-    receipts: ev.repointed.receipts.map(({ folder, ...r }) => r),
+    receipts: ev.repointed.receipts.map(({ folder: _folder, ...r }) => r),
   };
 }
 
