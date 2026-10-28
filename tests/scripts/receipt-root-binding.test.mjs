@@ -335,7 +335,7 @@ test('a restore write that fails is reported as restored: false, naming the file
   } finally { s.cleanup(); }
 });
 
-test('a signed receipt with an empty file list, copied into another project, is refused and imports nothing', { todo: 'card 235: receipt root binding' }, () => {
+test('a signed receipt with an empty file list, copied into another project, is refused and imports nothing', { todo: 'receipt root binding' }, () => {
   const s = sandbox();
   try {
     const a = s.mk('Projects', 'A');

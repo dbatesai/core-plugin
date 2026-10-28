@@ -356,7 +356,7 @@ test('probeForHarness hands runStartup the harness under the key runStartup read
   assert.deepEqual(failed, { error: 'boom' }, 'a probe-side failure never throws');
 });
 
-// ── --permissions: the one standing allow rule for CORE's scripts ─────────────
+// ── --permissions: the two standing allow rules for CORE's scripts ────────────
 test('permissionRules: a plugin-cache root globs the version folder; a dev root stays literal', async () => {
   const { permissionRules } = await import('../../plugins/core/skills/core/scripts/configure-project.mjs');
   const cache = permissionRules('/Users/x/.claude/plugins/cache/core/core/3.20.1');

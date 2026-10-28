@@ -315,11 +315,11 @@ function summarizeProbe(rows) {
   return 'ran';
 }
 
-// ── Permissions: the one standing allow rule for CORE's scripts ──────────────
+// ── Permissions: the two standing allow rules for CORE's scripts ─────────────
 // Every CORE command is one plain `node <scripts>/<name>.mjs …` call, so one
-// Bash rule covers all of them. The install path carries a version folder
+// Bash rule shape covers all of them. The install path carries a version folder
 // (…/cache/<marketplace>/core/<version>); replacing that segment with `*` keeps
-// the rule valid across plugin updates — a `*` matches anywhere in a Bash rule.
+// the rules valid across plugin updates — a `*` matches anywhere in a Bash rule.
 // Two rules because a trailing ` *` only also matches the bare command when it
 // is the rule's ONLY wildcard. Forward slashes on every platform: the harness
 // matches the command text, and the agent is told to type the path this way.
@@ -344,9 +344,9 @@ export function userSettingsPath(env = process.env, home = homedir()) {
 
 // Print-only on purpose: this script runs under the skill's own allowed-tools,
 // so a mode that wrote the user's settings would let a pre-approved command widen
-// its own standing permissions with no prompt. The user pastes the rule in.
+// its own standing permissions with no prompt. The user pastes the rules in.
 function formatPermissions(rules, settingsPath) {
-  const L = ['CORE permissions — one standing allow rule for every CORE script call:', ''];
+  const L = ['CORE permissions — two standing allow rules for every CORE script call (with arguments, and without):', ''];
   for (const r of rules) L.push(`  ${r}`);
   L.push('');
   L.push(`Paste into: ${settingsPath}  (permissions.allow)`);
