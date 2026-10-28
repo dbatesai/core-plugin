@@ -3,7 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import cp, { execFileSync, spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { ensureStoreIgnores } from '../../plugins/core/skills/core/scripts/store-ignores.mjs';
@@ -18,9 +19,6 @@ import { FILE_LINK_SKIP, linkFile, linkFolder } from '../helpers/links.mjs';
 
 const isWin = process.platform === 'win32';
 const NO_FIFO = isWin && 'Windows has no FIFO files';
-// A shell-script git first on PATH shows whether git ran. Without a shell, Node on Windows starts a bare
-// `git` only as git, git.com or git.exe, so the script is never found there.
-const NO_FAKE_GIT = isWin && 'the fake git is a shell script, which Node does not start on Windows';
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
 const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { env, encoding: 'utf8' });
 
@@ -38,6 +36,20 @@ function files(dir) {
   const out = [];
   for (const n of readdirSync(dir)) { const p = join(dir, n); if (statSync(p).isDirectory()) out.push(...files(p)); else out.push(p); }
   return out;
+}
+// Records every git started through node:child_process (by any module, this file's helpers included)
+// until the returned restore runs; each call still goes through. Restore before using git() or ignored().
+const GIT_CMD = /^git(\.exe|\.cmd)?$/i;
+function recordGit(calls) {
+  const names = ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync'];
+  const orig = Object.fromEntries(names.map((k) => [k, cp[k]]));
+  for (const k of names) cp[k] = (cmd, ...a) => {
+    const program = String(cmd).trim().split(/\s+/)[0].replace(/^["']|["']$/g, '').split(/[\\/]/).pop();
+    if (GIT_CMD.test(program)) calls.push([cmd, ...(Array.isArray(a[0]) ? a[0] : [])].join(' '));
+    return orig[k](cmd, ...a);
+  };
+  syncBuiltinESMExports();
+  return () => { Object.assign(cp, orig); syncBuiltinESMExports(); };
 }
 const ignored = (root, rel) => spawnSync('git', ['-C', root, 'check-ignore', '-q', '--no-index', rel], { env }).status === 0;
 
@@ -278,21 +290,18 @@ test('an ignore file that is a FIFO is reported without being opened', { skip: N
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a project with no repository of its own never asks git, even inside a parent repository', { skip: NO_FAKE_GIT }, async () => {
-  const { chmodSync } = await import('node:fs');
+test('a project with no repository of its own never asks git, even inside a parent repository', () => {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-parent-')));
-  const bin = join(parent, 'bin'); mkdirSync(bin);
-  const marker = join(parent, 'git-was-run');
-  writeFileSync(join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`); chmodSync(join(bin, 'git'), 0o755);
-  const path = process.env.PATH;
   try {
     execFileSync('git', ['-C', parent, 'init', '-q'], { env });
     const child = join(parent, 'child'); mkdirSync(join(child, '_memories'), { recursive: true });
     writeFileSync(join(child, '_memories', '.gitignore'), '# mine\n');
-    process.env.PATH = `${bin}:${path}`;
-    assert.deepEqual(ensureStoreIgnores(child), []);
-    assert.equal(existsSync(marker), false, 'git was never run, so the parent repository was not consulted');
-  } finally { process.env.PATH = path; rmSync(parent, { recursive: true, force: true }); }
+    const calls = [], restore = recordGit(calls);
+    let problems;
+    try { problems = ensureStoreIgnores(child); } finally { restore(); }
+    assert.deepEqual(calls, [], 'git was never run, so the parent repository was not consulted');
+    assert.deepEqual(problems, []);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
 test('an exact exception the user wrote for one of the names CORE writes is reported', () => {
@@ -334,8 +343,7 @@ test('a later lock generation or round re-included by the user is seen: present 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a .git that is a link or a pointer file keeps its repository outside: git is not run, a custom ignore file is reported as not checked, and the cache folder is not refused', { skip: NO_FAKE_GIT }, async () => {
-  const { symlinkSync, chmodSync } = await import('node:fs');
+test('a .git that is a link or a pointer file keeps its repository outside: git is not run, a custom ignore file is reported as not checked, and the cache folder is not refused', async () => {
   const { ensureLibDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
   for (const shape of ['link', 'pointer file']) {
     const outside = realpathSync(mkdtempSync(join(tmpdir(), 'core-outside-repo-')));
@@ -343,21 +351,21 @@ test('a .git that is a link or a pointer file keeps its repository outside: git 
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-ignores-')));
     mkdirSync(join(root, '_memories'));
     writeFileSync(join(root, '_memories', '.gitignore'), '# mine\n');
-    if (shape === 'link') symlinkSync(join(outside, '.git'), join(root, '.git'));
+    if (shape === 'link') linkFolder(join(outside, '.git'), join(root, '.git'));
     else writeFileSync(join(root, '.git'), `gitdir: ${join(outside, '.git')}\n`);
-    const bin = join(root, '..', `bin-${Date.now()}`); mkdirSync(bin);
-    const marker = join(bin, 'git-was-run');
-    writeFileSync(join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`); chmodSync(join(bin, 'git'), 0o755);
-    const path = process.env.PATH;
+    const calls = [], restore = recordGit(calls);
+    const ran = (step) => assert.deepEqual(calls, [], `${shape}: git was run against the outside repository (${step}): ${calls.join(' | ')}`);
     try {
-      process.env.PATH = `${bin}:${path}`;
-      assert.deepEqual(ensureStoreIgnores(root), ["_memories/.gitignore was not checked: the project's .git is a link or pointer file, and the repository it names is not consulted"], shape);
-      assert.ok(ensureLibDir(root), `${shape}: the cache folder is made`);
+      const custom = ensureStoreIgnores(root); ran('custom ignore file');
+      assert.deepEqual(custom, ["_memories/.gitignore was not checked: the project's .git is a link or pointer file, and the repository it names is not consulted"], shape);
+      const lib = ensureLibDir(root); ran('cache folder');
+      assert.ok(lib, `${shape}: the cache folder is made`);
       rmSync(join(root, '_memories', '.gitignore'));
-      assert.deepEqual(ensureStoreIgnores(root), [], `${shape}: CORE's own file needs no repository to decide`);
-      assert.deepEqual(ensureStoreIgnores(root), [], `${shape}: and stays quiet once written`);
-      assert.equal(existsSync(marker), false, `${shape}: git was never run against the outside repository`);
-    } finally { process.env.PATH = path; rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
+      const own = ensureStoreIgnores(root); ran("CORE's own file");
+      assert.deepEqual(own, [], `${shape}: CORE's own file needs no repository to decide`);
+      const again = ensureStoreIgnores(root); ran('second call');
+      assert.deepEqual(again, [], `${shape}: and stays quiet once written`);
+    } finally { restore(); rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
   }
 });
 
@@ -413,20 +421,15 @@ test('maintenance reports a re-include in _core and CORE files git already track
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a per-turn writer only makes sure the ignore file is there: git is never run on that path', { skip: NO_FAKE_GIT }, async () => {
-  const { chmodSync } = await import('node:fs');
+test('a per-turn writer only makes sure the ignore file is there: git is never run on that path', async () => {
   const { logEvent } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const root = project();
-  const bin = join(root, '..', `bin-hot-${Date.now()}`); mkdirSync(bin);
-  const marker = join(bin, 'git-was-run');
-  writeFileSync(join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`); chmodSync(join(bin, 'git'), 0o755);
-  const path = process.env.PATH;
   try {
     mkdirSync(join(root, '_sessions'));
     writeFileSync(join(root, '_sessions', '.gitignore'), '# mine\n');
-    process.env.PATH = `${bin}:${path}`;
-    logEvent(root, 'retrieval-log.jsonl', { kind: 'x' }, { today: '2026-10-05' });
-    assert.equal(existsSync(marker), false);
+    const calls = [], restore = recordGit(calls);
+    try { logEvent(root, 'retrieval-log.jsonl', { kind: 'x' }, { today: '2026-10-05' }); } finally { restore(); }
+    assert.deepEqual(calls, [], 'git was never run on the per-turn path');
     assert.equal(readFileSync(join(root, '_sessions', '.gitignore'), 'utf8'), '# mine\n', "the user's file is left alone");
-  } finally { process.env.PATH = path; rmSync(root, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
