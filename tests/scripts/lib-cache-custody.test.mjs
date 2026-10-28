@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, linkSync, rmSync, realpathSync, existsSync, symlinkSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, linkSync, rmSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { storeBoundaryProblem } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 import { writeEnrichment } from '../../plugins/core/skills/core/scripts/enrichment-sidecar.mjs';
 import { recordSessionStart, readSessionInventory } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
-const isWin = process.platform === 'win32';
+const FIFO_SKIP = process.platform === 'win32' ? 'mkfifo is POSIX' : false;
 const FOREIGN = 'foreign bytes\n';
 function fixture() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-lib-custody-')));
@@ -20,7 +21,7 @@ function fixture() {
 }
 const payload = { unitPath: 'u1.md', writerModelFamily: 'OPUS', answerModelFamily: 'FABLE', aliases: ['x'] };
 
-test('ordinary cache files, and a lock file holding a second name in the same folder, pass the store check', { skip: isWin }, () => {
+test('ordinary cache files, and a lock file holding a second name in the same folder, pass the store check', () => {
   const f = fixture();
   try {
     writeFileSync(join(f.lib, 'state-cache.json'), '{}');
@@ -57,7 +58,7 @@ for (const [name, body] of [
     assert.throws(() => l.recordSessionStart(root), /store refused/);`],
 ]) {
   for (const shape of ['a second hard link', 'a FIFO']) {
-    test(`a cache file ${name} that is ${shape} is never read or written through`, { skip: isWin }, () => {
+    test(`a cache file ${name} that is ${shape} is never read or written through`, { skip: shape === 'a FIFO' ? FIFO_SKIP : false }, () => {
       const f = fixture();
       try {
         const leaf = join(f.lib, name);
@@ -70,24 +71,24 @@ for (const [name, body] of [
   }
 }
 
-test('a linked _lib folder gets no sidecar, lock or session inventory where the link leads', { skip: isWin }, () => {
+test('a linked _lib folder gets no sidecar, lock or session inventory where the link leads', () => {
   const f = fixture();
   try {
     const outside = join(f.base, 'outside-lib'); mkdirSync(outside);
-    rmSync(f.lib, { recursive: true }); symlinkSync(outside, f.lib);
+    rmSync(f.lib, { recursive: true }); linkFolder(outside, f.lib);
     inChild(f.root, `assert.throws(() => e.writeEnrichment(root, payload), /store refused/);
       assert.throws(() => l.recordSessionStart(root), /store refused/);`);
     assert.deepEqual(readdirSync(outside), [], 'nothing was created through the link');
   } finally { f.cleanup(); }
 });
 
-test('a lock file that is a FIFO, a link or a second hard link is refused before it is read: no hang, nothing written, the planted file kept', { skip: isWin }, () => {
-  for (const shape of ['a FIFO', 'a link', 'a second hard link']) {
+test('a lock file that is a FIFO, a link or a second hard link is refused before it is read: no hang, nothing written, the planted file kept', async (t) => {
+  for (const [shape, skip] of [['a FIFO', FIFO_SKIP], ['a link', FILE_LINK_SKIP], ['a second hard link', false]]) await t.test(shape, { skip }, () => {
     const f = fixture();
     try {
       const lock = join(f.lib, '.enrichment-sidecar.lock');
       if (shape === 'a FIFO') execFileSync('mkfifo', [lock]);
-      else if (shape === 'a link') symlinkSync(f.foreign, lock);
+      else if (shape === 'a link') linkFile(f.foreign, lock);
       else linkSync(f.foreign, lock);
       inChild(f.root, `const fl = await import(${JSON.stringify(scripts + 'file-lock.mjs')});
         const lock = ${JSON.stringify(lock)};
@@ -97,42 +98,44 @@ test('a lock file that is a FIFO, a link or a second hard link is refused before
       assert.equal(existsSync(join(f.lib, 'enrichment-sidecar.json')), false, `${shape}: no sidecar`);
       assert.equal(readFileSync(f.foreign, 'utf8'), FOREIGN, `${shape}: the other name keeps its bytes`);
     } finally { f.cleanup(); }
-  }
+  });
 });
 
-test('a held lock generation replaced by a FIFO or a link before release: release fails by name without reading it, and the operation result or error is kept', { skip: isWin }, () => {
-  const f = fixture();
-  try {
-    const lock = join(f.lib, '.probe.lock');
-    inChild(f.root, `const fl = await import(${JSON.stringify(scripts + 'file-lock.mjs')});
-      const { execFileSync } = await import('node:child_process');
-      const fs = await import('node:fs');
-      const lock = ${JSON.stringify(lock)}, foreign = ${JSON.stringify(f.foreign)};
-      const replace = (shape) => { const g = fl.currentLockFile(lock); fs.rmSync(g); if (shape === 'fifo') execFileSync('mkfifo', [g]); else fs.symlinkSync(foreign, g); return g; };
-      // healthy control
-      let got = fl.acquireFileLock(lock);
-      assert.equal(got.ok, true);
-      assert.equal(fl.releaseFileLock(lock, got.nonce).released, true);
-      for (const shape of ['fifo', 'link']) {
+test('a held lock generation replaced by a FIFO or a link before release: release fails by name without reading it, and the operation result or error is kept', async (t) => {
+  // The FIFO half keeps the operation's result through a failed release; the link half keeps the operation's own error.
+  for (const [shape, skip] of [['fifo', FIFO_SKIP], ['link', FILE_LINK_SKIP]]) await t.test(shape, { skip }, () => {
+    const f = fixture();
+    try {
+      const lock = join(f.lib, '.probe.lock');
+      inChild(f.root, `const fl = await import(${JSON.stringify(scripts + 'file-lock.mjs')});
+        const { execFileSync } = await import('node:child_process');
+        const fs = await import('node:fs');
+        const lock = ${JSON.stringify(lock)}, foreign = ${JSON.stringify(f.foreign)}, shape = ${JSON.stringify(shape)};
+        const replace = (shape) => { const g = fl.currentLockFile(lock); fs.rmSync(g); if (shape === 'fifo') execFileSync('mkfifo', [g]); else fs.symlinkSync(foreign, g); return g; };
+        // healthy control
+        let got = fl.acquireFileLock(lock);
+        assert.equal(got.ok, true);
+        assert.equal(fl.releaseFileLock(lock, got.nonce).released, true);
         got = fl.acquireFileLock(lock);
         assert.equal(got.ok, true, shape);
-        const g = replace(shape);
+        const planted = replace(shape);
         const rel = fl.releaseFileLock(lock, got.nonce);
         assert.equal(rel.released, false, shape);
         assert.equal(rel.reason, 'unsafe-lock-file', shape);
-        assert.ok(fs.lstatSync(g), shape + ': the planted file is left in place');
+        assert.ok(fs.lstatSync(planted), shape + ': the planted file is left in place');
         assert.equal(fl.releaseFileLock(lock, null, { force: true }).released, true, 'operator force release clears it');
-      }
-      // the operation's result survives a failed release
-      got = fl.acquireFileLock(lock);
-      assert.throws(() => fl.withAcquiredFileLock(lock, got.nonce, () => { replace('fifo'); return 'material'; }),
-        (err) => err.code === 'LOCK_RELEASE_FAILED' && err.operationResult === 'material' && err.releaseResult.reason === 'unsafe-lock-file');
-      fl.releaseFileLock(lock, null, { force: true });
-      // and so does the operation's own error
-      got = fl.acquireFileLock(lock);
-      assert.throws(() => fl.withAcquiredFileLock(lock, got.nonce, () => { replace('link'); throw new Error('boom'); }),
-        (err) => err.message === 'boom' && err.lockReleaseFailure.reason === 'unsafe-lock-file');
-      fl.releaseFileLock(lock, null, { force: true });`);
-    assert.equal(readFileSync(f.foreign, 'utf8'), FOREIGN);
-  } finally { f.cleanup(); }
+        got = fl.acquireFileLock(lock);
+        if (shape === 'fifo') {
+          // the operation's result survives a failed release
+          assert.throws(() => fl.withAcquiredFileLock(lock, got.nonce, () => { replace('fifo'); return 'material'; }),
+            (err) => err.code === 'LOCK_RELEASE_FAILED' && err.operationResult === 'material' && err.releaseResult.reason === 'unsafe-lock-file');
+        } else {
+          // and so does the operation's own error
+          assert.throws(() => fl.withAcquiredFileLock(lock, got.nonce, () => { replace('link'); throw new Error('boom'); }),
+            (err) => err.message === 'boom' && err.lockReleaseFailure.reason === 'unsafe-lock-file');
+        }
+        fl.releaseFileLock(lock, null, { force: true });`);
+      assert.equal(readFileSync(f.foreign, 'utf8'), FOREIGN);
+    } finally { f.cleanup(); }
+  });
 });

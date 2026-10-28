@@ -3,14 +3,15 @@
 // is created, read or locked, and nothing foreign is inherited or changed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, symlinkSync, linkSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, linkSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stampFiles, readProjectCache, cacheCustodyProblem, CACHE_UNREADABLE, CACHE_ABSENT } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
+import { linkFolder, linkFile, FILE_LINK_SKIP } from '../helpers/links.mjs';
 
-const skip = process.platform === 'win32';
+const FIFO_SKIP = process.platform === 'win32' ? 'mkfifo is POSIX' : false;
 const FOREIGN = JSON.stringify({ files: { 'FOREIGN.md': { last_hash: 'f0f0', last_written_by: 'someone-else' } } }, null, 2) + '\n';
 const ENTRY = [{ path: 'a.md', hash: 'abc', lastWrittenBy: 'test' }];
 function setup() {
@@ -22,7 +23,7 @@ function setup() {
   return { base, root, foreign, snapshot, cleanup: () => rmSync(base, { recursive: true, force: true }) };
 }
 
-test('control: a regular project stamps its own cache; a never-stamped project reads as absent; an alias path works', { skip }, () => {
+test('control: a regular project stamps its own cache; a never-stamped project reads as absent; an alias path works', () => {
   const s = setup();
   try {
     assert.equal(cacheCustodyProblem(s.root), null);
@@ -30,7 +31,7 @@ test('control: a regular project stamps its own cache; a never-stamped project r
     assert.equal(stampFiles(s.root, ENTRY).stamped, true);
     assert.equal(readProjectCache(s.root).files['a.md'].last_hash, 'abc');
     assert.equal(stampFiles(s.root, [{ path: 'b.md', hash: 'def', lastWrittenBy: 'test' }]).stamped, true, 'a second stamp over its own cache and released lock');
-    const alias = join(s.base, 'alias'); symlinkSync(s.root, alias);
+    const alias = join(s.base, 'alias'); linkFolder(s.root, alias);
     assert.equal(stampFiles(alias, [{ path: 'c.md', hash: '123', lastWrittenBy: 'test' }]).stamped, true);
     assert.deepEqual(Object.keys(readProjectCache(s.root).files).sort(), ['a.md', 'b.md', 'c.md']);
     assert.deepEqual(s.snapshot(), { 'state-cache.json': FOREIGN });
@@ -38,13 +39,13 @@ test('control: a regular project stamps its own cache; a never-stamped project r
 });
 
 const cases = {
-  '_memories/_lib is a link out': (s) => symlinkSync(s.foreign, join(s.root, '_memories', '_lib')),
-  '_memories is a link out': (s) => { rmSync(join(s.root, '_memories'), { recursive: true }); mkdirSync(join(s.foreign, '_lib')); symlinkSync(s.foreign, join(s.root, '_memories')); },
-  'the cache file is a link': (s) => { mkdirSync(join(s.root, '_memories', '_lib')); symlinkSync(join(s.foreign, 'state-cache.json'), join(s.root, '_memories', '_lib', 'state-cache.json')); },
-  'the cache file has a second hard link': (s) => { mkdirSync(join(s.root, '_memories', '_lib')); linkSync(join(s.foreign, 'state-cache.json'), join(s.root, '_memories', '_lib', 'state-cache.json')); },
-  'a lock generation has a second hard link': (s) => { mkdirSync(join(s.root, '_memories', '_lib')); writeFileSync(join(s.foreign, 'lockish'), '{}'); linkSync(join(s.foreign, 'lockish'), join(s.root, '_memories', '_lib', '.state-cache.lock.g1')); },
+  '_memories/_lib is a link out': [false, (s) => linkFolder(s.foreign, join(s.root, '_memories', '_lib'))],
+  '_memories is a link out': [false, (s) => { rmSync(join(s.root, '_memories'), { recursive: true }); mkdirSync(join(s.foreign, '_lib')); linkFolder(s.foreign, join(s.root, '_memories')); }],
+  'the cache file is a link': [FILE_LINK_SKIP, (s) => { mkdirSync(join(s.root, '_memories', '_lib')); linkFile(join(s.foreign, 'state-cache.json'), join(s.root, '_memories', '_lib', 'state-cache.json')); }],
+  'the cache file has a second hard link': [false, (s) => { mkdirSync(join(s.root, '_memories', '_lib')); linkSync(join(s.foreign, 'state-cache.json'), join(s.root, '_memories', '_lib', 'state-cache.json')); }],
+  'a lock generation has a second hard link': [false, (s) => { mkdirSync(join(s.root, '_memories', '_lib')); writeFileSync(join(s.foreign, 'lockish'), '{}'); linkSync(join(s.foreign, 'lockish'), join(s.root, '_memories', '_lib', '.state-cache.lock.g1')); }],
 };
-for (const [name, plant] of Object.entries(cases)) {
+for (const [name, [skip, plant]] of Object.entries(cases)) {
   test(`refused, nothing foreign inherited or changed: ${name}`, { skip }, () => {
     const s = setup();
     try {
@@ -63,7 +64,7 @@ for (const [name, plant] of Object.entries(cases)) {
   });
 }
 
-test('a FIFO where the cache file should be is refused without being opened: the read and the stamp both return, bounded', { skip }, () => {
+test('a FIFO where the cache file should be is refused without being opened: the read and the stamp both return, bounded', { skip: FIFO_SKIP }, () => {
   const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const mod = pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts/state-cache.mjs')).href;
   const s = setup();

@@ -319,6 +319,8 @@ jobs:
           tests/scripts/project-only.test.mjs tests/scripts/graph-walk.test.mjs
           tests/scripts/guard-before-first-read.test.mjs tests/scripts/metrics-package.test.mjs
           tests/scripts/store-ignores.test.mjs tests/scripts/in-project-state.test.mjs
+          tests/scripts/capture-custody.test.mjs tests/scripts/lib-cache-custody.test.mjs
+          tests/scripts/state-cache-custody.test.mjs
 
       - name: The suite must not have written to the real account ~/.core
         shell: bash
