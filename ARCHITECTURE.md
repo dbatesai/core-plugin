@@ -152,7 +152,7 @@ The validation report includes a final qualitative field: *"Did retrieval feel r
 
 CORE measures how well it recognizes a project across sessions. A per-turn classifier labels each turn with one of six recognition states; a daily rollup aggregates them and writes a one-line signal that the readiness summary surfaces when recognition is slipping. Companion detectors flag non-resolving citations, stale context, and anticipation gaps.
 
-Capture runs by default into the project's own `_metrics/` folder; capture itself does not upload it, though a cloud-synced project folder syncs it. `metrics_enabled: false` in the project's `.core/<harness>/workspace.json`, or `CORE_METRICS_ENABLED=0`, opts out of producers that honor the capture gate. The base local retrieval/outcome JSONL event writer remains on; these flags are not a guarantee that no operational event is written. See `protocols/data-storage.md` §"Two capture streams, one exporter boundary".
+Capture runs by default into the project's own `_metrics/` folder; capture itself does not upload it, though a cloud-synced project folder syncs it. `metrics_enabled: false` in the project's `_core/<harness>/workspace.json`, or `CORE_METRICS_ENABLED=0`, opts out of producers that honor the capture gate. The base local retrieval/outcome JSONL event writer remains on; these flags are not a guarantee that no operational event is written. See `protocols/data-storage.md` §"Two capture streams, one exporter boundary".
 
 The classifier is **PROVISIONAL**. It isn't calibrated, so the readiness summary only flags an *upward* recognition-failure trend — never an absolute level — and every surface that shows the signal says PROVISIONAL. Calibration clears once a human-labeled set reaches a 0.7-precision gate, and that precision is computed only from the labels, never from the classifier's own output.
 
@@ -164,7 +164,7 @@ The classifier is **PROVISIONAL**. It isn't calibrated, so the readiness summary
 |---|---|
 | Skill product (this plugin) | Installed via `/plugin install core@core` into `~/.claude/plugins/cache/<marketplace>/core/<version>/skills/core/`. Legacy direct-install at `~/.claude/skills/core/` is recognized for clone-into-skills users. |
 | User's project context | User-owned. `<user-project>/_memories/` plus the rendered `<user-project>/PROJECT.md`. |
-| Per-project operational state | Inside the project at `<user-project>/.core/<harness>/`, one folder per harness — the agent's name for the project, session records, derived metrics, receipts. The folder ignores itself in git, and CORE trusts it only when its signature matches this machine's install secret, so state that arrives in a clone is set aside unread. |
+| Per-project operational state | Inside the project at `<user-project>/_core/<harness>/` (an older `.core` folder is renamed once), one folder per harness — the agent's name for the project, session records, derived metrics, receipts. The folder ignores itself in git, and CORE trusts it only when its signature matches this machine's install secret, so state that arrives in a clone is set aside unread. |
 | Cross-project operational meta | Machine-local at `~/.core/` — the agent's profile, the registered-project list, the install secret, the controlled vocabulary, saved agent configs, and cross-project research. |
 | Auto-memory | Machine-local at `~/.claude/projects/<hash>/memory/`. Cached, rebuilt each bootstrap. |
 
