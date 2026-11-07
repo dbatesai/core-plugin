@@ -49,7 +49,7 @@ Then load project context from the folder by reading it: `PROJECT.md`, the unit 
 - automatic per-turn retrieval and the capture inside it;
 - the automatic end-of-session close (the user closes with `/finalize project-only`, which records a partial close: the native memory refresh can't run here);
 - collab sync;
-- the capability probe, legacy migration and drift check;
+- legacy migration and drift check;
 - nothing removes captured turns on a schedule. The explicit commands work here: `project-only.mjs retention --root <root>` lists this folder's capture files older than 30 days and `--apply` removes them. The explicit purge does too: `project-only.mjs purge --root <root>` lists what it would remove from this folder and `--apply` removes it. It can't see copies kept outside the folder, so it reports those as unknown and says `purged-in-project`; tell the user that a normal session's purge is what covers the rest;
 - `/metrics` and its export, `/configure-project` and `/memory-view`. Each reads or writes outside the folder today, so don't run their scripts here; `project-only.mjs <name>` answers `unavailable` for each. Say so if the user asks for one, and that a normal session can run it.
 
@@ -197,13 +197,7 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 - Read `<project>/_sources/*.yaml` if the directory exists — the registered external sources for this project. Note the names and count for the readiness summary.
 - Read the project's manifest (`index-registry.mjs manifest --root <root>`) for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
-After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them. The example below shows the schema only — fill every value from what actually happened this bootstrap: `units_retrieved` lists the units your grep or walk actually selected (real ids from THIS project), `intent_topics` the actual session-intent topics, the counts the real counts. Logging the placeholder values records a retrieval that never happened.
-
-```bash
-node <scripts>/record-retrieval-event.mjs <project> --event-json '{"trigger":"session-start","intent_topics":["<actual-topic-1>","<actual-topic-2>"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"<unit-id-actually-retrieved>","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200}'
-```
-
-Tier 0 in-context reuse does not need a retrieval row. Do NOT stamp a usefulness judgment at retrieval time — whether a retrieved unit actually helped is a later, separate fact (the offered → exposed → attributed → outcome ladder); a usefulness field filled at retrieval time is self-graded homework at the wrong instant.
+Startup writes no retrieval-analytics row. Retrieval analytics are opt-in: when a project has them turned on, the per-turn hook records its own retrieval events.
 
 **Skip these surfaces at bootstrap:**
 - Session summaries in `<project>/_summaries/` (or legacy `_handoffs/` if the rename hasn't happened yet). They're narrative for the human reader. Facts worth keeping were already in PROJECT.md or the units at session close. Re-reading summaries re-anchors you on narrative framing and can resurrect user-deleted facts.
@@ -239,11 +233,7 @@ Surface any genuine user edit in the readiness summary before the agenda.
 node <scripts>/decorate-graph.mjs <project>
 
 node <scripts>/maintenance-run.mjs <project> --json
-
-node <scripts>/metrics-disclosure.mjs check <root>
 ```
-
-**The metrics disclosure runs here too, on every project.** CORE stores each turn's prompt and the memory context it delivered, on this machine, by default. A project that already existed when that capability arrived is exactly the one whose owner was never told — so the notice cannot live only on the new-workspace scaffold. The script self-gates: it prints the notice and stamps the manifest the first time, and is a silent no-op on every session after. If it prints anything, put that text in the readiness summary verbatim, once. It is also invoked from `protocols/startup-conditional-loads.md` for brand-new workspaces; the flag makes the double call harmless.
 
 **This runs AFTER edit-detection above, never before — mixed-ownership writers launder unreconciled edits.** Run before edit-detection reads the files it classifies, this backstop would silently absorb a between-session user edit to a unit body or PROJECT.md: decoration/hot-section would preserve the user's bytes but then unconditionally stamp a FRESH baseline over them, and the classifier would then read the file as CORE's own regenerated block (`edges-block-only`/`hot-block-only`) instead of the genuine user edit it actually was — bytes survive, but the fact that they changed is never observed, attributed, or propagated. Running this step only after edit-detection has already read and classified the pre-decoration bytes closes that window at the protocol level, matching the ordering the startup catch-up below requires for the exact same reason.
 
@@ -406,20 +396,6 @@ Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot
 
 **First — view memory.** Before any other compose-time action, re-check the auto-memory loaded in Identity load (the harness injects this into context, typically as `MEMORY.md`), especially the cross-project feedback memories. Recognition-failure looks like having memory loaded but not reaching for it; an explicit re-check at the top of composition closes the gap. Mirrors Anthropic's memory-tool system prompt — *always view your memory directory before doing anything else.*
 
-**Run capability probe (fail-open, failure visible).** Run:
-
-```bash
-node <scripts>/capability-probe.mjs --startup --json --out <hot>/capability-state.json
-```
-
-Fail-open but never silent: `--out` writes the JSON to the file and prints one summary line; a non-zero exit is `CORE-CAPABILITY-PROBE-FAILED` — capability evidence is stale this session, and the readiness summary says so.
-
-Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/process-memory` and `/metrics`: Fail-open but not silent: if both the project state and the project `_metrics/` fallback fail, the script prints a one-line error to stderr — leave that visible rather than discarding it, so a dead snapshot path surfaces instead of failing invisibly for months.
-
-```bash
-node <scripts>/record-capability-snapshot.mjs --cwd <root> --from <hot>/capability-state.json
-```
-
 **Scaffold the metrics store (never fatal, failure VISIBLE).** Once the project root is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write. Captured turns live in the project's own `_metrics/` on every platform, synced folder or not; a folder an earlier version used outside the project is read-only history that the metrics notice and the purge name. Idempotent and never fatal — but a scaffold failure is never discarded.
 
 ```bash
@@ -427,12 +403,6 @@ node <scripts>/metrics-init.mjs <project>
 ```
 
 A non-zero exit is `CORE-METRICS-INIT-FAILED`: put one plain-voice line in the readiness summary saying metrics capture is off and why; never report a healthy capture state over a failed scaffold.
-
-**Metrics tripwires (v3.14.0 Link 5 — proactive degradation surfacing).** A cheap check over the PINNED scorecards and capture health — never a live recomputation. Run it right after the scaffold; echo each stdout line **verbatim** into the readiness summary (the lines are already written in plain language with the likely locus). No output → say nothing, per the readiness-only-escalations rule.
-
-```bash
-node <scripts>/metrics-tripwires.mjs <project>
-```
 
 **Before composing — check context integrity.** You can answer from partial context without noticing it: MEMORY.md gets truncated at the injection cap, and a large PROJECT.md can exceed a single read. Run `check-context-integrity.mjs` with the lines you actually read from PROJECT.md this bootstrap (the returning-workspace Tier-1 load reads it in full or paged — pass that read-extent). The script resolves the auto-memory surface for the running harness itself: on Claude Code it derives `~/.claude/projects/<slug>/memory/MEMORY.md` from the git worktree root (the cwd outside a repo — the folder the harness itself injects); on a harness with no auto-memory file surface (Codex) the memory check is explicitly skipped and the marker says so — it is never a false check against the Claude-only path. Pass `--memory <path>` only to override, `--harness <name>` only if detection needs forcing. If the marker comes back `CONTEXT-PARTIAL`, say what's missing in plain voice **before** your first substantive answer — *"Heads up: MEMORY.md is over the injection cap, so I'm missing roughly 12 of its entries this session, and I only loaded 80 of PROJECT.md's 2200 lines. I'll read the rest before I lean on anything from there."* A bare `CONTEXT-COMPLETE` marker needs no narration; a `CONTEXT-COMPLETE (MEMORY.md check skipped …)` marker means the memory side was not measured — mention it once if the user asks about memory state.
 
@@ -442,15 +412,7 @@ node <scripts>/check-context-integrity.mjs --cwd <project> --project <project>/P
 
 **Per-turn retrieval (default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**, and it injects only for a project registered in `~/.core` (a folder's own `_memories/` authorizes nothing, so a cloned repo's planted store is never injected; before the first `/core` registers the project, automatic retrieval stays off); opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the metrics opt-out). When the keyword result is empty or thin for a question, the hook also injects an escalation pack — the first two candidate shards as `id — summary` rows, capped at 32 KB — so the agent reasons over them in the same turn; `CORE_ESCALATION=0` turns that off (`references/retrieval.md` §Tier 3 has the trigger and the other switches). Known limit: lexical matching can still inject a topical-but-irrelevant unit on an abstract query the trigger doesn't catch — bounded (byte-capped, advisory, fail-open).
 
-Read the output. When **any row is non-PASS**, say so once, in plain and calm words: name the check that came back short, what that means for this session, and what the user can do about it, if anything. Do not call the session "ready" or "certified" on a degraded row, and do not turn the row's code name into a headline. For example:
-
-> *"One check came back short: CORE couldn't confirm which plugin copy this session is running, so treat my notes about who I am here as best-effort until that's sorted."*
-
-When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
-
-If the scripts path is unresolved (`Cannot find module`), skip the capability probe — the probe itself is best-effort at startup, never a blocker.
-
-**But surface the unresolved root itself — loudly, once.** An unresolved scripts path is not a silent best-effort skip: it means project registration and all six Step-8 readiness commands were skipped this session, so the project was loaded without index regeneration, priority ranking, or the compaction check. Include a visible line in the readiness receipt — *"Heads up: I couldn't resolve the CORE plugin root this session, so the startup scripts (registration, index regen, priority, compaction check) were skipped. Run `claude plugins update core@core` and I'll have them next session."* This turns the wrong-drive silent failure into a visible degraded state the user can act on.
+**Surface an unresolved scripts path — loudly, once.** An unresolved scripts path is not a silent best-effort skip: it means project registration and all six Step-8 readiness commands were skipped this session, so the project was loaded without index regeneration, priority ranking, or the compaction check. Include a visible line in the readiness receipt — *"Heads up: I couldn't resolve the CORE plugin root this session, so the startup scripts (registration, index regen, priority, compaction check) were skipped. Run `claude plugins update core@core` and I'll have them next session."* This turns the wrong-drive silent failure into a visible degraded state the user can act on.
 
 Make workspace identity obvious. Talk like a person.
 
@@ -464,7 +426,6 @@ What to include:
 - Source-registration signals when they're worth mentioning: pending blocks in `<project>/inbox.md` (count plus what you'll do with them — *"three observations in the inbox; I'll graduate them at the next memory pass"*), any question from them you've escalated to the user, or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
-- The recognition signal, when present and worth flagging: read the one-line `<hot>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` the last time `/process-memory` or `/metrics` ran — that script is the mechanism's source of truth, and there is NO automatic hook: the signal refreshes only on those user-invoked passes, so a session that ends without them leaves the file stale, not wrong). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." Read it as "as of the last maintenance pass", never as continuous trending. It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
 - Plugin version + build: read both `version` and `build` from `../../.claude-plugin/plugin.json` relative to the skill base directory (which resolves to the plugin root's `plugin.json`) — that manifest is the single source of truth for both. Echo as "Plugin v<version> build <build>". If `plugin.json` is unreadable, omit the line; if it's readable but has no `build`, echo just "Plugin v<version>".
 
 Target voice:
