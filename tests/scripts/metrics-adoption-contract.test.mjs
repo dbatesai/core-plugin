@@ -2,7 +2,7 @@ import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { metricsEnabled, metricsState, logEvent } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -122,6 +122,41 @@ test('gates: a manifest metrics opt-out blocks a turn-capture env opt-in; a mani
     assert.equal(turnCaptureEnabled({ project: a, home: TEST_HOME, env: { ...env, CORE_TURN_CAPTURE: '1' } }), false);
     assert.equal(metricsState({ project: b, home: TEST_HOME, env }), 'default');
     assert.equal(turnCaptureEnabled({ project: b, home: TEST_HOME, env }), true);
+  } finally { rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true }); }
+});
+
+// Card 214: a forged or transplanted signature never switches analytics or capture on.
+function manifestFile(dir) { return join(dir, '_core', 'claude-code', 'workspace.json'); }
+
+test('a signed opt-in whose bytes were changed after signing is not trusted: analytics and capture stay off', () => {
+  const env = { CORE_HARNESS: 'claude-code' };
+  const dir = scratch({ workspace_id: 'x', metrics_enabled: true, turn_capture: true });
+  try {
+    assert.equal(metricsState({ project: dir, home: TEST_HOME, env }), 'on', 'control: the signed opt-in is honored');
+    assert.equal(turnCaptureEnabled({ project: dir, home: TEST_HOME, env }), true, 'control');
+    const f = manifestFile(dir);
+    assert.ok(existsSync(f) && existsSync(f + '.mac'), 'fixture: a signed manifest and its MAC');
+    const body = JSON.parse(readFileSync(f, 'utf8'));
+    writeFileSync(f, JSON.stringify({ ...body, note: 'edited after signing' }, null, 2) + '\n');   // the MAC is left as it was
+    assert.notEqual(metricsState({ project: dir, home: TEST_HOME, env }), 'on');
+    assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env }), false);
+    assert.equal(turnCaptureEnabled({ project: dir, home: TEST_HOME, env }), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Known limit until card 235 binds a signature to its own project: the copied manifest and MAC verify
+// in B, so B's analytics and capture switch on. Under opt-in defaults this is the one path where a
+// project that asked for nothing gets them; kept as a visible todo, not a pass.
+test('a signed opt-in copied with its MAC into another registered project does not switch that project on', { todo: 'card 235: manifest signature bound to its project' }, () => {
+  const env = { CORE_HARNESS: 'claude-code' };
+  const a = scratch({ workspace_id: 'x', metrics_enabled: true, turn_capture: true });
+  const b = scratch({ workspace_id: 'x' });
+  try {
+    assert.equal(metricsState({ project: b, home: TEST_HOME, env }), 'default', 'control: B opted into nothing');
+    copyFileSync(manifestFile(a), manifestFile(b));
+    copyFileSync(manifestFile(a) + '.mac', manifestFile(b) + '.mac');
+    assert.notEqual(metricsState({ project: b, home: TEST_HOME, env }), 'on');
+    assert.equal(turnCaptureEnabled({ project: b, home: TEST_HOME, env }), false);
   } finally { rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true }); }
 });
 
