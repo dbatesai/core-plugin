@@ -233,7 +233,7 @@ Read the output. The three signals worth surfacing in plain voice:
 
 Narrate one or two top anomalies in plain voice. Don't dump the raw report. If everything is clean, say so in one sentence ("Retrieval quality looked clean — 47 events, T1=60% / T2=30% / T3=11%, no unit dipping back over 30%.").
 
-If the project has no `_sessions/<date>/retrieval-log.jsonl` files yet, the analyzer reports "No retrieval events found" — surface that as a one-liner ("No retrieval log yet — the corpus builds with use.").
+If the project has no `_sessions/<date>/retrieval-log.jsonl` files yet, the analyzer reports "No retrieval events found" — surface that as a one-liner. If analytics are off for this project (the default; on with `CORE_METRICS_ENABLED=1` or `metrics_enabled: true`), say "No retrieval log: analytics are off, so none is kept." Only when analytics are on, say "No retrieval log yet — it builds with use."
 
 ## Step 6.5b — Retrieval-skip scan (transcript-based, v2.9)
 
@@ -271,7 +271,7 @@ It reads `<project>/_core/<harness>/capability-history.jsonl` (appended each ses
 
 ## Step 6.7 — Turn classification + rollup (keeps the startup signal fresh)
 
-Run the mechanical recognition pipeline — capture-gated like everything metrics (a workspace that opted out prints `DISABLED`; say so once and move on):
+Run the mechanical recognition pipeline — analytics-gated, separate from turn capture (with analytics off, the default, each prints `DISABLED`; say so once and move on):
 
 ```bash
 node <scripts>/classify-turns.mjs "<project>"
