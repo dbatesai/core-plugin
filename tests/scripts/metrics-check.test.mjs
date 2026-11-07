@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 import {
-  renderBar, computeRows, buildNarrative, renderReport, parseRecognitionSignal,
+  renderBar, computeRows, renderAnswerView, buildNarrative, renderReport, parseRecognitionSignal,
   checkCalibrationPool, checkGoldRegression, checkLiveRetrievalProxy, gatherMetrics,
   producerIdentity, METRICS_REPORT_SCHEMA_VERSION,
   BAR_WIDTH, FILLED_CHAR, EMPTY_CHAR, FAILED_CHAR, TRUST, SECTION,
@@ -822,6 +822,30 @@ for (const [state, want, notWant] of [
     assert.ok(row, 'the analytics state always has a line');
     assert.match(row.value, want);
     assert.doesNotMatch(row.value, notWant);
-    if (state !== 'on') assert.match(row.value, /any numbers shown are from before/);
+    if (state !== 'on') {
+      assert.match(row.value, /Scorecards, judgments and retrieval-event history are not being updated/);
+      assert.match(row.value, /checks below that run now are live/);
+    }
   });
 }
+
+test('mixed gates: analytics at default with turn capture on renders capture as live and limits the analytics line to analytics history', () => {
+  const out = baseOut({ mechanics: { ...baseOut().mechanics, analytics: 'default',
+    turn_capture: { enabled: true, rows: 3, days: 1, health: { attempts: 3, failures: 0 } } } });
+  const rows = computeRows(out);
+  const a = rows.find((r) => r.label === 'Analytics');
+  const tc = rows.find((r) => r.label === 'Turn capture (evidence)');
+  assert.match(a.value, /^OFF — analytics are opt-in/);
+  assert.doesNotMatch(a.value, /Nothing below is being updated/, 'the analytics line does not claim capture is stale');
+  assert.match(tc.value, /^ON — /);
+  assert.match(tc.value, /3 row\(s\) \/ 1 day\(s\)/);
+});
+
+test('answer view: capture on with analytics off says grading needs analytics, not that maintenance will grade it', () => {
+  const base = { project: '/x/proj', cards: [], tripwires: { healthy: true, tripped: [] }, capture: { enabled: true }, evidence: {} };
+  const off = renderAnswerView({ ...base, analytics: 'default' });
+  assert.match(off, /grading it is part of analytics, which are off/);
+  assert.doesNotMatch(off, /grading runs with regular maintenance/);
+  const on = renderAnswerView({ ...base, analytics: 'on' });
+  assert.match(on, /grading runs with regular maintenance/);
+});

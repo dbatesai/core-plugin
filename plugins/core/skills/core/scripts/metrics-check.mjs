@@ -438,8 +438,8 @@ export function computeRows(out) {
       value: a === 'on'
         ? 'ON — turns are classified and retrieval is scored locally (never exported). Turn off with CORE_METRICS_ENABLED=0 or "metrics_enabled": false in this project\'s workspace.json.'
         : a === 'off'
-          ? 'OFF — switched off for this project (an opt-out, or CORE could not read its settings). Nothing below is being updated; any numbers shown are from before.'
-          : 'OFF — analytics are opt-in and nobody turned them on. Nothing below is being updated; any numbers shown are from before. Turn on with CORE_METRICS_ENABLED=1 or "metrics_enabled": true in this project\'s signed workspace.json.',
+          ? 'OFF — switched off for this project (an opt-out, or CORE could not read its settings). Scorecards, judgments and retrieval-event history are not being updated; any of those numbers shown are from before. The checks below that run now are live.'
+          : 'OFF — analytics are opt-in and nobody turned them on. Scorecards, judgments and retrieval-event history are not being updated; any of those numbers shown are from before. The checks below that run now are live. Turn on with CORE_METRICS_ENABLED=1 or "metrics_enabled": true in this project\'s signed workspace.json.',
     });
   }
 
@@ -937,13 +937,15 @@ export function gatherAnswers(projectDir) {
   let capture = { enabled: true };
   try { capture = turnCaptureStats(projectDir); } catch { /* default shape above */ }
   const evidence = checkAnswerEvidence(projectDir);
-  return { project: projectDir, cards, tripwires, capture, evidence };
+  let analytics = 'default';
+  try { analytics = metricsState({ project: projectDir }); } catch { /* unreadable state reads as off below */ analytics = 'off'; }
+  return { project: projectDir, cards, tripwires, capture, evidence, analytics };
 }
 
 function pct(x) { return `${Math.round(x * 100)}%`; }
 
 /** Render the three-question view. Pure; takes gatherAnswers() output. */
-export function renderAnswerView({ project, cards, tripwires, capture, evidence }) {
+export function renderAnswerView({ project, cards, tripwires, capture, evidence, analytics = 'on' }) {
   const newest = cards[0] || null;
   const prev = cards[1] || null;
   const name = String(project || '').split(/[\\/]/).filter(Boolean).pop() || 'this project';
@@ -966,6 +968,8 @@ export function renderAnswerView({ project, cards, tripwires, capture, evidence 
   let storing;
   if (captureOff) {
     storing = 'not measured — turn capture is off for this project (it is opt-in), so nothing records what each conversation needed.';
+  } else if (!judged && analytics !== 'on') {
+    storing = 'not yet measured — turn capture is recording evidence, but grading it is part of analytics, which are off (opt in with CORE_METRICS_ENABLED=1).';
   } else if (!judged) {
     storing = 'not yet measured — evidence is being captured; grading runs with regular maintenance.';
   } else if (thin) {
