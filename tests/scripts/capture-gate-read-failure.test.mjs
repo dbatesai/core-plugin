@@ -121,6 +121,12 @@ test('readable untrusted opt-outs survive; malformed readable data retains its e
     assert.equal(metrics.metricsState(f.options), 'default'); // metrics' default is off: nobody opted in
     assert.equal(metrics.metricsEnabled(f.options), false);
     assert.equal(capture.turnCaptureEnabled(f.options), false); // capture's default is off
+    // A malformed manifest carries no opt-out, so it leaves analytics at their default rather than
+    // explicitly off; the user's own CORE_TURN_CAPTURE=1 is read before the manifest and still holds.
+    const captureOn = { ...f.options, env: { ...f.options.env, CORE_TURN_CAPTURE: '1' } };
+    assert.equal(capture.turnCaptureEnabled(captureOn), true);
+    assert.equal(capture.turnCaptureEnabled({ ...captureOn, env: { ...captureOn.env, CORE_METRICS_ENABLED: '0' } }), false);
+    assert.deepEqual(fs.readFileSync(f.manifest, 'utf8'), '{malformed', 'the gate reads never repair or rewrite the manifest');
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
 });
 
