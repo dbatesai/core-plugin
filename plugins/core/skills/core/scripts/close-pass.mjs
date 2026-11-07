@@ -365,7 +365,7 @@ export function readCloseReceipt(store, sessionId, opts = {}) {
 /** Write a session's receipt atomically, owner-only. */
 export function writeCloseReceipt(store, receipt, opts = {}) {
   const storageRoot = closeStorageRoot(store, opts);
-  prepareCloseStorageRoot(storageRoot);
+  prepareCloseStorageRoot(storageRoot, opts.storageRoot ? {} : { store });
   return withFileLock(join(storageRoot, '.turn-capture.lock'), () =>
     writeCloseReceiptUnlocked(store, receipt, { ...opts, storageRoot }));
 }
@@ -448,10 +448,11 @@ export function runDeterministicClose(store, {
   // Resolve independently of the capture gate: an explicit OFF short-circuits
   // metricsEnabled, but must never short-circuit the invalid-pin routing check.
   const home = opts.home || requireTrustedHome();
+  const projectStorage = !opts.storageRoot;
   const storageRoot = closeStorageRoot(store, { ...opts, home });
   opts = { ...opts, storageRoot, home };
   const summaryDir = join(storageRoot, 'close', 'summaries');
-  prepareCloseStorageRoot(storageRoot);
+  prepareCloseStorageRoot(storageRoot, projectStorage ? { store } : {});
   return withFileLock(join(storageRoot, '.turn-capture.lock'), () => {
     prepareCloseDirectory(summaryDir);
     prepareCloseDirectory(receiptDir(store, opts));

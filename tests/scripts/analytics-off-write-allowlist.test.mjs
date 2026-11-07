@@ -234,3 +234,16 @@ test('negative control: with both switches on the diff sees capture rows, and th
   assert.ok(r.normalized.includes(CAPTURE_ROWS), `capture did not write ${CAPTURE_ROWS}: ${JSON.stringify(r.normalized)}`);
   assert.ok(filesHolding(r).some((p) => normalize(p) === CAPTURE_ROWS), 'the prompt check did not see the prompt in the capture rows');
 });
+
+test('with nothing opted in, the session close alone (no maintenance pass after it) leaves _metrics ignoring itself', () => {
+  const s = sandbox();
+  try {
+    const env = childEnv(s.home, states.A.gate);
+    run(CLOSE, [], JSON.stringify({ session_id: SESSION, cwd: s.project, hook_event_name: 'SessionEnd', reason: 'other', transcript_path: s.transcript }), env, s.project);
+    const receipts = join(s.project, '_metrics', 'close', 'receipts');
+    assert.ok(waitFor(() => existsSync(receipts) && readdirSync(receipts).some((n) => n.endsWith('.json'))), 'the close wrote its receipt');
+    const ignore = join(s.project, '_metrics', '.gitignore');
+    assert.ok(existsSync(ignore), '_metrics has its self-ignore before any maintenance pass');
+    assert.match(readFileSync(ignore, 'utf8'), /\*/);
+  } finally { rmSync(s.base, { recursive: true, force: true }); }
+});

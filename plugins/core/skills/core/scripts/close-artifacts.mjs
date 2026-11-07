@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { resolveStoragePath } from './log-event.mjs';
+import { resolveStoragePath, prepareStorageDir } from './log-event.mjs';
 
 const MARKER = 'core.generated-close/1';
 const digest = text => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -17,10 +17,15 @@ function statIfPresent(path) {
   try { return lstatSync(path); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
 }
 
-/** Create only the lock's parent before serialization, never a payload directory. */
-export function prepareCloseStorageRoot(root) {
+/**
+ * Create only the lock's parent before serialization, never a payload directory. For the
+ * project's own `_metrics/` (`store` given), the same preparation every capture write uses:
+ * a linked folder is refused and the folder's self-ignore is written before the lock is.
+ */
+export function prepareCloseStorageRoot(root, { store = null } = {}) {
   const stat = statIfPresent(root);
   if (stat && !stat.isDirectory()) throw new Error(`unsafe close storage root: ${root}`);
+  if (store) prepareStorageDir(resolve(store));
   mkdirSync(root, { recursive: true, mode: 0o700 });
 }
 
