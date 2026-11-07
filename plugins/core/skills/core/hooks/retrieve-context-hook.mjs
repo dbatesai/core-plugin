@@ -47,7 +47,7 @@ import { isCliEntry } from '../scripts/cli-entry.mjs';
 import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
-import { metricsEnabled } from '../scripts/log-event.mjs';
+import { metricsState } from '../scripts/log-event.mjs';
 import { projectMigrationFence } from '../scripts/project-state.mjs';
 import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
@@ -290,31 +290,34 @@ export async function main() {
   // result is `no-hit` at the tier actually reached — never a fabricated
   // 1→2→3 `miss`.
   try {
-    if (!metricsEnabled({ project: store })) {
-      telemetryReason = 'metrics-opt-out'; // hook-log is the authoritative receipt; no retrieval row is faked
-    } else {
-      // Ladder semantics: the shipped product
-      // retriever — INCLUDING its built-in one-hop edge expansion — is Tier 1 by
-      // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
-      // path, which this pipeline never runs. So every event from this mechanism
-      // is tier_reached 1, and hit provenance rides a separate closed
-      // `source_stage` field instead of overloading the ladder tier
-      // (overloading it would make routine expansion hits read as Tier-2
-      // escalation — a causal-evidence defect).
-      const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
-      retrievalId = randomUUID();
+    // Ladder semantics: the shipped product
+    // retriever — INCLUDING its built-in one-hop edge expansion — is Tier 1 by
+    // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
+    // path, which this pipeline never runs. So every event from this mechanism
+    // is tier_reached 1, and hit provenance rides a separate closed
+    // `source_stage` field instead of overloading the ladder tier
+    // (overloading it would make routine expansion hits read as Tier-2
+    // escalation — a causal-evidence defect).
+    const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
+    retrievalId = randomUUID();
 
-      // Session + harness identity ride the evidence capture below (sessionId is resolved above).
-      // Harness resolution: CORE_HOOK_HARNESS
-      // is the EXPLICIT, authoritative signal — set by the harness-specific
-      // wrapper entry file (retrieve-context-hook-codex.mjs sets it to 'codex'
-      // before calling main()), never inferred. The ambient env-var fallback
-      // below is undocumented Codex behavior — kept ONLY
-      // for direct/manual invocation that bypasses the wrapper, never trusted
-      // as the primary signal.
-      const harness = resolveHookHarness();
-      const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
-      const queryTerms = tokenize(prompt).slice(0, 8);
+    // Session + harness identity ride the evidence capture below (sessionId is resolved above).
+    // Harness resolution: CORE_HOOK_HARNESS
+    // is the EXPLICIT, authoritative signal — set by the harness-specific
+    // wrapper entry file (retrieve-context-hook-codex.mjs sets it to 'codex'
+    // before calling main()), never inferred. The ambient env-var fallback
+    // below is undocumented Codex behavior — kept ONLY
+    // for direct/manual invocation that bypasses the wrapper, never trusted
+    // as the primary signal.
+    const harness = resolveHookHarness();
+    const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
+    const queryTerms = tokenize(prompt).slice(0, 8);
+
+    const analytics = metricsState({ project: store });
+    if (analytics !== 'on') {
+      // hook-log is the authoritative receipt; no retrieval row is faked
+      telemetryReason = analytics === 'off' ? 'metrics-opt-out' : 'metrics-off';
+    } else {
       const out = recordRetrievalEvent(store, {
         trigger: 'per-turn-hook',
         mechanism: 'model-free-substrate', // names what actually ran: rank/policy/edge pipeline — Tier 1 only, never 2 or 3
@@ -332,55 +335,54 @@ export async function main() {
         ...(enrichmentValid ? { enrichment_valid: enrichmentValid.valid, enrichment_total: enrichmentValid.total } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
-
-      // EVERY-TURN evidence capture (Link 1 of the evidence chain), opt-in (default OFF)
-      // with opt-outs. Written in the same moment as the numbers row above, joined
-      // by the same retrieval_id: the full prompt, the combined delivered pack
-      // text, per-unit ids+scores, the top rejected candidates, a store
-      // signature for drift detection, and producer identity. This is what the
-      // hindsight judge later grades — the numbers row records THAT retrieval
-      // happened; this records enough to judge whether it was RIGHT.
-      //
-      // LOCAL ONLY: lands under the metrics storage base (0700/0600, kept until
-      // explicit purge); metrics-package.mjs has no read path into
-      // it (canary tripwire test). Fail-open: a capture failure never blocks
-      // the turn — it lands in the stream's health counter (Link 5 watches
-      // that) and its closed status rides the terminal receipt. Gated INSIDE
-      // the metrics-on branch: opting out of all local capture also stops
-      // this; its own CORE_TURN_CAPTURE / workspace turn_capture flag disables
-      // it independently.
-      try {
-        if (turnCaptureEnabled({ project: store })) {
-          const deliveredIds = new Set(units.map((u) => u.id));
-          const scoreById = new Map(
-            (Array.isArray(trace.stages.substrate) ? trace.stages.substrate : []).map((h) => [String(h.id), h.score]),
-          );
-          const tcResult = captureTurnEvidence(store, {
-            retrieval_id: retrievalId,
-            session_id: sessionId,
-            harness,
-            prompt_text: prompt,
-            pack_text: trace.pack && trace.pack.text ? trace.pack.text : '',
-            delivered: units.map((u) => ({ id: u.id, score: scoreById.get(u.id) ?? null, source_stage: u.source_stage })),
-            rejected_top: (Array.isArray(trace.stages.substrate) ? trace.stages.substrate : [])
-              .filter((h) => !deliveredIds.has(String(h.id)))
-              .map((h) => ({ id: String(h.id), score: h.score, source_stage: 'ranked' })),
-            truncation: {
-              byte_cap_applied: Boolean(trace.pack && Array.isArray(trace.pack.excluded)
-                && trace.pack.excluded.some((e) => e && e.reason === 'byte-cap')),
-              prompt_tokens_used: queryTerms.length,
-            },
-            store_signature: computeStoreSignature(store),
-            producer_version: PRODUCER_VERSION,
-            producer_sha: PRODUCER_SHA,
-          });
-          turnCaptureStatus = tcResult.written ? 'captured'
-            : String(tcResult.reason || 'error').split(/[:\s]/)[0]; // closed head token, never raw content
-        } else {
-          turnCaptureStatus = 'disabled';
-        }
-      } catch { turnCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
     }
+
+    // EVERY-TURN evidence capture (Link 1 of the evidence chain), opt-in (default OFF)
+    // with opt-outs. Written in the same moment as the numbers row above, joined
+    // by the same retrieval_id: the full prompt, the combined delivered pack
+    // text, per-unit ids+scores, the top rejected candidates, a store
+    // signature for drift detection, and producer identity. This is what the
+    // hindsight judge later grades — the numbers row records THAT retrieval
+    // happened; this records enough to judge whether it was RIGHT.
+    //
+    // LOCAL ONLY: lands under the metrics storage base (0700/0600, kept until
+    // explicit purge); metrics-package.mjs has no read path into
+    // it (canary tripwire test). Fail-open: a capture failure never blocks
+    // the turn — it lands in the stream's health counter (Link 5 watches
+    // that) and its closed status rides the terminal receipt. Runs on its own
+    // opt-in (turnCaptureEnabled), outside the analytics branch: an explicit
+    // analytics opt-out stops it, the analytics default does not.
+    try {
+      if (turnCaptureEnabled({ project: store })) {
+        const deliveredIds = new Set(units.map((u) => u.id));
+        const scoreById = new Map(
+          (Array.isArray(trace.stages.substrate) ? trace.stages.substrate : []).map((h) => [String(h.id), h.score]),
+        );
+        const tcResult = captureTurnEvidence(store, {
+          retrieval_id: retrievalId,
+          session_id: sessionId,
+          harness,
+          prompt_text: prompt,
+          pack_text: trace.pack && trace.pack.text ? trace.pack.text : '',
+          delivered: units.map((u) => ({ id: u.id, score: scoreById.get(u.id) ?? null, source_stage: u.source_stage })),
+          rejected_top: (Array.isArray(trace.stages.substrate) ? trace.stages.substrate : [])
+            .filter((h) => !deliveredIds.has(String(h.id)))
+            .map((h) => ({ id: String(h.id), score: h.score, source_stage: 'ranked' })),
+          truncation: {
+            byte_cap_applied: Boolean(trace.pack && Array.isArray(trace.pack.excluded)
+              && trace.pack.excluded.some((e) => e && e.reason === 'byte-cap')),
+            prompt_tokens_used: queryTerms.length,
+          },
+          store_signature: computeStoreSignature(store),
+          producer_version: PRODUCER_VERSION,
+          producer_sha: PRODUCER_SHA,
+        });
+        turnCaptureStatus = tcResult.written ? 'captured'
+          : String(tcResult.reason || 'error').split(/[:\s]/)[0]; // closed head token, never raw content
+      } else {
+        turnCaptureStatus = 'disabled';
+      }
+    } catch { turnCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
   } catch {
     telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
   }
@@ -422,7 +424,7 @@ export async function main() {
     action = 'delivered';
     reason = telemetryReason;
   } else if (final.length === 0) {
-    action = telemetryReason === 'ok' || telemetryReason === 'metrics-opt-out' ? 'skip' : 'failed';
+    action = telemetryReason === 'ok' || telemetryReason === 'metrics-opt-out' || telemetryReason === 'metrics-off' ? 'skip' : 'failed';
     reason = telemetryReason === 'ok' ? 'no-hit' : telemetryReason;
   } else {
     // Selection succeeded but the byte-capped product delivered no context.

@@ -286,12 +286,10 @@ function checkMetricsParentChain(anchor, dir) {
 /**
  * Capture gate for the Layer 2/3 metrics interpretation passes (spec §18).
  *
- * DEFAULT-ON, opt-out. The instrumented-memory thesis needs the corpus — a
- * default-off gate starves calibration (a single project rarely reaches ~100
- * labeled turns), so the feedback loop the system exists to close could
- * never close. Capture stays LOCAL (no network
- * exfil); the accepted tradeoff is that a fresh marketplace install classifies its
- * own conversation content into local artifacts unless the user opts out.
+ * DEFAULT-OFF, opt-in. The interpretation passes (classifier, detectors, rollups,
+ * scorecards, per-turn retrieval-event rows) run only for a user or overlay that
+ * asked for them. Capture stays LOCAL (no network exfil). The operational event
+ * writer (`logEvent`) and the hook and close receipts are not behind this gate.
  *
  * Precedence (first match wins):
  *   1. `CORE_METRICS_ENABLED` env false (0/false/no/off) → OFF — hard opt-out, beats everything.
