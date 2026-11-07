@@ -333,5 +333,5 @@ test('first-use initialization is serialized and tolerates an identical self-ign
     console.log(JSON.stringify({status:receipt.status,races}));
   `);
   assert.equal(observed.status, 'recorded');
-  assert.equal(observed.races, 3, 'close root, summary dir and receipt dir each establish exclusion');
+  assert.equal(observed.races, 4, '_metrics, the close root, the summary dir and the receipt dir each establish exclusion');
 });
