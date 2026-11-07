@@ -166,7 +166,7 @@ export function evaluateTripwires(projectDir, { thresholds = TRIPWIRE_THRESHOLDS
     const failures = (health && health.failures) || 0;
     if ((vol.turns_captured || 0) > 0) tripped.push({
       kind: 'capture-disabled',
-      message: `Turn evidence capture is off for this project, so the memory-quality numbers cover only what was recorded before it was turned off${failures ? ` (${failures} recorded write failure${failures === 1 ? '' : 's'} from before that)` : ''} — your opt-out, not a fault.`,
+      message: `Turn evidence capture is off for this project, so the memory-quality numbers cover only what was recorded before it was turned off${failures ? ` (${failures} recorded write failure${failures === 1 ? '' : 's'} from before that)` : ''}. Capture is opt-in and off now; that is a setting, not a fault.`,
     });
   } else if (deadNow) {
     tripped.push({

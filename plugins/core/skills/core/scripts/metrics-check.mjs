@@ -72,7 +72,7 @@ import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQuality
 import { turnCaptureStats, readCaptureHealth, HEALTH_FILENAME } from './turn-capture.mjs';
 import { latestScorecards, scorecardLogPath } from './scorecard.mjs';
 import { evaluateTripwires } from './metrics-tripwires.mjs';
-import { trustedMetricsDir } from './log-event.mjs';
+import { trustedMetricsDir, metricsState } from './log-event.mjs';
 import { ensureProjectArtifactDir } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { assertStoreBoundary, refusalExit } from './generate-summary-index.mjs';
@@ -424,15 +424,30 @@ export function computeRows(out) {
     value: telemetryValue,
   });
 
-  // 3b. Rich-context capture — VISIBLE ACTIVE STATE. The default-ON stream
-  // saves literal query + delivered-context text locally, so its state must
-  // always render in one plain-language line (visible-active-state +
-  // independent disable).
+  // 3a. Analytics — VISIBLE STATE. Opt-in. When off, the scorecards, judgments and
+  // retrieval-event rows below are not being written, so any numbers they show are
+  // from before; this line says so rather than letting old numbers read as live.
+  {
+    const a = mech.analytics;
+    rows.push({
+      section: SECTION.MECHANICS,
+      label: 'Analytics',
+      pct: 0,
+      trust: TRUST.DIRECT,
+      noGauge: true,
+      value: a === 'on'
+        ? 'ON — turns are classified and retrieval is scored locally (never exported). Turn off with CORE_METRICS_ENABLED=0 or "metrics_enabled": false in this project\'s workspace.json.'
+        : a === 'off'
+          ? 'OFF — switched off for this project (an opt-out, or CORE could not read its settings). Nothing below is being updated; any numbers shown are from before.'
+          : 'OFF — analytics are opt-in and nobody turned them on. Nothing below is being updated; any numbers shown are from before. Turn on with CORE_METRICS_ENABLED=1 or "metrics_enabled": true in this project\'s signed workspace.json.',
+    });
+  }
+
+  // 3b. Rich-context capture — VISIBLE STATE. Opt-in. It saves literal query and
+  // delivered-context text locally, so its state always renders in one
+  // plain-language line, ON with its off-switches and OFF with its on-switch.
   const tc = mech.turn_capture || {};
   {
-    // Because the stream IS on unless the user acted, the ON state and
-    // its off-switches must always render, and the OFF state renders too so an
-    // opted-out user sees their choice took effect.
     const health = tc.health || {};
     rows.push({
       section: SECTION.MECHANICS,
@@ -442,7 +457,7 @@ export function computeRows(out) {
       noGauge: true,
       value: tc.enabled
         ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, kept until you purge it): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed.${(tc.history || []).length ? ` Earlier rows kept outside the project folder (read-only history): ${tc.history.reduce((n, h) => n + (h.rows || 0), 0)} row(s) / ${tc.history.reduce((n, h) => n + (h.days || 0), 0)} day(s).` : ''} Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
-        : 'OFF — turn capture is disabled for this project, so hindsight grading of retrieval quality has no evidence to work from.',
+        : 'OFF — turn capture is opt-in and off for this project, so hindsight grading of retrieval quality has no new evidence to work from. Turn on with CORE_TURN_CAPTURE=1 or "turn_capture": true in this project\'s signed workspace.json.',
     });
   }
 
@@ -845,9 +860,8 @@ ${body}
   // mechanics.telemetry, matching the render's classification.
   out.regression.gold = await checkGoldRegression(cwd);
   mech.telemetry = checkLiveRetrievalProxy(cwd);
-  // Turn-capture evidence-stream state (default-ON) — a
-  // mechanics/instrumentation fact. Always rendered: ON shows the disclosure +
-  // off-switches; OFF confirms the user's opt-out took effect.
+  // Analytics and turn-capture state — mechanics facts, always rendered (both opt-in).
+  mech.analytics = metricsState({ project: cwd, home });
   mech.turn_capture = turnCaptureStats(cwd, { home });
 
   // ---- mechanics status: hard evidence only; routine upkeep never demotes
@@ -951,7 +965,7 @@ export function renderAnswerView({ project, cards, tripwires, capture, evidence 
   // Q1 — storing the right memories (storage-gap rate, mechanical grade).
   let storing;
   if (captureOff) {
-    storing = 'not measured — turn capture is off for this project, so nothing records what each conversation needed.';
+    storing = 'not measured — turn capture is off for this project (it is opt-in), so nothing records what each conversation needed.';
   } else if (!judged) {
     storing = 'not yet measured — evidence is being captured; grading runs with regular maintenance.';
   } else if (thin) {
