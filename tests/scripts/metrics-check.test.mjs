@@ -138,15 +138,13 @@ function baseOut(overrides = {}) {
   };
 }
 
-test('computeRows: returns seven rows across mechanics/regression/readiness sections', () => {
-  // Seven as of v3.14.0: the turn-capture state line ALWAYS renders (+1), and
-  // the benefit row is REMOVED (-1, the question left scope by
-  // decision, not by gap).
+test('computeRows: returns eight rows across mechanics/regression/readiness sections', () => {
+  // The analytics and turn-capture state lines always render.
   const rows = computeRows(baseOut());
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 8);
   const bySection = { mechanics: 0, regression: 0, readiness: 0 };
   for (const r of rows) bySection[r.section]++;
-  assert.equal(bySection.mechanics, 4);
+  assert.equal(bySection.mechanics, 5);
   assert.equal(bySection.regression, 1);
   assert.equal(bySection.readiness, 2);
 });
@@ -744,7 +742,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
 
     // ---- mechanics: round-trip probe, store integrity, telemetry, and the
     // mechanics-scoped machine status (never an umbrella claim).
-    assert.deepEqual(Object.keys(out.mechanics).sort(), ['probe', 'status', 'store', 'telemetry', 'turn_capture']);
+    assert.deepEqual(Object.keys(out.mechanics).sort(), ['analytics', 'probe', 'status', 'store', 'telemetry', 'turn_capture']);
     assert.ok(['WORKING', 'WORKING-WITH-CAVEATS', 'DEGRADED', 'MACHINERY-WORKING-NO-STORE'].includes(out.mechanics.status));
     assert.equal(typeof out.mechanics.probe.round_trip, 'boolean');
     assert.equal(out.mechanics.store.present, true);
@@ -800,7 +798,7 @@ test('turn-capture: the ON line carries the disclosure, volumes, health, and eve
   assert.match(renderReport(out), /Turn capture \(evidence\)/);
 });
 
-test('turn-capture: the OFF line confirms the opt-out took effect and names the consequence', () => {
+test('turn-capture: the OFF line says capture is opt-in, names the consequence and how to turn it on', () => {
   const out = baseOut({
     mechanics: { ...baseOut().mechanics, turn_capture: { enabled: false, rows: 0, days: 0, health: { attempts: 0, failures: 0 } } },
   });
@@ -809,5 +807,21 @@ test('turn-capture: the OFF line confirms the opt-out took effect and names the 
   assert.match(row.value, /^OFF — /);
   assert.match(row.value, /hindsight grading/);
   assert.doesNotMatch(row.value, /^ON/, 'must NOT claim ON when capture is off');
-  assert.match(renderReport(out), /OFF — turn capture is disabled/);
+  assert.match(row.value, /CORE_TURN_CAPTURE=1/);
+  assert.match(renderReport(out), /OFF — turn capture is opt-in/);
 });
+
+for (const [state, want, notWant] of [
+  ['on', /^ON — /, /^OFF/],
+  ['default', /^OFF — analytics are opt-in and nobody turned them on\..*CORE_METRICS_ENABLED=1/, /^ON/],
+  ['off', /^OFF — switched off for this project/, /^ON/],
+]) {
+  test(`analytics row (${state}): always rendered, and says whether the numbers below are live`, () => {
+    const out = baseOut({ mechanics: { ...baseOut().mechanics, analytics: state } });
+    const row = computeRows(out).find((r) => r.label === 'Analytics');
+    assert.ok(row, 'the analytics state always has a line');
+    assert.match(row.value, want);
+    assert.doesNotMatch(row.value, notWant);
+    if (state !== 'on') assert.match(row.value, /any numbers shown are from before/);
+  });
+}
