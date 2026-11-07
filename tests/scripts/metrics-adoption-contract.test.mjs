@@ -2,8 +2,8 @@ import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { metricsEnabled, metricsState, logEvent } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { turnCaptureEnabled } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
@@ -150,9 +150,11 @@ test('a signed opt-in whose bytes were changed after signing is not trusted: ana
 test('a signed opt-in copied with its MAC into another registered project does not switch that project on', { todo: 'card 235: manifest signature bound to its project' }, () => {
   const env = { CORE_HARNESS: 'claude-code' };
   const a = scratch({ workspace_id: 'x', metrics_enabled: true, turn_capture: true });
-  const b = scratch({ workspace_id: 'x' });
+  const b = scratch({ workspace_id: 'x', metrics_enabled: false });   // registered, with its own signed manifest
   try {
-    assert.equal(metricsState({ project: b, home: TEST_HOME, env }), 'default', 'control: B opted into nothing');
+    writeManifestFlags(b, { metrics_enabled: null });                   // then cleared: B opted into nothing
+    assert.equal(metricsState({ project: b, home: TEST_HOME, env }), 'default', 'control: B is registered and opted into nothing');
+    assert.ok(existsSync(manifestFile(b)), 'fixture: B has its own signed manifest to overwrite');
     copyFileSync(manifestFile(a), manifestFile(b));
     copyFileSync(manifestFile(a) + '.mac', manifestFile(b) + '.mac');
     assert.notEqual(metricsState({ project: b, home: TEST_HOME, env }), 'on');

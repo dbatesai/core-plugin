@@ -90,7 +90,8 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
   try {
     symlinkSync(METRICS_INIT, link);
     const out = execFileSync('node', [...accountHomeArgs(home), link, project], {
-      env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' }, // USERPROFILE: Windows homedir()
+      // Analytics opted in so the scaffold has work to do; with nothing opted in it writes nothing.
+      env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code', CORE_METRICS_ENABLED: '1' }, // USERPROFILE: Windows homedir()
       encoding: 'utf8',
     });
     // On the buggy one-sided guard the module imports, the guard is false, and the
