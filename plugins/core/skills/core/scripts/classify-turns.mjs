@@ -273,10 +273,10 @@ export function runClassification({ project, harness = 'claude-code', cwd, home:
   // Unit heads and PROJECT.md are read and excerpts of them go into the records; a link anywhere
   // under `_memories`, or PROJECT.md as a link, is refused (throws) before anything is read.
   assertStoreBoundary(project, { synthesis: true });
-  // Capture gate (spec §18, metrics policy): default-on, opt-out. Captures nothing
-  // — reads no transcript content, writes no records — when the user has opted out.
+  // Capture gate (spec §18, metrics policy): opt-in. Captures nothing — reads no
+  // transcript content, writes no records — unless the user turned analytics on.
   if (!metricsEnabled({ project, env, home })) {
-    return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
+    return { status: 'DISABLED', reason: 'analytics are off (opt in with CORE_METRICS_ENABLED=1 or the manifest\'s metrics_enabled: true)', provisional: true };
   }
   const t = readTranscript({ harness, cwd: cwd || project, home: nativeRoot, sessionId, env });
   if (!t.available) {
