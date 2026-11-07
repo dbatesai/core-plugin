@@ -17,6 +17,9 @@ const MAINT_SCRIPT = join(HERE, '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'maintenance-run.mjs');
 const SELF_TEST_FIXTURE = join(HERE, '..', 'fixtures', 'obligation3-store');
 
+// Analytics are opt-in; the derived-metrics ops below run for a project that opted in.
+const metricsOn = () => ({ ...process.env, CORE_METRICS_ENABLED: '1' });
+
 // Isolated HOME so nothing a run resolves from the home touches the real
 // developer ~/.core during tests (mirrors decorate-graph.test.mjs / hot-section.test.mjs).
 function testHome(root) {
@@ -224,13 +227,13 @@ test('judge op: unjudged evidence rows get judged in the pass, and the scorecard
     store_signature: computeStoreSignature(root), producer_version: 'v', producer_sha: 'sha',
   }, { env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_TURN_CAPTURE: '1' } });
   assert.equal(cap.written, true, cap.reason);
-  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home, env: metricsOn() });
   assert.ok(res.ranOps.includes('hindsight-judge'), 'unjudged evidence → judge op ran');
   assert.ok(res.ranOps.includes('scorecard-computation'), 'fresh judgments pinned in the same pass');
   const judgmentRows = readFileSync(join(root, '_metrics', 'judgment-log.jsonl'), 'utf8').trim().split('\n');
   assert.equal(judgmentRows.length, 1);
   // second pass: nothing unjudged, nothing new to pin
-  const res2 = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
+  const res2 = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home, env: metricsOn() });
   assert.ok(!res2.ranOps.includes('hindsight-judge'));
   assert.ok(!res2.ranOps.includes('scorecard-computation'));
 });
@@ -240,18 +243,18 @@ test('scorecard op: pins a scorecard when unpinned judgments exist, skips when n
   const home = testHome(root);
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
   // nothing to pin → op does not run
-  let res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  let res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home, env: metricsOn() });
   assert.ok(!res.ranOps.includes('scorecard-computation'), 'no inputs → no scorecard');
   // plant a judgment row → op pins one scorecard
   const base = join(root, '_metrics');
   mkdirSync(base, { recursive: true });
   writeFileSync(join(base, 'judgment-log.jsonl'),
     JSON.stringify({ kind: 'hindsight-judgment', retrieval_id: 'r1', ts: '2026-06-27T00:00:00Z', verdict: 'hit-right', judge_version: '1.0.0' }) + '\n');
-  res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home, env: metricsOn() });
   assert.ok(res.ranOps.includes('scorecard-computation'), 'unpinned judgment → scorecard pinned');
   assert.ok(existsSync(join(base, 'scorecard-log.jsonl')), 'scorecard log written');
   // second run with nothing new → skip
-  res = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
+  res = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home, env: metricsOn() });
   assert.ok(!res.ranOps.includes('scorecard-computation'), 'pinned already → skip');
 });
 
@@ -263,7 +266,7 @@ test('pinned scorecards carry the live tripwire thresholds (visible-goalposts ru
   mkdirSync(base, { recursive: true });
   writeFileSync(join(base, 'judgment-log.jsonl'),
     JSON.stringify({ kind: 'hindsight-judgment', retrieval_id: 'r1', ts: '2026-06-27T00:00:00Z', verdict: 'hit-right', judge_version: '1.0.0' }) + '\n');
-  runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home, env: metricsOn() });
   const card = JSON.parse(readFileSync(join(base, 'scorecard-log.jsonl'), 'utf8').trim().split('\n')[0]);
   assert.equal(card.thresholds.self_test_drop, TRIPWIRE_THRESHOLDS.self_test_drop);
   assert.equal(card.thresholds.capture_consecutive_failures, TRIPWIRE_THRESHOLDS.capture_consecutive_failures);
@@ -274,11 +277,11 @@ test('auto-author trigger: a stale round emits one narrated note and stamps the 
   const home = testHome(root);
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
   // cold start: no round at all → due → note + cap stamp
-  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home, env: metricsOn() });
   assert.ok(res.notes.some((n) => /self-test round/.test(n) && /due|stale|cold start|exists yet/.test(n)),
     `expected an authoring-due note, got: ${JSON.stringify(res.notes)}`);
   // second pass inside the cap window → no repeat note
-  const res2 = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
+  const res2 = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home, env: metricsOn() });
   assert.ok(!res2.notes.some((n) => /self-test round/.test(n) && /due|stale|cold start|exists yet/.test(n)),
     'weekly cap suppresses a repeat trigger');
 });
@@ -328,7 +331,7 @@ test('CLI: with a registered self-test round, maintenance-run auto-regrades and 
     const regResult = register(root, 1, goldPath);
     assert.ok(regResult.ok, `register should pass: ${JSON.stringify(regResult.violations)}`);
 
-    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json'], { encoding: 'utf8' });
+    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json'], { encoding: 'utf8', env: metricsOn() });
     const parsed = JSON.parse(out);
     assert.ok(parsed.self_test_regrade, 'CLI JSON output carries a self_test_regrade field');
     assert.match(parsed.self_test_regrade.note, /self-test round 1 re-graded automatically/);
@@ -346,7 +349,7 @@ test('CLI: no registered self-test round is a silent no-op — no self_test_regr
   const root = makeProject();
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
   try {
-    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json'], { encoding: 'utf8' });
+    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json'], { encoding: 'utf8', env: metricsOn() });
     const parsed = JSON.parse(out);
     assert.equal(parsed.self_test_regrade, null);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -365,7 +368,7 @@ test('CLI: --dry-run skips the self-test auto-regrade entirely (no log write)', 
     writeFileSync(goldPath, JSON.stringify(gold));
     register(root, 1, goldPath);
 
-    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json', '--dry-run'], { encoding: 'utf8' });
+    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json', '--dry-run'], { encoding: 'utf8', env: metricsOn() });
     const parsed = JSON.parse(out);
     assert.equal(parsed.self_test_regrade, null, 'dry-run never regrades — it is a real append, not a report');
     assert.equal(readSelfTestLogRows(root).length, 0);

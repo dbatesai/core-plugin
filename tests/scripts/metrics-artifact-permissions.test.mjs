@@ -61,7 +61,8 @@ test('the scorecard log is owner-only', { skip: IS_WIN && 'POSIX modes' }, () =>
   const root = mkdtempSync(join(tmpdir(), 'perm-scorecard-'));
   try {
     const project = makeProject(root);
-    appendScorecard(project, computeScorecard(project));
+    // Analytics are opt-in; the log exists only for a project that opted in.
+    appendScorecard(project, computeScorecard(project), { env: { ...process.env, CORE_METRICS_ENABLED: '1' } });
     assert.equal(mode(scorecardLogPath(project)), 0o600);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

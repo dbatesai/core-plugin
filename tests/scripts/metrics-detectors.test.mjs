@@ -348,7 +348,7 @@ test('runDetectors refuses a session mismatch instead of tagging findings with t
     // No sess-mine.jsonl exists — only an unrelated session's transcript.
     writeFileSync(join(slugDir, 'sess-other.jsonl'),
       JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'tell me about the retrieval plan' }] } }) + '\n');
-    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-mine', workspaceId: 'md-mismatch-ws', env: {} });
+    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-mine', workspaceId: 'md-mismatch-ws', env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.status, 'UNAVAILABLE', 'refuses rather than tagging another session\'s findings as this one\'s');
     assert.equal(r.records, undefined, 'no records at all — nothing was written');
   } finally {
@@ -370,7 +370,7 @@ test('anticipation-gap records are stamped provisional + low severity at the sou
     writeFileSync(join(slugDir, 'sess-d.jsonl'),
       JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'tell me about the retrieval plan' }] } }) + '\n' +
       JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'sure.' }] } }) + '\n');
-    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-d', workspaceId: 'md-prov-ws', env: {} });
+    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-d', workspaceId: 'md-prov-ws', env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.status, 'OK');
     for (const rec of r.records.filter((x) => x.detector === 'anticipation-gap')) {
       assert.equal(rec.provisional, true, 'every anticipation-gap record self-declares heuristic status');

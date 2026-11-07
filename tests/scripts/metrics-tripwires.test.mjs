@@ -10,8 +10,12 @@ import {
   evaluateTripwires,
   TRIPWIRE_THRESHOLDS,
 } from '../../plugins/core/skills/core/scripts/metrics-tripwires.mjs';
-import { appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
+import { appendScorecard as appendScorecardGated } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 import { assessRoundStaleness } from '../../plugins/core/skills/core/scripts/self-test-round.mjs';
+
+// Analytics are opt-in; these scorecards are pinned for a project that opted in.
+const appendScorecard = (project, card) =>
+  appendScorecardGated(project, card, { env: { ...process.env, CORE_METRICS_ENABLED: '1' } });
 
 const TRIPWIRES_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'metrics-tripwires.mjs');

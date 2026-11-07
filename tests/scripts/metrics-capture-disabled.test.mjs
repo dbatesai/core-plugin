@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { computeScorecard, appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
+import { computeScorecard, appendScorecard as appendScorecardGated } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 import { evaluateTripwires } from '../../plugins/core/skills/core/scripts/metrics-tripwires.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
@@ -23,6 +23,9 @@ function writeManifestFlags(project, fields) {
   updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
 }
 
+// Analytics are opt-in; these scorecards are pinned for a project that opted in.
+const appendScorecard = (project, card) =>
+  appendScorecardGated(project, card, { env: { ...process.env, CORE_METRICS_ENABLED: '1' } });
 
 function makeProject(root, { captureOff = false, captureOn = false } = {}) {
   const project = join(root, 'proj');

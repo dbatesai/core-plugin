@@ -5,12 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   computeScorecard,
-  appendScorecard,
+  appendScorecard as appendScorecardGated,
   latestScorecards,
   shouldComputeScorecard,
   scorecardLogPath,
   SCORECARD_SCHEMA_VERSION,
 } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
+
+// Analytics are opt-in; these scorecards are pinned for a project that opted in.
+const appendScorecard = (project, card) =>
+  appendScorecardGated(project, card, { env: { ...process.env, CORE_METRICS_ENABLED: '1' } });
 
 const WS_ID = 'sc-fixture';
 

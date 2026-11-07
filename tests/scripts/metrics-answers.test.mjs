@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { gatherAnswers, renderAnswerView } from '../../plugins/core/skills/core/scripts/metrics-check.mjs';
-import { appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
+import { appendScorecard as appendScorecardGated } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS = 'claude-code';   // fixtures write Claude Code state; an ambient harness must not change that
@@ -31,6 +31,10 @@ function writeManifestFlags(project, fields) {
   updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
 }
 
+
+// Analytics are opt-in; these scorecards are pinned for a project that opted in.
+const appendScorecard = (project, card) =>
+  appendScorecardGated(project, card, { env: { ...process.env, CORE_METRICS_ENABLED: '1' } });
 
 const CHECK_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'metrics-check.mjs');

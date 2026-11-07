@@ -155,7 +155,7 @@ test('runClassification classifies the session passed in, not the newest transcr
     // A newer session already started: THREE turns. mtime-latest would pick this.
     writeFileSync(join(dir, 'sess-newer.jsonl'),
       turn('a', 'r1.') + turn('b', 'r2.') + turn('c', 'r3.'));
-    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', env: {} });
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.status, 'OK');
     assert.equal(r.transcript_resolution, 'session-id');
     assert.equal(r.total, 1, 'classified the 1-turn session, not the 3-turn newer one');
@@ -177,7 +177,7 @@ test('runClassification refuses a session mismatch instead of filing another ses
     ].join('\n') + '\n';
     // No sess-mine.jsonl exists at all — only an unrelated session's transcript.
     writeFileSync(join(dir, 'sess-other.jsonl'), turn('secret', 'this belongs to a different session'));
-    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', env: {} });
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.status, 'UNAVAILABLE', 'refuses rather than classifying the wrong session\'s turns');
     assert.equal(r.records, undefined, 'no records at all — nothing was written');
   } finally {
@@ -198,7 +198,7 @@ test('each classified record is stamped with proxy_version', () => {
       JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
     ].join('\n') + '\n';
     writeFileSync(join(dir, 'sess-pv.jsonl'), turn('hello', 'The answer is 42.'));
-    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', today: '2026-06-01', env: {} });
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', today: '2026-06-01', env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.status, 'OK');
     assert.ok(r.records.length >= 1);
     assert.equal(r.records[0].proxy_version, PROXY_VERSION, 'record carries the proxy version so calibration can invalidate across a proxy change');
