@@ -36,40 +36,49 @@ function scratch(flags) {
   return dir;
 }
 
-// ---------- 1. Capture gate: DEFAULT-ON, opt-out ----------
-// Default-on rather than default-off: the instrumented-
-// memory thesis needs the corpus, and the calibration gate was starving under opt-in.
-// Opt out via env CORE_METRICS_ENABLED=0 or per-workspace metrics_enabled:false.
-// Explicit env wins over the workspace flag in both directions. Capture stays local.
+// ---------- 1. Capture gate: DEFAULT-OFF, opt-in ----------
+// Analytics run only when the user asks for them: env CORE_METRICS_ENABLED=1 or the
+// project's signed manifest metrics_enabled:true. An overlay that wants its corpus sets
+// the opt-in. Explicit env wins over the workspace flag in both directions. Capture stays local.
 
-test('capture gate defaults ON with no env and no workspace flag', () => {
+test('capture gate defaults OFF with no env and no workspace flag', () => {
   const dir = scratch({ workspace_id: 'x' });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env: { CORE_HARNESS: 'claude-code' } }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('a project opts OUT via its manifest metrics_enabled:false', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: false });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), false); }
+  try { assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env: { CORE_HARNESS: 'claude-code' } }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('manifest metrics_enabled:true stays ON (explicit opt-in, harmless under default-on)', () => {
+test('manifest metrics_enabled:true turns analytics ON (explicit opt-in)', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env: { CORE_HARNESS: 'claude-code' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('explicit CORE_METRICS_ENABLED=0 hard-off overrides a workspace opt-in', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_METRICS_ENABLED: '0' } }), false); }
+  try { assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env: { CORE_METRICS_ENABLED: '0' } }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('explicit CORE_METRICS_ENABLED=1 forces ON over a workspace opt-out', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: false });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_METRICS_ENABLED: '1' } }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env: { CORE_METRICS_ENABLED: '1' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('explicit CORE_METRICS_ENABLED=1 turns analytics ON with no workspace flag', () => {
+  const dir = scratch({ workspace_id: 'x' });
+  try { assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env: { CORE_HARNESS: 'claude-code', CORE_METRICS_ENABLED: '1' } }), true); }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('no project at all: analytics stay OFF', () => {
+  assert.equal(metricsEnabled({ home: TEST_HOME, env: { CORE_HARNESS: 'claude-code' } }), false);
 });
 
 // ---------- 2. Passthrough capture: arbitrary overlay fields written verbatim ----------

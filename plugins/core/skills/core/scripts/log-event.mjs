@@ -302,30 +302,39 @@ function checkMetricsParentChain(anchor, dir) {
  *      overriding the marker.
  *   3. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
  *   4. the project's trusted manifest (`_core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
- *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
+ *   5. the same manifest `"metrics_enabled": true`  → ON — explicit per-project opt-in.
  *      A manifest whose stamp does not verify (planted by a clone) is not read.
  *   6. this harness's manifest says `"metrics_enabled": false` but doesn't verify → OFF,
  *      or a `workspace.json` at the project root says so → OFF.
  *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
  *      source can only ever switch capture off, never on.
- *   7. default → ON.
+ *   7. default → OFF (opt-in): analytics run only when the user asked for them.
  * A failure while reading the project list or manifest → OFF on the default path. The explicit
  * environment opt-in (step 3) is the user's own word and is decided before those reads.
  */
-export function metricsEnabled({ project, env = process.env, home: homeIn } = {}) {
+export function metricsEnabled(opts = {}) {
+  return metricsState(opts) === 'on';
+}
+
+/**
+ * The same ladder as metricsEnabled, keeping why analytics are off: 'on', 'off' (an explicit
+ * opt-out, the fail-closed marker, or unreadable state) or 'default' (nobody opted in).
+ * Turn capture reads this so only an explicit 'off' overrides its own opt-in.
+ */
+export function metricsState({ project, env = process.env, home: homeIn } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
-  if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
+  if (['0', 'false', 'no', 'off'].includes(flag)) return 'off'; // explicit hard-off wins
   // Everything below reads the project list and the project's manifest. When one of those reads
   // fails (an unreadable or malformed project list), whether this project opted out is unknown,
   // and unknown is OFF: capture never proceeds on a guess.
   // No account home to read the project's state from means whether it opted out is unknown, so OFF.
-  try { const home = homeIn ?? coreHome(); const on = metricsEnabledFromState({ project, env, home, flag }); metricsGateFailure = null; return on; }
+  try { const home = homeIn ?? coreHome(); const state = metricsStateFromState({ project, env, home, flag }); metricsGateFailure = null; return state; }
   catch (e) {
     // OFF, and said once per process on stderr so the failure stays visible: a defect in this path
     // must not look like an ordinary opt-out.
     metricsGateFailure = String(e?.code || e?.name || 'error');
     if (!gateFailureSaid) { gateFailureSaid = true; try { process.stderr.write(`CORE metrics gate: could not read project state (${metricsGateFailure}); capture is off for this run\n`); } catch { /* stderr closed */ } }
-    return false;
+    return 'off';
   }
 }
 
@@ -333,21 +342,21 @@ export function metricsEnabled({ project, env = process.env, home: homeIn } = {}
 export let metricsGateFailure = null;
 let gateFailureSaid = false;
 
-function metricsEnabledFromState({ project, env, home, flag }) {
-  if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
-  if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
+function metricsStateFromState({ project, env, home, flag }) {
+  if (project && captureDisabledMarkerPath(project, { home, env })) return 'off'; // fail-closed pin failure beats opt-in
+  if (['1', 'true', 'yes', 'on'].includes(flag)) return 'on';
   if (project) {
     const coreDir = join(home, '.core');
     const m = readManifest({ root: projectRootFor(project, { home, coreDir }),
       harness: detectStateHarness(env), coreDir, throwReadErrors: true });
-    if (m && m.metrics_enabled === false) return false; // per-project opt-out
-    if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
+    if (m && m.metrics_enabled === false) return 'off'; // per-project opt-out
+    if (m && m.metrics_enabled === true) return 'on';   // per-project opt-in (explicit)
     const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
     // Read even beside a trusted manifest: an older `.core` left in the project may still say off.
-    if (manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
-    if (readCaptureOptOuts(join(root, 'workspace.json')).metrics_enabled === false) return false;
+    if (manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return 'off';
+    if (readCaptureOptOuts(join(root, 'workspace.json')).metrics_enabled === false) return 'off';
   }
-  return true; // default-ON: instrument by default; opt out via env or workspace flag
+  return 'default'; // default-OFF: analytics are opt-in via env or the signed manifest
 }
 
 export function eventLogPath(projectDir, filename, { today } = {}) {

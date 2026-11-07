@@ -47,7 +47,7 @@
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { withFileLock, foreignLockArtifact } from './file-lock.mjs';
-import { resolveStoragePath, prepareStorageDir, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
+import { resolveStoragePath, prepareStorageDir, metricsEnabled, metricsState, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified, readCaptureOptOuts } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
@@ -97,7 +97,8 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 /**
  * Is the every-turn evidence layer active for this project?
  * Precedence (first match wins):
- *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
+ *   1. metrics explicitly OFF (env or manifest opt-out, the fail-closed marker, unreadable state) → OFF.
+ *      The metrics default alone does not switch capture off; capture has its own opt-in below.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
  *   3. the project's signed manifest (`_core/<harness>/workspace.json`) says `"turn_capture": false` → OFF,
  *      or `"turn_capture": true` → ON; an unverified manifest or the project-root `workspace.json`
@@ -112,7 +113,7 @@ export function turnCaptureEnabled({ project, env = process.env, home: homeIn } 
   let home;
   try { home = homeIn ?? coreHome(); }
   catch (e) { turnCaptureGateFailure = String(e?.code || 'error'); return false; }   // no account home: OFF
-  if (!metricsEnabled({ project, env, home })) return false;
+  if (metricsState({ project, env, home }) === 'off') return false; // an explicit metrics opt-out, the marker or unreadable state
   const flag = (env.CORE_TURN_CAPTURE || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false;
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;

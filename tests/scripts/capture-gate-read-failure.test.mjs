@@ -69,11 +69,11 @@ for (const code of ['EACCES', 'EIO']) {
   });
 }
 
-test('absent state: metrics stay default ON, turn capture is default OFF, and nothing creates an installation identity', () => {
+test('absent state: metrics and turn capture are both default OFF, and nothing creates an installation identity', () => {
   const f = fixture();
   try {
     const before = snapshot(f.base);
-    assert.equal(metrics.metricsEnabled(f.options), true);
+    assert.equal(metrics.metricsEnabled(f.options), false);
     assert.equal(capture.turnCaptureEnabled(f.options), false);
     assert.deepEqual(snapshot(f.base), before);
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
