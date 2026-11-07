@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildRollup, writeRollup, readOrientSignal } from '../../plugins/core/skills/core/scripts/metrics-rollup.mjs';
-import { metricsEnabled, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { metricsEnabled, metricsState, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 test('a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
@@ -151,10 +151,15 @@ test('ACCEPTANCE (exact-triple calibration): a calibration bound to a DIFFERENT 
   });
 });
 
-// ---- Capture gate (spec §18): default-on; opt-out per workspace/env ----
+// ---- Capture gate (spec §18): off until the env or the signed manifest opts in; an opt-out wins ----
 
-test('metricsEnabled is ON by default (instrument by default, capture stays local)', () => {
-  assert.equal(metricsEnabled({ project: '/no/such/project', env: {} }), true);
+test('metricsEnabled is OFF until someone opts in', () => {
+  const home = mkdtempSync(join(tmpdir(), 'mw-default-home-'));
+  try {
+    mkdirSync(join(home, '.core')); writeFileSync(join(home, '.core', 'projects.json'), '[]');
+    assert.equal(metricsState({ project: '/no/such/project', home, env: {} }), 'default');
+    assert.equal(metricsEnabled({ project: '/no/such/project', home, env: {} }), false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test('metricsEnabled honors explicit env opt-out, and env wins over a workspace flag', () => {
@@ -178,7 +183,7 @@ test('metricsEnabled opt-in via the project manifest metrics_enabled flag', () =
 
 test('a disabled workspace produces no rollup artifacts', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    // The default is ON, so opt out explicitly to exercise the disabled path.
+    // An explicit opt-out exercises the disabled path.
     const env = { CORE_METRICS_ENABLED: '0' };
     const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env }));
     assert.equal(r.disabled, true);
@@ -195,7 +200,7 @@ test('detector output (anticipation-gap) can never reach the headline signal', (
     mkdirSync(detDir, { recursive: true });
     writeFileSync(join(detDir, '2026-06-09.jsonl'),
       JSON.stringify({ detector: 'anticipation-gap', provisional: true, severity: 'low', terms: ['x'] }) + '\n');
-    const r = buildRollup({ project, today: '2026-06-09', home });
+    const r = buildRollup({ project, today: '2026-06-09', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.match(r.signal, /no classified turns/, 'rollup reads classified/ only — heuristics never grade the headline');
     assert.deepEqual(r.distribution, {});
   } finally {

@@ -404,7 +404,7 @@ test('detectStateHarness: positive signals only; an unrecognized harness gets it
 });
 
 test('metricsEnabled: a root workspace.json can switch capture off but never on', async () => {
-  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { metricsEnabled, metricsState } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { mkdtempSync, writeFileSync: wf, rmSync: rm } = await import('node:fs');
   const { tmpdir: td } = await import('node:os');
   const { join: j } = await import('node:path');
@@ -412,11 +412,15 @@ test('metricsEnabled: a root workspace.json can switch capture off but never on'
   const project = mkdtempSync(j(td(), 'optout-proj-'));
   try {
     const env = { CLAUDECODE: '1' };
-    assert.equal(metricsEnabled({ project, env, home }), true);
+    assert.equal(metricsState({ project, env, home }), 'default', 'control: nobody opted in');
+    assert.equal(metricsEnabled({ project, env, home }), false);
     wf(j(project, 'workspace.json'), JSON.stringify({ metrics_enabled: false }));
+    assert.equal(metricsState({ project, env, home }), 'off', 'a root opt-out switches it off');
     assert.equal(metricsEnabled({ project, env, home }), false);
     wf(j(project, 'workspace.json'), JSON.stringify({ metrics_enabled: true, metrics_disclosure_shown: true }));
-    assert.equal(metricsEnabled({ project, env, home }), true);
+    assert.equal(metricsState({ project, env, home }), 'default', 'a root opt-in is not an opt-in');
+    assert.equal(metricsEnabled({ project, env, home }), false);
+    assert.equal(metricsState({ project, env: { ...env, CORE_METRICS_ENABLED: '0' }, home }), 'off');
     assert.equal(metricsEnabled({ project, env: { ...env, CORE_METRICS_ENABLED: '0' }, home }), false);
   } finally { rm(home, { recursive: true, force: true }); rm(project, { recursive: true, force: true }); }
 });
@@ -1883,7 +1887,7 @@ test('a generated _core folder is not created beside an older .core that is not 
 });
 
 test('an opt-out in an older .core beside a trusted _core manifest still switches metrics and capture off; the environment still decides first', async () => {
-  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { metricsEnabled, metricsState } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   const s = sandbox();
   try {
@@ -1891,14 +1895,16 @@ test('an opt-out in an older .core beside a trusted _core manifest still switche
     registerProject(s.coreDir, p);
     updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover', turn_capture: true } });
     const env = { CORE_HARNESS: H };
-    assert.equal(metricsEnabled({ project: p, env, home: s.home }), true, 'control: on by default');
+    assert.equal(metricsState({ project: p, env, home: s.home }), 'default', 'control: nobody opted in to metrics');
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'control: on by the signed manifest opt-in');
     mkdirSync(join(p, '.core', H), { recursive: true });
     writeFileSync(join(p, '.core', H, 'workspace.json'), '{"turn_capture":false}');
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'capture off');
-    assert.equal(metricsEnabled({ project: p, env, home: s.home }), true, 'metrics untouched by a capture-only switch');
+    assert.equal(metricsState({ project: p, env, home: s.home }), 'default', 'metrics untouched by a capture-only switch');
     writeFileSync(join(p, '.core', H, 'workspace.json'), '{"metrics_enabled":false}');
+    assert.equal(metricsState({ project: p, env, home: s.home }), 'off', 'metrics off');
     assert.equal(metricsEnabled({ project: p, env, home: s.home }), false, 'metrics off');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'a metrics opt-out overrides the capture opt-in');
     assert.equal(metricsEnabled({ project: p, env: { ...env, CORE_METRICS_ENABLED: '1' }, home: s.home }), true, 'the environment still decides first');
   } finally { s.cleanup(); }
 });

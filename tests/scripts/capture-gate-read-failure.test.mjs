@@ -112,30 +112,34 @@ test('readable untrusted opt-outs survive; malformed readable data retains its e
     // Replacing signed bytes without a stamp makes this readable but untrusted.
     fs.writeFileSync(f.manifest, JSON.stringify({ metrics_enabled: false, turn_capture: false }));
     const before = snapshot(f.base);
+    assert.equal(metrics.metricsState(f.options), 'off');
     assert.equal(metrics.metricsEnabled(f.options), false);
     assert.equal(capture.turnCaptureEnabled({ ...f.options,
       env: { ...f.options.env, CORE_METRICS_ENABLED: '1' } }), false);
     assert.deepEqual(snapshot(f.base), before);
     fs.writeFileSync(f.manifest, '{malformed');
-    assert.equal(metrics.metricsEnabled(f.options), true);
+    assert.equal(metrics.metricsState(f.options), 'default'); // metrics' default is off: nobody opted in
+    assert.equal(metrics.metricsEnabled(f.options), false);
     assert.equal(capture.turnCaptureEnabled(f.options), false); // capture's default is off
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
 });
 
-for (const [name, gate, env, manifest] of [
-  ['metrics', metrics.metricsEnabled, {}, undefined],
+for (const [name, gate, env, manifest, untouched, off] of [
+  // An environment or manifest opt-in is read before the root file, so the metrics control is the
+  // state nobody opted in to, and OFF is the explicit 'off' that state can be told apart from.
+  ['metrics', metrics.metricsState, {}, undefined, 'default', 'off'],
   // Capture is opt-in, so its "on" state is the signed manifest's explicit opt-in.
-  ['turn capture', capture.turnCaptureEnabled, { CORE_METRICS_ENABLED: '1' }, { turn_capture: true }],
+  ['turn capture', capture.turnCaptureEnabled, { CORE_METRICS_ENABLED: '1' }, { turn_capture: true }, true, false],
 ]) test(`${name}: an unreadable legacy root manifest is OFF, an absent one leaves the enabled state alone`, () => {
   const f = fixture(manifest);
   try {
     const opt = { ...f.options, env: { ...f.options.env, ...env } };
     const file = join(f.root, 'workspace.json');
-    assert.equal(gate(opt), true);
+    assert.equal(gate(opt), untouched);
     fs.writeFileSync(file, JSON.stringify({ metrics_enabled: false, turn_capture: false }));
     const before = snapshot(f.base);
-    denied(file, () => assert.equal(gate(opt), false));
-    assert.equal(gate(opt), false);
+    denied(file, () => assert.equal(gate(opt), off));
+    assert.equal(gate(opt), off);
     assert.deepEqual(snapshot(f.base), before);
   } finally { fs.rmSync(f.base, { recursive: true, force: true }); }
 });

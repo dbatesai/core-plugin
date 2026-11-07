@@ -1,4 +1,4 @@
-import { operationalMetricsDir, resolveStoragePath, metricsEnabled, metricsHistoryFolders } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { operationalMetricsDir, resolveStoragePath, metricsEnabled, metricsState, metricsHistoryFolders } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { writePinSigned, writeHeldSigned, markMetricsEverExternal, projectRootFor, localStateDir, canonical as canonicalPath } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
@@ -173,19 +173,19 @@ test('a lost, tampered or foreign pin never turns capture off or sends it anywhe
     const folder = appData(home, 'a-store');
     mkdirSync(folder, { recursive: true });
     signedPin(metaA, home, folder, A);
-    assert.equal(metricsEnabled({ project: A, env: {}, home }), true);
+    assert.equal(metricsState({ project: A, env: {}, home }), 'default');
     writeFileSync(join(metaA, 'storage-path.txt'), folder + '-tampered');
-    assert.equal(metricsEnabled({ project: A, env: {}, home }), true, 'tampered: capture stays on');
+    assert.equal(metricsState({ project: A, env: {}, home }), 'default', 'tampered: never switches capture off');
     assert.equal(resolveStoragePath(A), join(A, '_metrics'));
     assert.deepEqual(metricsHistoryFolders(A, { home, env: E }), [], 'a tampered record names nothing');
     rmSync(join(metaA, 'storage-path.txt'));
-    assert.equal(metricsEnabled({ project: A, env: {}, home }), true, 'half a pin: capture stays on');
+    assert.equal(metricsState({ project: A, env: {}, home }), 'default', 'half a pin: never switches capture off');
 
     // A's pin and its MAC copied into B verify as a signature but name the wrong project.
     signedPin(metaA, home, folder, A);
     writeFileSync(join(metaB, 'storage-path.txt'), readFileSync(join(metaA, 'storage-path.txt')));
     writeFileSync(join(metaB, 'storage-path.txt.mac'), readFileSync(join(metaA, 'storage-path.txt.mac')));
-    assert.equal(metricsEnabled({ project: B, env: {}, home }), true);
+    assert.equal(metricsState({ project: B, env: {}, home }), 'default');
     assert.deepEqual(metricsHistoryFolders(B, { home, env: {} }), [], "B does not adopt A's folder as its history");
   }, { projects: 2 });
 });
@@ -251,9 +251,12 @@ test('a capture-disabled marker an earlier scaffold left is cleared by the next 
   withProject(({ home, projectDir }) => {
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     writeFileSync(join(meta, 'capture-disabled.json'), '{"marker":"core-capture-disabled"}\n');
-    assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), false);
+    const optIn = { CORE_METRICS_ENABLED: '1' };
+    assert.equal(metricsState({ project: projectDir, env: {}, home }), 'off');
+    assert.equal(metricsEnabled({ project: projectDir, env: optIn, home }), false, 'the marker beats an opt-in');
     assert.equal(initMetrics({ projectDir, home, env: E }).ok, true);
-    assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), true);
+    assert.equal(metricsState({ project: projectDir, env: {}, home }), 'default', 'the marker no longer switches it off');
+    assert.equal(metricsEnabled({ project: projectDir, env: optIn, home }), true, 'an opted-in project captures again');
   });
 });
 

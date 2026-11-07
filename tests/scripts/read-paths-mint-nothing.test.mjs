@@ -96,26 +96,26 @@ test('the metrics gate answers OFF, never throws, when the project list is malfo
       rmSync(list, { recursive: true, force: true });
       ${setupCode}
       const m = await import(${JSON.stringify(pathToFileURL(join(REPO, 'plugins/core/skills/core/scripts/log-event.mjs')).href)});
-      const a = m.metricsEnabled({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: {} });
-      const b = m.metricsEnabled({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: {} });
+      const a = m.metricsState({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: {} });
+      const b = m.metricsState({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: {} });
       const why = m.metricsGateFailure;
       const c = m.metricsEnabled({ project: ${JSON.stringify(proj)}, home: ${JSON.stringify(home)}, env: { CORE_METRICS_ENABLED: '1' } });
       process.stdout.write(JSON.stringify({ a, b, c, why, after_good_read: m.metricsGateFailure }));
     `], { encoding: 'utf8' });
     const ok = probe(`writeFileSync(list, '{"projects":[]}');`);
-    assert.deepEqual(JSON.parse(ok.stdout), { a: true, b: true, c: true, why: null, after_good_read: null }, 'control: a readable list keeps the default');
+    assert.deepEqual(JSON.parse(ok.stdout), { a: 'default', b: 'default', c: true, why: null, after_good_read: null }, 'control: a readable list keeps the default');
     assert.equal(ok.stderr, '');
     for (const [label, code, why] of [['malformed JSON', `writeFileSync(list, '{not json');`, 'SyntaxError'], ['a directory where the list should be', `mkdirSync(list);`, 'EISDIR']]) {
       const r = probe(code);
       assert.equal(r.status, 0, `${label}: ${r.stderr}`);
-      assert.deepEqual(JSON.parse(r.stdout), { a: false, b: false, c: true, why, after_good_read: null }, `${label}: the reason is for the failing call and clears when a later call reads cleanly`);
+      assert.deepEqual(JSON.parse(r.stdout), { a: 'off', b: 'off', c: true, why, after_good_read: null }, `${label}: the reason is for the failing call and clears when a later call reads cleanly`);
       assert.equal(r.stderr.split('\n').filter((l) => l.startsWith('CORE metrics gate:')).length, 1, `${label}: said once, not per call`);
     }
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
 test('the metrics gate also answers OFF on a project list it has no permission to read', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
-  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { metricsEnabled, metricsState } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { chmodSync } = await import('node:fs');
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'gate-')));
   try {
@@ -123,6 +123,9 @@ test('the metrics gate also answers OFF on a project list it has no permission t
     mkdirSync(join(home, '.core'), { recursive: true }); mkdirSync(proj);
     const list = join(home, '.core', 'projects.json');
     writeFileSync(list, '{"projects":[]}'); chmodSync(list, 0o000);
-    try { assert.equal(metricsEnabled({ project: proj, home, env: {} }), false); } finally { chmodSync(list, 0o644); }
+    try {
+      assert.equal(metricsState({ project: proj, home, env: {} }), 'off');
+      assert.equal(metricsEnabled({ project: proj, home, env: {} }), false);
+    } finally { chmodSync(list, 0o644); }
   } finally { rmSync(base, { recursive: true, force: true }); }
 });

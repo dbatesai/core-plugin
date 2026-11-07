@@ -61,7 +61,8 @@ test('a scaffold clears a stale capture-disabled marker and capture resumes (rec
       `const result = initMetrics({ projectDir: ${JSON.stringify(project)}});`,
       `process.stdout.write(JSON.stringify({ result, metricsOn: metricsEnabled({ project: ${JSON.stringify(project)} }) }));`,
     ].join('\n');
-    const child = runChild(runner, { HOME: fakeHome, USERPROFILE: fakeHome });
+    // Opted in, so the gate reads ON once nothing switches it off.
+    const child = runChild(runner, { HOME: fakeHome, USERPROFILE: fakeHome, CORE_METRICS_ENABLED: '1' });
     assert.equal(child.status, 0, child.stderr);
     const observed = JSON.parse(child.stdout);
     assert.equal(observed.result.ok, true, JSON.stringify(observed.result));
