@@ -301,6 +301,11 @@ export function main(argv) {
     return 3;
   }
 
+  // Capability drift is analytics: it writes nothing unless analytics are on for this project.
+  if (metricsState({ project }) !== 'on') {
+    console.log(JSON.stringify({ status: 'DISABLED', reason: 'analytics are off (opt in with CORE_METRICS_ENABLED=1 or the manifest\'s metrics_enabled: true)' }));
+    return 0;
+  }
   const target = { root: projectRootFor(project), harness: harness || detectStateHarness() };
   const history = loadCapabilityHistory(target, project);
   const { drift, healing, ambiguous } = detectDrift(history);
@@ -327,6 +332,7 @@ export function main(argv) {
 }
 
 import { realpathSync } from 'node:fs';
+import { metricsState } from './log-event.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { ensureStoreIgnores } from './store-ignores.mjs';
 const _c = p => { try { return realpathSync(p); } catch { return p; } };

@@ -312,8 +312,13 @@ test('main: the drift log is stamped with the bytes written, so the edit check r
   const project = realpathSync(mkdtempSync(join(tmpdir(), 'capdrift-stamp-')));
   const logPath = join(project, '_memories', '_capability-drift-log.md');
   const realLog = console.log;
+  const savedGate = process.env.CORE_METRICS_ENABLED;
   try {
     console.log = () => {};
+    process.env.CORE_METRICS_ENABLED = '0';
+    assert.equal(main([project, '--harness', 'claude-code']), 0);
+    assert.equal(existsSync(logPath), false, 'analytics off: no drift log is written');
+    process.env.CORE_METRICS_ENABLED = '1';   // drift is analytics; this test is about the log once written
     assert.equal(main([project, '--harness', 'claude-code']), 0);
     console.log = realLog;
     assert.ok(existsSync(logPath));
@@ -322,6 +327,7 @@ test('main: the drift log is stamped with the bytes written, so the edit check r
     appendFileSync(logPath, '\nuser note\n');
     assert.equal(classifyFileLifecycle(project, logPath, { kind: 'unit' }).classification, 'pending-edit');
   } finally {
+    if (savedGate === undefined) delete process.env.CORE_METRICS_ENABLED; else process.env.CORE_METRICS_ENABLED = savedGate;
     console.log = realLog;
     rmSync(project, { recursive: true, force: true });
   }

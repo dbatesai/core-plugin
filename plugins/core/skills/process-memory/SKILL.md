@@ -265,7 +265,7 @@ Read the per-session capability history and surface any drift:
 node <scripts>/analyze-capability-drift.mjs "<project>"
 ```
 
-It reads `<project>/_core/<harness>/capability-history.jsonl` (appended each session at startup by `record-capability-snapshot.mjs`), renders `<project>/_memories/_capability-drift-log.md`, and reports degrading drift + regressions. Narrate only what's actionable in plain voice — a capability that slipped PASS→DEGRADED, or one that stopped reporting between sessions. If there's no history yet, say so in one sentence ("No capability history yet — it accrues per session."). Healing-direction changes are informational; don't lead with them.
+It reads `<project>/_core/<harness>/capability-history.jsonl` (appended each session at startup by `record-capability-snapshot.mjs`), renders `<project>/_memories/_capability-drift-log.md`, and reports degrading drift + regressions. Narrate only what's actionable in plain voice — a capability that slipped PASS→DEGRADED, or one that stopped reporting between sessions. If it prints `DISABLED`, analytics are off for this project; say so once and move on. If there's no history yet, say so in one sentence ("No capability history yet."). Healing-direction changes are informational; don't lead with them.
 
 ---
 
