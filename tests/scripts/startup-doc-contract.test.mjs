@@ -30,10 +30,10 @@ test('metrics-init failure is visible: no stderr/exit suppression, and a typed f
     'a failed scaffold prints a visible marker the readiness summary carries');
 });
 
-test('capability probe failure is visible: no 2>/dev/null on the probe, and a typed failure marker line exists', () => {
-  assert.doesNotMatch(startup, /capability-probe\.mjs --startup --json 2>\/dev\/null/,
-    'the probe must not suppress the stderr the protocol itself says to leave visible');
-  assert.match(startup, /CORE-CAPABILITY-PROBE-FAILED/);
+test('startup runs no analytics steps: no capability probe or snapshot, no tripwires, no metrics notice', () => {
+  for (const script of ['capability-probe.mjs', 'record-capability-snapshot.mjs', 'metrics-tripwires.mjs', 'metrics-disclosure.mjs', 'record-retrieval-event.mjs']) {
+    assert.doesNotMatch(startup, new RegExp(script.replace('.', '\\.')), `startup.md no longer runs ${script}`);
+  }
 });
 
 test('the context-integrity command is harness-aware — no hardcoded Claude-only MEMORY.md path', () => {
@@ -43,13 +43,14 @@ test('the context-integrity command is harness-aware — no hardcoded Claude-onl
     'the protocol names the Codex behavior: absent surface = explicit skip, not a false check');
 });
 
-test('view-memory leads the compose section — before the probe/scaffold/tripwire actions, not buried after them', () => {
+test('view-memory leads the compose section — before the scaffold and other actions, not buried after them', () => {
   const composeAt = startup.indexOf('## Compose the readiness summary');
   assert.ok(composeAt >= 0);
   const viewAt = startup.indexOf('**First — view memory.**');
-  const probeAt = startup.indexOf('capability-probe.mjs', composeAt);
+  const scaffoldAt = startup.indexOf('metrics-init.mjs', composeAt);
+  assert.ok(scaffoldAt > composeAt, 'the scaffold step is in the compose section');
   assert.ok(viewAt > composeAt, 'view-memory lives in the compose section');
-  assert.ok(viewAt < probeAt, 'view-memory comes BEFORE the probe and every other compose-time action');
+  assert.ok(viewAt < scaffoldAt, 'view-memory comes BEFORE the scaffold and every other compose-time action');
   assert.doesNotMatch(startup, /\*\*Before composing — view memory\.\*\*/,
     'the old buried duplicate is gone');
 });
