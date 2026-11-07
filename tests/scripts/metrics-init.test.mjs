@@ -914,3 +914,25 @@ test('a failed route creates no capture folder or ignore rule', () => {
     assert.equal(existsSync(join(project,'_metrics')),false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('the scaffold command writes nothing when neither analytics nor turn capture is opted in, and scaffolds when either is', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const script = join(process.cwd(), 'plugins/core/skills/core/scripts/metrics-init.mjs');
+  const run = (home, projectDir, extra) => spawnSync(process.execPath, [...accountHomeArgs(home), script, projectDir],
+    { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code', ...extra } });
+  for (const [extra, scaffolds] of [[{}, false], [{ CORE_METRICS_ENABLED: '1' }, true], [{ CORE_TURN_CAPTURE: '1' }, true], [{ CORE_METRICS_ENABLED: '0', CORE_TURN_CAPTURE: '1' }, true]]) {
+    withProject(({ home, projectDir }) => {
+      const r = run(home, projectDir, extra);
+      assert.equal(r.status, 0, `${JSON.stringify(extra)}\n${r.stderr}`);
+      const out = JSON.parse(r.stdout);
+      if (scaffolds) {
+        assert.equal(out.ok, true);
+        assert.equal(out.skipped, undefined, JSON.stringify(extra));
+        assert.ok(existsSync(join(projectDir, '_metrics')), `${JSON.stringify(extra)} scaffolds _metrics`);
+      } else {
+        assert.match(out.skipped, /both off/);
+        assert.equal(existsSync(join(projectDir, '_metrics')), false, 'nothing opted in: no _metrics folder is created');
+      }
+    });
+  }
+});

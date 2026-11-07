@@ -25,9 +25,10 @@
 
 import { existsSync, rmSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
+import { turnCaptureEnabled } from './turn-capture.mjs';
 import { sep, join } from 'node:path';
 import {  platform } from 'node:os';
-import { operationalMetricsDir, prepareStorageDir, appendLeaf } from './log-event.mjs';
+import { operationalMetricsDir, prepareStorageDir, appendLeaf, metricsState } from './log-event.mjs';
 import { ensureRealFolders } from './store-ignores.mjs';
 import { STATE_DIRNAME, LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 import { coreHome } from './trusted-home.mjs';
@@ -173,6 +174,13 @@ if (isCliEntry(import.meta.url)) {
   if (!projectDir) {
     console.error('usage: node metrics-init.mjs <project-dir>');
     process.exit(1);
+  }
+  // Nothing opted in: analytics at their default and turn capture off, so there is nothing to
+  // scaffold and nothing is written. A leftover capture-disabled marker reads as 'off', not
+  // 'default', so the scaffold still runs and clears it.
+  if (metricsState({ project: projectDir }) === 'default' && !turnCaptureEnabled({ project: projectDir })) {
+    console.log(JSON.stringify({ ok: true, skipped: 'analytics and turn capture are both off; nothing to scaffold' }));
+    process.exit(0);
   }
   const result = initMetrics({ projectDir });
   if (!result.ok) {
