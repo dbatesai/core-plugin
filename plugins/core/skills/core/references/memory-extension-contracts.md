@@ -113,11 +113,14 @@ The observability layer (Phases 0–3) extends the same way. An overlay adds its
   detectors are added without touching capture (`metrics-detectors.mjs` is the pattern). An
   overlay writes its own domain detectors — e.g. a delivery-specific "missed-signal" detector —
   reading the same captured ground truth.
-- **The capture gate is the deployment switch.** Metrics are default-on; the whole
-  substrate (classifier, detectors, rollups, bi-temporal storage metrics) runs for every workspace
-  unless it opts out via `CORE_METRICS_ENABLED=0` or `workspace.json` `metrics_enabled: false`.
-  Capture stays local. An overlay that wants a workspace dark sets the opt-out; everyone else
-  contributes to the corpus by default.
+- **The capture gate is the deployment switch.** Metrics are opt-in: the substrate (classifier,
+  detectors, rollups, scorecards, bi-temporal storage metrics, per-turn retrieval-event rows) runs only
+  for a workspace that turned it on, with `CORE_METRICS_ENABLED=1` or `metrics_enabled: true` in the
+  project's signed `_core/<harness>/workspace.json`. An overlay that wants its corpus sets that opt-in
+  for each workspace. `CORE_METRICS_ENABLED=0`, a `metrics_enabled: false` opt-out and the fail-closed
+  marker keep a workspace dark; the environment's `=1` outranks a manifest opt-out, and `=0` and the
+  marker outrank everything. Turn capture has its own opt-in (`CORE_TURN_CAPTURE=1` or
+  `turn_capture: true`) and is stopped by an explicit metrics opt-out. Capture stays local.
 
 What CORE owns: the six-state recognition taxonomy, the rollup, the startup readiness signal, the gold
 detectors, the calibration harness (`calibrate-classifier.mjs`) and its precision gate. What the
