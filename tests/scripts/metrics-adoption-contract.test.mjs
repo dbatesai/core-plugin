@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { metricsEnabled, logEvent } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { metricsEnabled, metricsState, logEvent } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { turnCaptureEnabled } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 import { computePrecision } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
@@ -79,6 +80,49 @@ test('explicit CORE_METRICS_ENABLED=1 turns analytics ON with no workspace flag'
 
 test('no project at all: analytics stay OFF', () => {
   assert.equal(metricsEnabled({ home: TEST_HOME, env: { CORE_HARNESS: 'claude-code' } }), false);
+});
+
+test('a signed-manifest opt-in alone turns analytics on: off before it is written, on after, off when read from another home', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'metrics-contract-'));
+  const otherHome = mkdtempSync(join(tmpdir(), 'optout-other-home-'));
+  const env = { CORE_HARNESS: 'claude-code' };   // no CORE_METRICS_ENABLED anywhere
+  try {
+    registerFixtureProject(TEST_HOME, dir);
+    assert.equal(metricsState({ project: dir, home: TEST_HOME, env }), 'default', 'registered, nothing opted in');
+    updateManifest({ root: dir, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields: { metrics_enabled: true } });
+    assert.equal(metricsState({ project: dir, home: TEST_HOME, env }), 'on', 'the signed manifest opt-in is read');
+    assert.equal(metricsEnabled({ project: dir, home: TEST_HOME, env }), true);
+    assert.equal(metricsState({ project: dir, home: otherHome, env }), 'default', 'the same folder under another home has no trusted opt-in');
+  } finally { rmSync(dir, { recursive: true, force: true }); rmSync(otherHome, { recursive: true, force: true }); }
+});
+
+// Two gates. Turn capture has its own opt-in; analytics block it only when they are explicitly off
+// (env 0, a manifest opt-out, the fail-closed marker, unreadable state), not by their default.
+for (const [metricsEnv, metricsWant] of [[undefined, 'default'], ['1', 'on'], ['0', 'off']]) {
+  for (const [captureEnv, captureOptIn] of [[undefined, false], ['1', true], ['0', false]]) {
+    const want = captureOptIn && metricsWant !== 'off';
+    test(`gates: CORE_METRICS_ENABLED=${metricsEnv ?? '(unset)'}, CORE_TURN_CAPTURE=${captureEnv ?? '(unset)'} -> metrics ${metricsWant}, capture ${want ? 'on' : 'off'}`, () => {
+      const dir = scratch({ workspace_id: 'x' });
+      const env = { CORE_HARNESS: 'claude-code' };
+      if (metricsEnv !== undefined) env.CORE_METRICS_ENABLED = metricsEnv;
+      if (captureEnv !== undefined) env.CORE_TURN_CAPTURE = captureEnv;
+      try {
+        assert.equal(metricsState({ project: dir, home: TEST_HOME, env }), metricsWant);
+        assert.equal(turnCaptureEnabled({ project: dir, home: TEST_HOME, env }), want);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+  }
+}
+
+test('gates: a manifest metrics opt-out blocks a turn-capture env opt-in; a manifest capture opt-in works with analytics at their default', () => {
+  const env = { CORE_HARNESS: 'claude-code' };
+  const a = scratch({ workspace_id: 'x', metrics_enabled: false });
+  const b = scratch({ workspace_id: 'x', turn_capture: true });
+  try {
+    assert.equal(turnCaptureEnabled({ project: a, home: TEST_HOME, env: { ...env, CORE_TURN_CAPTURE: '1' } }), false);
+    assert.equal(metricsState({ project: b, home: TEST_HOME, env }), 'default');
+    assert.equal(turnCaptureEnabled({ project: b, home: TEST_HOME, env }), true);
+  } finally { rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true }); }
 });
 
 // ---------- 2. Passthrough capture: arbitrary overlay fields written verbatim ----------
