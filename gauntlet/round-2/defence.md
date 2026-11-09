@@ -2,7 +2,7 @@
 
 Seven fresh reviewers, each given only the file paths and `reviewer-brief.md`. 129 findings: **critical 17 · major 81 · minor 30 · taste 1**.
 
-**Status line:** Round 2 — 129 findings, 128 accepted, 1 rebutted in part (see "Partial rebuttals").
+**Status line:** Round 2 — 129 findings, 129 accepted, 0 rebutted (one partial rebuttal was disputed by its reviewer with evidence and withdrawn before judging).
 
 Round 2 found that several round-1 fixes were made on paper. The biggest: the convention arm never had the five skills, so no test ever measured Layer 1, and Layer 1 could not run without the script anyway. Every accepted finding maps to one fix below. The fix list is what v3 implements.
 
@@ -36,6 +36,7 @@ Round 2 found that several round-1 fixes were made on paper. The biggest: the co
 | G24 | **Executor mechanics.** 0.1 copies the four plan files and the evidence into `docs/plan/` on `v4` and names the source branch. 0.3's Accept can fail. Tests are listed with `find`, so Node 20 works. `ci.yml` adds `v4` and `pull_request`; the two kept steps are `continue-on-error` until 3.5 and 4.3; Accept is "passes except steps flagged in `docs/build-log.md`". After the rebase onto `next`, delete the nine v3 test files it adds. The `sk-` pattern needs a left boundary. 5.2 gets an offline Accept; the prose check moves to 7.6 with a v4 fixture. 7.2 uses `runSelftest({ instruments })`, injection not monkey-patching. `selftest` uses a temp core dir. `cli-entry.mjs` is ported, not moved. 3.3 and 3.4 come after 4.1's queue. Step labels and `expects` lines corrected. |
 | G25 | **Every step has "If it fails".** The 21 missing ones are written, specific where the general rule does not fit (4.5, 5.3, 9.x). |
 | G26 | **Text fixes.** Listed per finding below. |
+| G27 | **Layer 1 travels with the repo for Codex and Antigravity.** Setup offers to commit one copy of the five skills to `.agents/skills/`, stamped with CORE's version. Codex and Antigravity read that folder; Claude Code gets the skills from the plugin. `check --project` warns when the stamp is older than the installed CORE. The block gains one line carrying the write test. The rung table's "Files only" row names the full loss. Known cost: on Codex or Antigravity with the plugin also installed, the same skill text is listed twice. |
 
 ## Dispositions
 
@@ -64,7 +65,7 @@ Round 2 found that several round-1 fixes were made on paper. The biggest: the co
 | R2-PA-02 | crit | Accepted | G4 |
 | R2-PA-03 | crit | Accepted | G4 — AND, not OR; G1 — the layer 1 arm has `remember` too |
 | R2-PA-04 | crit | Accepted | G2 |
-| R2-PA-05 | maj | Rebutted in part | See below |
+| R2-PA-05 | maj | Accepted (rebuttal withdrawn) | G27 — see below |
 | R2-PA-06 | maj | Accepted | G3 |
 | R2-PA-07 | maj | Accepted | G7 |
 | R2-PA-08 | maj | Accepted | G22 — Projects scored |
@@ -185,4 +186,4 @@ Round 2 found that several round-1 fixes were made on paper. The biggest: the co
 
 | ID | Reviewer response |
 |---|---|
-| R2-PA-05 | Pending |
+| R2-PA-05 | **Disputed.** Claude Code Projects docs list "Plugins enabled in `.claude/settings.json`" as "Not loaded" in cloud threads, so fix (3) fails where the loss bites; and it does nothing for Codex or Antigravity. Proposed one copy in `.agents/skills/` only, version-stamped. **Outcome:** the evidence is decisive on fix (3) and the narrower copy answers the drift and conflict objections. Rebuttal withdrawn; finding accepted as G27. No judge needed. |
