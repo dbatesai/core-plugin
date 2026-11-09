@@ -12,12 +12,12 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 6. Codex loads Claude Code plugin layouts as they are: `.claude-plugin/plugin.json`, `hooks/hooks.json`, `skills/`, `.mcp.json`, `.claude-plugin/marketplace.json`. [SOURCE T/codex-rs/exec-server-protocol/src/protocol.rs#L54-L59] [SOURCE T/codex-rs/core-plugins/src/loader.rs#L74-L77] [SOURCE T/codex-rs/core-plugins/src/marketplace.rs#L20-L25]
 7. Plugin hook commands get `PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, `PLUGIN_DATA` and `CLAUDE_PLUGIN_DATA`, as env vars and as `${...}` text replacement. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L311-L319] [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L714-L716]
 8. The plugin's persistent data folder is `$CODEX_HOME/plugins/data/<plugin>-<marketplace>`. The installed copy is `$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>`. [SOURCE T/codex-rs/core-plugins/src/store.rs#L112-L127] [SOURCE T/codex-rs/core-plugin-common/src/installed.rs#L10-L12]
-9. Do not use the root `plugin.json` "Agent Plugins" manifest if you need hooks. That format gets no hooks on Codex today. Use `.codex-plugin/plugin.json` or `.claude-plugin/plugin.json`. [SOURCE T/codex-rs/core-plugins/src/loader.rs#L985-L995]
+9. Do not use the root `plugin.json` "Agent Plugins" manifest if you need hooks. That format gets no hooks on Codex today. Use `.codex-plugin/plugin.json` or `.claude-plugin/plugin.json`. [SOURCE T/codex-rs/core-plugins/src/loader.rs#L985-L995] **Conflict:** the official plugin docs say hooks can go under `extensions.com.openai` in root `plugin.json`. The docs may describe a newer build than 0.167.0. Test before relying on either. [OPENED https://developers.openai.com/plugins/build/plugins.md — "Add `extensions.com.openai` to root `plugin.json` for presentation, existing registered MCP server mappings, lifecycle hooks, and onboarding."]
 10. Native memory exists but is off by default. It is global, not per project. It is built in the background from old session files, not during the session. [SOURCE T/codex-rs/features/src/lib.rs#L1398-L1403] [SOURCE T/codex-rs/memories/README.md#L29-L38]
 11. `AGENTS.md` is the always-loaded instruction file. Project files share a 32 KiB budget. Claude Code now reads `AGENTS.md` too. [SOURCE T/codex-rs/config/src/config_toml.rs#L77] [OPENED CC/memory.md#L367 — "Reading `AGENTS.md` directly requires Claude Code v2.1.277 or later."]
 12. Skills use the same `SKILL.md` format with progressive disclosure. The shared location is `.agents/skills`. [SOURCE T/codex-rs/ext/skills/src/host_roots.rs#L27-L28] [SOURCE T/codex-rs/ext/skills/src/host_roots.rs#L225] [SOURCE T/codex-rs/ext/skills/src/catalog_prompt.rs#L27]
 13. Inside the sandbox, `.git`, `.agents`, `.codex` and `.aws` under the workspace are read-only. Keep project memory files somewhere else. Hooks run outside the sandbox. [SOURCE T/codex-rs/protocol/src/permissions.rs#L40-L51] [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L444-L462]
-14. Proactive tools in the CLI: `codex exec`, `/goal` with automatic continuation, `clock.sleep`, `codex queue`, `notify`. There is no `/loop` and no cron in the CLI. App "Automations" are documented but I could not open the page. [SOURCE T/codex-rs/ext/goal/src/extension.rs#L180-L201] [SOURCE T/codex-rs/cli/src/queue_cmd.rs#L18-L32] [SEARCH-ONLY https://developers.openai.com/codex/app/automations]
+14. Proactive tools in the CLI: `codex exec`, `/goal` with automatic continuation, `clock.sleep`, `codex queue`, `notify`. There is no `/loop` and no cron in the CLI. App "Automations" are now called "Scheduled tasks". They run from the desktop app or ChatGPT web, not the CLI. [SOURCE T/codex-rs/ext/goal/src/extension.rs#L180-L201] [SOURCE T/codex-rs/cli/src/queue_cmd.rs#L18-L32] [OPENED https://learn.chatgpt.com/docs/automations.md — "Codex CLI doesn't provide the Scheduled management interface. Use ChatGPT web or the desktop app to create and manage scheduled tasks."]
 15. Windows is native: win32 builds on npm, hooks through `cmd.exe /C` with a `commandWindows` override, and a `[windows] sandbox` setting. `codex mcp-server` no longer exists. [OPENED NPM — `'@openai/codex-win32-x64': 'npm:@openai/codex@0.167.0-win32-x64'`] [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L660-L664] [SOURCE T/codex-rs/cli/src/main.rs#L145-L245]
 
 ---
@@ -26,7 +26,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 
 **How I got the evidence.**
 
-- `developers.openai.com` was blocked. I did not use any mirror. The repo's own `docs/*.md` files are stubs that point to that host. [OPENED T/docs/agents_md.md — "For information about AGENTS.md, see [this documentation](https://developers.openai.com/codex/guides/agents-md)."]
+- `developers.openai.com` was blocked when this was first written. I did not use any mirror. It was reachable on the 2026-11-09 re-check; see "Primary-docs check" at the end. The repo's own `docs/*.md` files are stubs that point to that host. [OPENED T/docs/agents_md.md — "For information about AGENTS.md, see [this documentation](https://developers.openai.com/codex/guides/agents-md)."]
 - So the primary evidence is Rust source, fetched file by file from `raw.githubusercontent.com/openai/codex/rust-v0.167.0/`. Line numbers come from those raw files. The `T/` links point to the same files on github.com.
 - I did not run Codex. Nothing here was tested live.
 - Tags used: `[SOURCE url#L]` = code I read. `[OPENED url — "quote"]` = page or file I read, with a verbatim quote. `[OPENED-VIA-WEBFETCH url]` = page read through a summarizing fetch tool, so I never saw the raw text. `[SEARCH-ONLY url]` = I only saw a search extract.
@@ -83,7 +83,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 
 **OS differences.** On a Windows executor, fallback names holding `\` or `:` are also rejected. I found no other difference. [SOURCE T/codex-rs/core/src/agents_md.rs#L283-L287]
 
-**Surfaces.** CLI and `codex exec`: yes, by source. IDE and app: same core, clients not checked. Cloud: a search extract says the cloud agent uses a repository's `AGENTS.md`. [SEARCH-ONLY https://developers.openai.com/codex/cloud/environments]
+**Surfaces.** CLI and `codex exec`: yes, by source. IDE and app: same core, clients not checked. Cloud: the official page says the cloud agent uses a repository's `AGENTS.md`. That page is now titled "Codex Cloud (Legacy)". [OPENED https://learn.chatgpt.com/docs/environments/cloud-environment.md — "If your repo includes `AGENTS.md`, the agent uses it to find project-specific lint and test commands."]
 
 **On `main`.** Same discovery. It adds a visible warning when the budget runs out. [SOURCE M/codex-rs/core/src/agents_md.rs#L51]
 
@@ -97,7 +97,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 
 - `[features] memories = true`, or `--enable memories`, or `codex features enable memories`. The old key `memory_tool` still maps to it. [SOURCE T/codex-rs/features/src/legacy.rs#L41-L42] [SOURCE T/codex-rs/cli/src/main.rs#L1006-L1025]
 - The TUI has `/memories`. [OPENED T/codex-rs/tui/src/slash_command.rs — "configure memory use and generation"]
-- Search extract of the official page says the same and that memories are off by default. [SEARCH-ONLY https://developers.openai.com/codex/memories]
+- The official page says the same and that memories are off by default. [OPENED https://learn.chatgpt.com/docs/customization/memories.md — "Local Codex memories are off by default."] It also confirms the v1/v2 folders below. [OPENED https://learn.chatgpt.com/docs/customization/memories.md — "When you enable memories in a fresh Codex home, the CLI uses `$CODEX_HOME/memories_v2/` by default."]
 
 **Where it is stored.**
 
@@ -190,7 +190,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 
 ## 4. Hooks
 
-**Does Codex have lifecycle hooks today? Yes.** Feature key `hooks`, stage `Stable`, default **on**. The source calls them "Claude-style". The engine type is named `ClaudeHooksEngine`. [SOURCE T/codex-rs/features/src/lib.rs#L1464-L1469] [OPENED T/codex-rs/features/src/lib.rs — "Enable Claude-style lifecycle hooks loaded from hooks.json files."] [SOURCE T/codex-rs/hooks/src/registry.rs#L69]
+**Does Codex have lifecycle hooks today? Yes.** Feature key `hooks`, stage `Stable`, default **on**. The source calls them "Claude-style". The engine type is named `ClaudeHooksEngine`. [OPENED https://learn.chatgpt.com/docs/hooks.md — "Hooks are enabled by default."] [SOURCE T/codex-rs/features/src/lib.rs#L1464-L1469] [OPENED T/codex-rs/features/src/lib.rs — "Enable Claude-style lifecycle hooks loaded from hooks.json files."] [SOURCE T/codex-rs/hooks/src/registry.rs#L69]
 
 **The 14 events.** [SOURCE T/codex-rs/hooks/src/lib.rs#L29-L44]
 
@@ -198,7 +198,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 |---|---|---|---|---|
 | `SessionStart` | `source`: `startup`, `resume`, `clear`, `compact`, `fork` | Yes. Plain stdout or `hookSpecificOutput.additionalContext` | `continue:false` stops | [SOURCE T/codex-rs/hooks/src/events/session_start.rs#L243-L314] [SOURCE T/codex-rs/hooks/src/schema.rs#L859-L861] |
 | `UserPromptSubmit` | none | Yes. Same two ways | Exit 2 + stderr, or `decision:"block"` | [SOURCE T/codex-rs/hooks/src/events/user_prompt_submit.rs#L157-L245] |
-| `PreToolUse` | tool name | Yes (`additionalContext`) | Exit 2 + stderr blocks. `updatedInput` rewrites. `permissionDecision` `allow` and `ask` are not honored | [SOURCE T/codex-rs/hooks/src/events/pre_tool_use.rs#L268-L281] [SOURCE T/codex-rs/hooks/src/events/pre_tool_use.rs#L485] [SOURCE T/codex-rs/hooks/src/events/pre_tool_use.rs#L602] |
+| `PreToolUse` | tool name | Yes (`additionalContext`) | Exit 2 + stderr, `permissionDecision:"deny"`, or `decision:"block"` blocks. `permissionDecision:"allow"` with `updatedInput` rewrites. `ask` is not honored. [OPENED https://learn.chatgpt.com/docs/hooks.md — "`permissionDecision: "ask"`, legacy `decision: "approve"`, `continue: false`, `stopReason`, and `suppressOutput` are parsed but not supported yet."] | [SOURCE T/codex-rs/hooks/src/events/pre_tool_use.rs#L268-L281] [SOURCE T/codex-rs/hooks/src/events/pre_tool_use.rs#L485] [SOURCE T/codex-rs/hooks/src/events/pre_tool_use.rs#L602] |
 | `PermissionRequest` | tool name | No | `decision.behavior` `allow` or `deny` | [SOURCE T/codex-rs/hooks/src/schema.rs#L187-L227] |
 | `PostToolUse` | tool name | Yes | `decision:"block"` | [SOURCE T/codex-rs/hooks/src/schema.rs#L143-L156] [SOURCE T/codex-rs/hooks/src/schema.rs#L229-L240] |
 | `PreCompact` | `trigger`: `manual`, `auto` | No | `continue:false` aborts the compaction | [SOURCE T/codex-rs/hooks/src/events/compact.rs#L59-L67] [SOURCE T/codex-rs/core/src/compact.rs#L197-L211] |
@@ -230,7 +230,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 - Common fields: `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `model`, `permission_mode`. Turn-scoped events add `turn_id`. [SOURCE T/codex-rs/hooks/src/schema.rs#L497-L511] [SOURCE T/codex-rs/hooks/src/schema.rs#L565-L584]
 - `UserPromptSubmit` adds `prompt`. `Stop` adds `stop_hook_active` and `last_assistant_message`. Tool events add `tool_name`, `tool_input`, `tool_use_id`, and `tool_response` after the call. [SOURCE T/codex-rs/hooks/src/schema.rs#L586-L602] [SOURCE T/codex-rs/hooks/src/schema.rs#L321-L343]
 - `transcript_path` is the session's rollout file. [SOURCE T/codex-rs/core/src/session/mod.rs#L5693-L5705]
-- `permission_mode` is only ever `bypassPermissions` (approval policy `never`) or `default`. [SOURCE T/codex-rs/core/src/hook_runtime.rs#L1073-L1081]
+- `permission_mode` is only ever `bypassPermissions` (approval policy `never`) or `default` in the source at this tag. [SOURCE T/codex-rs/core/src/hook_runtime.rs#L1073-L1081] The official page lists five values. Do not assume only two. [OPENED https://learn.chatgpt.com/docs/hooks.md — "describes the current permission mode as `default`, `acceptEdits`, `plan`, `dontAsk`, or `bypassPermissions`."]
 - Tool names: shell is `Bash`. File edits are `apply_patch`, and matchers `Write` and `Edit` also select it. Sub-agent spawn is `spawn_agent`, and matcher `Agent` also selects it. [SOURCE T/codex-rs/core/src/tools/hook_names.rs#L28-L56]
 - Generated JSON schemas for every input and output are in the repo under `codex-rs/hooks/schema/generated/`. [SOURCE T/codex-rs/hooks/src/schema.rs#L17-L41]
 
@@ -245,7 +245,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 
 - A non-managed hook runs only when it is enabled **and** its stored `trusted_hash` matches its current definition. Otherwise it is listed but not run. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L917-L940] [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L1000-L1017]
 - Trust state lives in the user's config under `[hooks.state."<key>"]` with `enabled`, `trusted_hash`, `trusted_content_hash`. Only the user layer and session flags may set it. A project cannot trust its own hooks. [SOURCE T/codex-rs/config/src/hook_config.rs#L29-L38] [SOURCE T/codex-rs/hooks/src/config_rules.rs#L8-L14]
-- The TUI has `/hooks` to review them. [OPENED T/codex-rs/tui/src/slash_command.rs — "view and manage lifecycle hooks"] I found no CLI subcommand that grants trust. [SOURCE T/codex-rs/cli/src/main.rs#L145-L245]
+- The TUI has `/hooks` to review them. [OPENED T/codex-rs/tui/src/slash_command.rs — "view and manage lifecycle hooks"] The official page says trust is granted there, against the hook's hash. [OPENED https://learn.chatgpt.com/docs/hooks.md — "Codex records trust against the hook's current hash, so new or changed hooks are marked for review and skipped until trusted."] I found no CLI subcommand that grants trust. [SOURCE T/codex-rs/cli/src/main.rs#L145-L245]
 - One-off bypass: `--dangerously-bypass-hook-trust`. It is a global flag for `codex exec` too. [OPENED T/codex-rs/utils/cli/src/shared_options.rs — "Run enabled hooks without requiring persisted hook trust for this invocation."] [SOURCE T/codex-rs/exec/src/cli.rs#L163-L170]
 - Project hooks also need the project itself to be trusted. [SOURCE T/codex-rs/config/src/loader/mod.rs#L1128-L1146]
 - Admins can allow managed hooks only. [OPENED T/docs/config.md — "Admins can set top-level `allow_managed_hooks_only = true` in `requirements.toml` to ignore user, project, and session hook configs"]
@@ -257,16 +257,16 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 - Env for plugin hooks: `PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, `PLUGIN_DATA`, `CLAUDE_PLUGIN_DATA`. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L311-L319] [OPENED T/codex-rs/hooks/src/engine/discovery.rs — "For OOTB compat with existing plugins that use this env var."]
 - The same four names are replaced in the command string when written as `${NAME}`. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L714-L716]
 - There is **no** project-directory variable. Nothing like `CLAUDE_PROJECT_DIR` is set. Use the `cwd` field on stdin. The hook process also starts in the session's working directory. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L311-L319] [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L280-L281]
-- Plugin hook trust adds a content hash of the whole plugin folder. It is re-computed before each run. If any file changed: "plugin contents changed; hook approval required". [SOURCE T/codex-rs/hooks/src/engine/plugin_trust.rs#L1-L6] [SOURCE T/codex-rs/hooks/src/engine/plugin_trust.rs#L40-L44] [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L228-L247]
+- Plugin hook trust adds a content hash of the whole plugin folder. It is re-computed before each run. If any file changed: "plugin contents changed; hook approval required". The official page confirms a plugin update resets approval. [OPENED https://learn.chatgpt.com/docs/hooks.md — "If a plugin update changes a bundled script, Codex requires a new review even if the hook definition stays the same."] [SOURCE T/codex-rs/hooks/src/engine/plugin_trust.rs#L1-L6] [SOURCE T/codex-rs/hooks/src/engine/plugin_trust.rs#L40-L44] [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L228-L247]
 - The hash skips only `__pycache__`, `.venv`, `*.pyc`, `*.egg-info`. A symlink or other special file in the plugin makes the hash fail. [SOURCE T/codex-rs/hooks/src/engine/plugin_fingerprint.rs#L37-L47] [SOURCE T/codex-rs/hooks/src/engine/plugin_fingerprint.rs#L82-L86]
 - The hash shares the hook's timeout. A large plugin can make a 1-second `SessionEnd` hook time out. [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L227-L233]
-- Plugins in the Agent Plugins format (root `plugin.json`) get no hooks at all. [SOURCE T/codex-rs/core-plugins/src/loader.rs#L985-L995]
+- Plugins in the Agent Plugins format (root `plugin.json`) get no hooks at all, by the source at this tag. [SOURCE T/codex-rs/core-plugins/src/loader.rs#L985-L995] The official plugin docs say otherwise: hooks can be set under `extensions.com.openai` in root `plugin.json`. Treat this as unresolved. [OPENED https://developers.openai.com/plugins/build/plugins.md — "To override that default, define `hooks` inside `extensions.com.openai` in root `plugin.json`."]
 
 **Do hooks work on Windows? Yes.**
 
 - With no session shell known, Windows runs `%COMSPEC%` (fallback `cmd.exe`) with `/C "<command>"`. Unix runs `$SHELL` (fallback `/bin/sh`) with `-lc`. [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L444-L470] [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L499-L522]
 - When the session has a detected shell, the hook command is passed to that shell instead. So keep hook command strings simple and portable. [SOURCE T/codex-rs/core/src/session/mod.rs#L5805-L5813]
-- `commandWindows` replaces `command` on Windows. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L660-L664]
+- `commandWindows` replaces `command` on Windows. [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L660-L664] [OPENED https://learn.chatgpt.com/docs/hooks.md — "`commandWindows` is an optional Windows-only command override."] The official hooks page has no Windows exclusion.
 - Windows uses a Job Object to clean up. Unix kills the process group. [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L283-L287] [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L390-L415]
 
 **Other notes.**
@@ -274,7 +274,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 - Hooks run as plain host processes. I saw no sandbox wrapper in the hook runner. [SOURCE T/codex-rs/hooks/src/engine/command_runner.rs#L444-L496]
 - The older `notify` setting still exists beside hooks (section 8).
 
-**Surfaces.** CLI and `codex exec`: yes, by source. IDE and app: same core; the search extract of the docs lists the same file locations. [SEARCH-ONLY https://developers.openai.com/codex/hooks] Cloud: unknown.
+**Surfaces.** CLI and `codex exec`: yes, by source. The official page lists the same file locations. The desktop app has its own review screen. [OPENED https://learn.chatgpt.com/docs/hooks.md — "In the CLI, open `/hooks`. In the desktop app, select **Review hooks** in the composer or open **Settings > Hooks**."] Cloud-orchestrated ChatGPT Work runs only admin-set MCP hooks. [OPENED https://learn.chatgpt.com/docs/hooks.md — "Cloud orchestration supports only Global MCP hooks, even when a tool runs on a connected computer."] Codex Cloud tasks: unknown.
 
 ---
 
@@ -307,7 +307,7 @@ Research date: 2026-11-09. Codex version studied: **0.167.0** (latest stable). C
 
 - An open spec for skills and MCP servers only. [OPENED https://raw.githubusercontent.com/agentplugins/agent-plugins-spec/main/README.md — "It defines a portable package format for Agent Skills and MCP servers."]
 - Codex maps it to `./skills` and `./mcp.json`, and reads Codex extras from `extensions["com.openai"]` or from an extra `.codex-plugin/plugin.json`. [SOURCE T/codex-rs/core-plugins/src/agent_plugin_manifest.rs#L17] [SOURCE T/codex-rs/core-plugins/src/agent_plugin_manifest.rs#L169-L170] [SOURCE T/codex-rs/core-plugins/src/manifest/manifest_cache.rs#L64-L68]
-- But hooks are not loaded for this format. [SOURCE T/codex-rs/core-plugins/src/loader.rs#L985-L995]
+- But hooks are not loaded for this format, by the source at this tag. [SOURCE T/codex-rs/core-plugins/src/loader.rs#L985-L995] The official plugin docs conflict with this (see section 4).
 - Its MCP config supports `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` in `args`, `env`, `cwd`. [SOURCE T/codex-rs/codex-mcp/src/agent_plugin_config.rs#L17-L18] [SOURCE T/codex-rs/codex-mcp/src/agent_plugin_config.rs#L211-L230]
 
 **Variables.**
@@ -372,7 +372,7 @@ So a Claude Code plugin whose `.mcp.json` uses `${CLAUDE_PLUGIN_ROOT}` in `args`
 
 **Still under development.** A shared agent message board, and waking an idle root session on agent mail. [SOURCE T/codex-rs/features/src/lib.rs#L1635-L1639]
 
-**OS differences.** None found. **Surfaces.** CLI: yes. Others: same core, not checked. Docs extract agrees on `max_threads = 6`, `max_depth = 1`, and the two `agents/` folders. [SEARCH-ONLY https://developers.openai.com/codex/subagents]
+**OS differences.** None found. **Surfaces.** CLI: yes. Others: same core, not checked. The official page agrees on the two `agents/` folders. [OPENED https://learn.chatgpt.com/docs/agent-configuration/subagents.md — "add standalone TOML files under `~/.codex/agents/` for personal agents or `.codex/agents/` for project-scoped agents."] It does not state `max_threads = 6` or `max_depth = 1`. It says only that Codex picks the thread default, and it does not mention `max_depth`. Those two numbers rest on source only. It also says each custom agent file must define `name`, `description`, and `developer_instructions`.
 
 ---
 
@@ -423,7 +423,7 @@ So a Claude Code plugin whose `.mcp.json` uses `${CLAUDE_PLUGIN_ROOT}` in `args`
 
 **Cloud tasks.** `codex cloud` is marked experimental. Sub-commands: `exec` (needs `--env`, optional `--attempts` 1–4, `--branch`), `status`, `list`, `apply`, `diff`. [SOURCE T/codex-rs/cli/src/main.rs#L228-L230] [SOURCE T/codex-rs/cloud-tasks/src/cli.rs#L15-L50]
 
-**Automations in the Codex app.** Not in the open-source repo. The core has only a permission gate for it. [OPENED T/codex-rs/features/src/lib.rs — "Allow desktop apps to run local automations."] The docs page exists. Search extracts say automations are recurring background tasks, need the app running, can use plugins and skills, and report to an inbox. [SEARCH-ONLY https://developers.openai.com/codex/app/automations]
+**Automations in the Codex app (now "Scheduled tasks").** Not in the open-source repo. The core has only a permission gate for it. [OPENED T/codex-rs/features/src/lib.rs — "Allow desktop apps to run local automations."] The official page now calls them "Scheduled tasks". They are recurring background tasks. [OPENED https://learn.chatgpt.com/docs/automations.md — "Schedule recurring tasks to run in the background."] In the desktop app they run locally, in the project folder or a worktree, and need the app running. [OPENED https://learn.chatgpt.com/docs/automations.md — "For project-scoped scheduled tasks, keep the machine powered on and the ChatGPT desktop app running."] They can use plugins and skills. [OPENED https://learn.chatgpt.com/docs/automations.md — "Scheduled tasks created with ChatGPT Work on the web, or with ChatGPT Work or Codex in the desktop app, can use plugins."] [OPENED https://learn.chatgpt.com/docs/automations.md — "Scheduled tasks can also use skills."] Results go to an inbox. [OPENED https://learn.chatgpt.com/docs/automations.md — "The **Scheduled** view acts as your inbox."] Web tasks cannot use a local folder, and Team Tasks run in the cloud. [OPENED https://learn.chatgpt.com/docs/automations.md — "Team Tasks run in the cloud through the team's service account and configured app connections."] The CLI and IDE extension have no scheduling interface. [OPENED https://learn.chatgpt.com/docs/automations.md — "Codex CLI doesn't provide the Scheduled management interface."] A task scheduled inside a chat can repeat every few minutes. [OPENED https://learn.chatgpt.com/docs/automations.md — "Scheduled tasks in a chat can use minute-based intervals for active follow-up loops"]
 
 **What does not exist in the CLI.** No `/loop`, no cron, no schedule command. The full slash-command and sub-command lists show none. [SOURCE T/codex-rs/tui/src/slash_command.rs#L12-L89] [SOURCE T/codex-rs/cli/src/main.rs#L145-L245] Still under development: current-time reminders, async messages to the user, wake on agent mail. [SOURCE T/codex-rs/features/src/lib.rs#L2145-L2149] [SOURCE T/codex-rs/features/src/lib.rs#L2019-L2023] [SOURCE T/codex-rs/features/src/lib.rs#L1635-L1639]
 
@@ -442,7 +442,7 @@ So a Claude Code plugin whose `.mcp.json` uses `${CLAUDE_PLUGIN_ROOT}` in `args`
 - **MCP from hooks:** a hook handler can be an MCP tool call (`type: "mcp_tool"`). Not for `SessionEnd`. [SOURCE T/codex-rs/protocol/src/hooks.rs#L173-L183] [SOURCE T/codex-rs/hooks/src/engine/discovery.rs#L729-L746]
 - **MCP from skills:** a skill can declare an MCP dependency and Codex can offer to install it. Stable, default on. [SOURCE T/codex-rs/features/src/lib.rs#L1965-L1969]
 - **Sandbox hand-off:** an MCP server can ask for the current sandbox state. Experimental. [OPENED T/codex-rs/codex-mcp/README.md — "An MCP server advertises the experimental `codex/sandbox-state` capability to receive sandbox metadata on tool calls."]
-- **Codex as an MCP server: gone.** At this tag there is no `mcp-server` crate in the workspace and no such sub-command. [SOURCE T/codex-rs/Cargo.toml#L2-L165] [SOURCE T/codex-rs/cli/src/main.rs#L145-L245] A raw fetch of `codex-rs/mcp-server/Cargo.toml` at the tag returns 404. Search extracts of the official docs say the command and binary were removed and point to the app-server instead. [SEARCH-ONLY https://developers.openai.com/codex/mcp-server] `codex app-server` is marked experimental. [SOURCE T/codex-rs/cli/src/main.rs#L171-L172]
+- **Codex as an MCP server: gone.** At this tag there is no `mcp-server` crate in the workspace and no such sub-command. [SOURCE T/codex-rs/Cargo.toml#L2-L165] [SOURCE T/codex-rs/cli/src/main.rs#L145-L245] A raw fetch of `codex-rs/mcp-server/Cargo.toml` at the tag returns 404. The official page says the command and binary were removed and points to the app-server instead. [OPENED https://learn.chatgpt.com/docs/mcp-server.md — "The `codex mcp-server` command and the standalone `codex-mcp-server` binary have been removed."] The page gives no version or date for the removal. `codex app-server` is marked experimental. [SOURCE T/codex-rs/cli/src/main.rs#L171-L172]
 - **OS differences.** None found. **Surfaces.** Core; clients not checked.
 
 ---
@@ -521,7 +521,7 @@ So a Claude Code plugin whose `.mcp.json` uses `${CLAUDE_PLUGIN_ROOT}` in `args`
 - The README gives a native PowerShell installer. [OPENED T/README.md — "Run the following on Windows to install Codex CLI:"]
 - npm ships `win32-x64` and `win32-arm64` builds of 0.167.0. [OPENED NPM — `'@openai/codex-win32-arm64': 'npm:@openai/codex@0.167.0-win32-arm64'`]
 - But the repo's install doc still lists: [OPENED T/docs/install.md — "macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2**"]. I read this as out of date, given the two points above and the Windows-only code below.
-- Search extract of the Windows docs: native Windows with `elevated` (preferred) or `unelevated` sandbox, WSL as the alternative. [SEARCH-ONLY https://developers.openai.com/codex/windows]
+- The official Windows page confirms native Windows, with WSL as the alternative. [OPENED https://learn.chatgpt.com/docs/windows/windows-sandbox.md — "Use the native Windows sandbox by default."] Correction: it lists three sandboxes, not two. `mxc` is recommended. `elevated` is now the preferred *legacy fallback*, and `unelevated` the second fallback. [OPENED https://learn.chatgpt.com/docs/windows/windows-sandbox.md — "`mxc`: The recommended sandbox on compatible Windows devices."] [OPENED https://learn.chatgpt.com/docs/windows/windows-sandbox.md — "`elevated`: The preferred legacy fallback when MXC is unavailable or disabled."] The CLI has a native PowerShell installer. [OPENED https://learn.chatgpt.com/docs/codex/cli.md — "Install the Codex CLI with the standalone installer for Windows."]
 
 **Windows-specific behavior found in source.**
 
@@ -557,7 +557,7 @@ Claude Code facts are from its docs, fetched today as `.md` pages.
 | `${CLAUDE_PLUGIN_ROOT}` | [OPENED CC/plugins-reference.md#L558 — "Absolute path of the plugin's installed version"] | Same name works in **hook commands**, plus `${PLUGIN_ROOT}` | Not expanded in `.mcp.json` for the `.codex-plugin` / `.claude-plugin` format, by my reading |
 | Plugin persistent data dir | [OPENED CC/plugins-reference.md#L559 — "`~/.claude/plugins/data/<id>/`, created on first reference and kept across plugin updates."] | `$CODEX_HOME/plugins/data/<plugin>-<marketplace>`, exposed as `PLUGIN_DATA` and `CLAUDE_PLUGIN_DATA` to hooks | I did not find where Codex creates the folder for hook-only plugins. Create it yourself before writing |
 | `CLAUDE_PROJECT_DIR` | [OPENED CC/plugins-reference.md#L572 — "`CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_PROJECT_DIR`, and `CLAUDE_PLUGIN_OPTION_<KEY>`"] | **None.** Use `cwd` from stdin | Scripts must not rely on a project-dir variable |
-| `/loop` and scheduled tasks | [OPENED CC/scheduled-tasks.md#L9 — "Session-scoped scheduled tasks let Claude re-run a prompt automatically on an interval within a Claude Code session."] | **No direct equivalent in the CLI.** Nearest: `/goal` auto-continuation, `clock.sleep`, `codex queue`, app Automations (search-only) | No interval or cron tool. `/goal` continues until done; it does not wake on a clock |
+| `/loop` and scheduled tasks | [OPENED CC/scheduled-tasks.md#L9 — "Session-scoped scheduled tasks let Claude re-run a prompt automatically on an interval within a Claude Code session."] | **No direct equivalent in the CLI.** Nearest: `/goal` auto-continuation, `clock.sleep`, `codex queue`. Outside the CLI: desktop-app or web "Scheduled tasks" (formerly Automations), which can run on minute intervals inside a chat (section 8) | No interval or cron tool in the CLI. `/goal` continues until done; it does not wake on a clock |
 | Headless mode | [OPENED CC/headless.md#L21 — "Add the `-p` (or `--print`) flag to any `claude` command to run it non-interactively."] | `codex exec` (section 8) | Opposite hook default: Claude `-p` "runs the hooks in a project's `.claude/settings.json` … even in a folder you've never trusted" [OPENED CC/headless.md#L41]. Codex exec runs only trusted hooks unless the bypass flag is set |
 | Transcripts | [OPENED CC/hooks.md#L1295 — `"transcript_path": "/Users/.../.claude/projects/.../00893aaf-19fa-41d2-8238-13269b9b3ca0.jsonl"`] | Rollout JSONL under `$CODEX_HOME/sessions/YYYY/MM/DD/` (section 10) | Different layout and line schema. Codex storage is mid-migration |
 | Compaction hooks | [SOURCE CC/hooks.md#L59-L60] | `PreCompact`, `PostCompact`, then `SessionStart` with source `compact` | `PreCompact` cannot add context on Codex. Re-inject on `SessionStart(compact)` |
@@ -587,8 +587,8 @@ Handler types: Claude Code lists `command`, `http`, `mcp_tool`, `prompt`, `agent
 
 | Host | What happened | What I did |
 |---|---|---|
-| `developers.openai.com` | Blocked by this session's network policy | Not attempted. Used source code, plus search extracts labelled SEARCH-ONLY |
-| `learn.chatgpt.com` | Appeared in search results serving the same Codex docs pages | **Not fetched.** It would act as a mirror of the blocked docs. Flagging it so the caller can decide |
+| `developers.openai.com` | Blocked when first written. Reachable on 2026-11-09 with direct `curl`. Codex doc paths return 308 redirects to `learn.chatgpt.com`. `/plugins/build/plugins.md` is served directly (200) | Used on the re-check. Pages opened are tagged OPENED |
+| `learn.chatgpt.com` | Reachable on 2026-11-09 with direct `curl` (200). This is OpenAI's own docs host, the redirect target of `developers.openai.com/codex/*`, not a mirror | Fetched the `.md` pages for hooks, memories, AGENTS.md, skills, subagents, scheduled tasks, Windows sandbox, CLI, MCP server removal, cloud environments, plugins, and `llms.txt` |
 | `agents.md` | DNS failure (`ENOTFOUND`) from the fetch tool | Used the `openai/agents.md` repo README on raw.githubusercontent.com instead. [OPENED https://raw.githubusercontent.com/openai/agents.md/main/README.md — "is a simple, open format for guiding coding agents."] |
 | `agentskills.io` | DNS failure (`ENOTFOUND`) | Used `agentskills/agentskills` repo on raw.githubusercontent.com |
 | `github.com` via `curl` | 403 from the proxy | Used the fetch tool for directory listings and the releases page. Those are summaries, tagged OPENED-VIA-WEBFETCH |
@@ -597,7 +597,7 @@ Handler types: Claude Code lists `command`, `http`, `mcp_tool`, `prompt`, `agent
 | `cdn.jsdelivr.net/gh/...` | 403 | Not used. (`cdn.jsdelivr.net/npm/...` returned 200) |
 | GitHub connector | Limited to the user's own repository | Not used for `openai/codex` |
 
-Reachable and used: `raw.githubusercontent.com`, `registry.npmjs.org`, `code.claude.com`, `github.com` (fetch tool only), web search.
+Reachable and used: `raw.githubusercontent.com`, `registry.npmjs.org`, `code.claude.com`, `github.com` (fetch tool only), web search. On the 2026-11-09 re-check: `developers.openai.com` and `learn.chatgpt.com`, by direct requests only.
 
 Because there was no full clone, I could not grep the whole repo. Statements of the form "I found no X" mean: not in the files I opened.
 
@@ -606,7 +606,7 @@ Because there was no full clone, I could not grep the whole repo. Statements of 
 ## Unconfirmed — do not rely on
 
 1. **IDE extension, desktop app, and cloud behavior.** All closed source. I assume they share the core. I did not verify that hooks, plugins, skills, or memories behave the same there. Whether Codex cloud runs hooks, skills, or plugins at all is unknown.
-2. **Everything tagged SEARCH-ONLY.** App Automations details. The official wording on hooks, memories, plugins, subagents, Windows, and cloud. The claim that `codex mcp-server` was removed in 0.154.0 in September 2026.
+2. **What stayed unconfirmed after the docs check.** The claim that `codex mcp-server` was removed in 0.154.0 in September 2026: the official page gives no version or date. The subagent defaults `max_threads = 6` and `max_depth = 1`: source only. Where the official docs and the 0.167.0 source disagree (root `plugin.json` hooks, `permission_mode` values), see "Primary-docs check".
 3. **Everything tagged OPENED-VIA-WEBFETCH.** The release page text, directory listings, and the list of Claude Code hook handler types came through a summarizing tool.
 4. **Nothing was run.** Every Codex behavior here is read from source at one tag. Bugs, server-side flags, or account-level gates could change what a user sees. Feature defaults can be overridden by managed config or by OpenAI's servers; I did not look for that.
 5. **Hooks in `codex exec`.** I infer they fire the same way because the engine is in the core and the bypass flag is a global `exec` flag. I did not trace the exec start-up path.
@@ -621,3 +621,45 @@ Because there was no full clone, I could not grep the whole repo. Statements of 
 14. **Windows.** I read Windows code paths but did not run on Windows. The install doc's "via WSL2" line may reflect a real limit I did not find.
 15. **`main` vs the tag.** I compared only a few files. `main` already marks V1 multi-agent as deprecated; more may have moved.
 16. **The `[permissions]` profile system, Guardian auto-review, apps/connectors, code mode, remote plugins and plugin sharing.** They exist in source. I did not study them.
+
+---
+
+## Primary-docs check (2026-11-09)
+
+Pages fetched with direct `curl` from `learn.chatgpt.com/docs/*.md` (the target of `developers.openai.com/codex/*` redirects) and `developers.openai.com/plugins/build/plugins.md`. No relay, mirror, or cache.
+
+**SEARCH-ONLY claims, one line each.**
+
+1. Summary item 14, app Automations exist: **upgraded and corrected.** Now called "Scheduled tasks". The CLI has no scheduling interface.
+2. Section 1, cloud agent uses `AGENTS.md`: **upgraded.** The page is now "Codex Cloud (Legacy)".
+3. Section 2, memories off by default: **upgraded.** Storage under `$CODEX_HOME/memories` or `memories_v2` also confirmed.
+4. Section 4, docs list the same hook file locations: **upgraded.** Added the desktop app review screen and the cloud-orchestration limit (admin MCP hooks only).
+5. Section 6, `max_threads = 6`: **corrected.** The page gives no number. It says Codex picks the default.
+6. Section 6, `max_depth = 1`: **corrected.** The page does not mention `max_depth`. Source only.
+7. Section 6, the two `agents/` folders: **upgraded.**
+8. Section 8, automations are recurring background tasks that need the app running, use plugins and skills, and report to an inbox: **upgraded** (four parts). Added: desktop tasks run locally; web tasks cannot use a local folder; Team Tasks run in the cloud; in-chat tasks can repeat every few minutes.
+9. Section 9, `codex mcp-server` and the binary were removed, use the app-server: **upgraded.**
+10. Section 9 / Unconfirmed list, removal in 0.154.0 in September 2026: **left SEARCH-ONLY.** The official page gives no version or date.
+11. Section 12, Windows sandbox is `elevated` (preferred) or `unelevated`, WSL as alternative: **corrected.** Three sandboxes. `mxc` is recommended. `elevated` is the preferred legacy fallback. Native Windows and WSL as the alternative are confirmed.
+
+**Checks requested on hooks (official hooks page).**
+
+- Events: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SubagentStart`, `SubagentStop`, `Stop`, `Interrupt`, `PreModelRequest`, `PostModelRequest`. Fourteen. Matches the source.
+- `SessionStart` and `SessionEnd`: both exist. `SessionEnd` runs for the main thread only, 1 s default, 3 s cap, reason always `other`.
+- `PreToolUse` can block: yes, by `permissionDecision:"deny"`, `decision:"block"`, or exit 2. `allow` plus `updatedInput` rewrites. `ask` is not supported. Wording in section 4 updated.
+- Native Windows: the page documents `commandWindows` and `windows_managed_dir` and has no Windows exclusion. It does not say "supported on Windows" in so many words.
+- Stable or flagged: on by default, `[features] hooks = false` turns them off. The page does not use the word "stable".
+- Trust: non-managed hooks need review in `/hooks` (CLI) or **Settings > Hooks** (app). Trust is stored against the hook's hash. Managed hooks are trusted by policy. `--dangerously-bypass-hook-trust` skips it for one run.
+- Plugin update: yes, it resets approval if a bundled script changes, even with the same hook definition.
+
+**Other checks.**
+
+- `AGENTS.md` cap: 32 KiB (`project_doc_max_bytes`). Confirmed.
+- Skills locations: `.agents/skills` from the working directory up to the repo root, `$HOME/.agents/skills`, `/etc/codex/skills`, and bundled system skills. Confirmed. The page does not list `.codex/skills` or `$CODEX_HOME/skills`; those rest on source.
+- Plugin manifests: the docs make root `plugin.json` (Agent Plugins schema) the main format, with `.codex-plugin/plugin.json` as a fallback. They accept "Claude-compatible manifests" and `.claude-plugin/marketplace.json`.
+
+**Conflicts between the docs and the 0.167.0 source. Not resolved.**
+
+- Root `plugin.json` hooks: source says not loaded. Docs say hooks go under `extensions.com.openai`. This changes summary item 9. Flagged in place.
+- Hook `permission_mode`: source gives two values. Docs list five. Flagged in place.
+- Plugin hooks in the docs are "supported for plugins installed manually in Codex desktop" and bar a plugin from the public directory. Not reflected in the source reading.

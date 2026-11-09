@@ -106,6 +106,10 @@ Because CORE writes generated blocks into the same files a person edits, it need
 
 Full detail: `source-evaluation.md`.
 
+### 2.9 The trust list
+
+`~/.core/projects.json` is the list of enabled projects: a JSON array whose entries carry a `path` string (`scripts/project-state.mjs:84-97`). Only `index-registry.mjs` writes it (`scripts/index-registry.mjs:2-4`). The home folder for it comes from the OS account record, not `$HOME` (`scripts/trusted-home.mjs:25-31`).
+
 ---
 
 ## Part 3 — The five reported defects, checked against source
@@ -246,3 +250,65 @@ All URLs below were OPENED this session with `curl` from `code.claude.com/docs/e
 **Skills**
 
 - Skills follow the Agent Skills open standard. The combined description and `when_to_use` text is cut at 1,536 characters in the listing. "Keep `SKILL.md` under 500 lines." — `skills.md`
+
+### 4.2 Codex — from source at tag `rust-v0.167.0` and the official docs
+
+Detail and every citation: `research-codex.md`. Source was read file by file; the official docs at `learn.chatgpt.com` were checked afterwards (that file's "Primary-docs check" section). Nothing was run.
+
+- **Hooks exist, are stable, and are on by default.** Fourteen events, including `SessionStart`, `UserPromptSubmit`, `PreToolUse` (can block), `PreCompact`, `PostCompact`, `Stop`, and `SessionEnd`. [codex §4]
+- **Context injection** works from `SessionStart` and `UserPromptSubmit` (plain stdout or `additionalContext`), not from `PreCompact`. After compaction a `SessionStart` with source `compact` fires, which is the way to re-inject. [codex §4]
+- **Hook commands are shell strings.** No `args` exec form. `commandWindows` overrides the command on Windows. Hooks run outside the agent's sandbox. [codex §4]
+- **Trust.** A hook runs only after the user approves it in `/hooks`. Plugin hook approval is tied to a hash of every file in the plugin folder, so a plugin update that changes a file resets approval. Headless runs need `--dangerously-bypass-hook-trust`. [codex §4, primary-docs check]
+- **Plugins** load `.codex-plugin/plugin.json` and also Claude-layout `.claude-plugin/plugin.json`. Hook commands get `PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT`. There is no project-directory variable; use `cwd` from stdin. [codex §4–5]
+- **Memories** exist but are off by default, global, and built in the background. [codex §2]
+- **No `/loop` or cron in the CLI.** `/goal`, a sleep tool, and `codex queue` exist. Scheduled tasks live in the desktop app and web, not the CLI. [codex §8, primary-docs check]
+- **Subagent roles** are TOML files; their tool access cannot be narrowed below the parent's. [codex §6]
+- **Native Windows** is supported. Without a Windows sandbox set up, a writable sandbox falls back to read-only. [codex §11–12]
+
+CORE 3's own Codex notes say Codex "has no session-start or session-end event" (`INSTALL.md:122`). That is out of date.
+
+### 4.3 Antigravity — from the official docs, changelog, and schemas
+
+Detail and every citation: `research-antigravity.md`. Every page has a markdown copy at `<url>.md`; 106 pages were read. Nothing was run.
+
+- **Hooks exist:** `SessionStart`, `PreInvocation`, `PostInvocation`, `PreToolUse`, `PostToolUse`, `Stop`. No `SessionEnd`, no `PreCompact`, no `UserPromptSubmit` (the prompt arrives as `lastUserInput` on `PreInvocation`, which fires before every model call). [antigravity §6]
+- **Hook format differs from Claude Code's.** Top-level keys are hook-group names; JSON in and JSON out; context goes in through `injectSteps`. A Claude-format `hooks/hooks.json` is not read. Plugin hooks run with the plugin folder as working directory; the workspace comes from `workspacePaths` on stdin. Only `command` hooks. Default timeout 30 seconds. **Hooks fail open silently.** [antigravity §6; `https://antigravity.google/docs/hooks.md`]
+- **The hook contract is new and moving.** It changed three times in three weeks; `SessionStart` was never announced in the changelog; a field report says an injected step with `metadata` drops the whole output on CLI 1.5.2. [antigravity §6]
+- **Plugins:** `plugin.json` or `.antigravity-plugin/plugin.json`, with `skills/`, `agents/`, `rules/`, `hooks.json`, `mcp_config.json`. The docs allow it beside `.claude-plugin/` in one repository. A skill description may be 1 to 1,024 characters. [antigravity §4, §7]
+- **Instruction files:** `AGENTS.md` and `GEMINI.md` are read natively; `CLAUDE.md` is not. [antigravity §2]
+- **Memory:** "Agents don't remember conversations." The Knowledge page returns 404. The native route for lessons is `/learn`, which writes only on approval. [antigravity §5]
+- **Proactive work:** `/schedule` (per conversation), Automations (App only), sidecars (user must enable), `/goal`, and headless `agy -p`. Headless skips any tool call it cannot get approved and still exits 0. [antigravity §9]
+- **Terms:** driving `agy` from another vendor's agent is not supported on consumer plans. [antigravity §9]
+- **Google's own cross-harness sample plugin** ships `.claude-plugin/`, `.codex-plugin/`, and a root `plugin.json` side by side, and ships no hooks. [antigravity §7]
+
+### 4.4 Anthropic's `productivity` plugin, installed in this container
+
+Read from `~/.claude/plugins/synced/…/productivity/` `[cmd: find; cat]`. Version 1.3.1. Four skills (`memory-management`, `task-management`, `start`, `update`), a `.mcp.json`, and no scripts or hooks. Its memory design: `CLAUDE.md` as a "hot cache" of about 30 people and terms, kept to 50–80 lines, plus a `memory/` folder of markdown (`glossary.md`, `people/`, `projects/`, `context/`) searched when the hot cache misses (`skills/memory-management/SKILL.md`). Task state lives in `TASKS.md`. It acts when the user runs `/update`. It tracks no risks or decisions. [competitors §2.4]
+
+---
+
+## Part 5 — What the research literature supports
+
+Detail and every citation: `research-literature.md` (peer-reviewed papers, preprints, and vendor engineering posts, each graded by source type).
+
+### 5.1 Context rot
+Accuracy falls as input grows, well below the context limit; topically related wrong text hurts more than unrelated text; in Chroma's memory test, about 300 focused tokens beat a 113,000-token full history in every model tested. [literature §1]
+
+### 5.2 Retrieval
+Injecting more items helps, then hurts. For agents with tools, search over plain files is a strong baseline; embeddings still win some one-shot tests and some large codebases. [literature §2]
+
+### 5.3 Write policy
+No study compares per-turn, end-of-session, and agent-initiated writing head to head. Extraction pipelines omit and invent: HaluMem found every tested system below 62% accuracy and most omitting over half of updates. Anthropic's November 2026 post found models do better when told what memory is for, and that a fixed "record only X" rule lost much of the gain. [literature §3]
+
+### 5.4 Changed facts
+Stale and fresh values side by side cause confidently wrong actions. Replace or invalidate at write time and keep the old value as dated history. Decay formulas have little direct evidence. Checking a cited source at read time worked in GitHub's production memory. [literature §4]
+
+### 5.5 Summaries
+Summaries drop specifics; keeping the raw record searchable beats summary-only memory in every comparison found. Fixed sections keep more than free prose. [literature §5]
+
+### 5.6 Evaluation
+Measure with and without the feature on the same tasks, with repeated runs, graded on outcomes. LLM judges show position, verbosity and self-preference bias; blind them and swap the order. [literature §7]
+
+### 5.7 Security and silent failure
+Memory files and hooks are a demonstrated attack path; people approve about 93% of permission prompts, so approval alone is weak. "No data" must never read as "healthy": use three states, a heartbeat, and a known-answer probe. [literature §9–10]
+
