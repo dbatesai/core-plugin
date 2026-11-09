@@ -17,7 +17,7 @@ The long evidence files sit beside this one. This file is the digest.
 | `source-runtime.md` | One CORE 3.20.1 session, step by step, with sizes |
 | `source-evaluation.md` | How CORE tests and measures itself today |
 | `source-changelog.md` | Release history and the defect record |
-| `research-claude-code.md` | What Claude Code does natively |
+| `research-claude-code.md` | What Claude Code does natively (written after Part 4; it corrects two lines there) |
 | `research-codex.md` | What OpenAI Codex does natively |
 | `research-antigravity.md` | What Google Antigravity does natively |
 | `research-memory-layers-a.md` | mem0, Letta, Zep / Graphiti |
@@ -195,7 +195,7 @@ All URLs below were OPENED this session with `curl` from `code.claude.com/docs/e
 **Instruction files**
 
 - Claude Code now reads `AGENTS.md` natively when a project has no `CLAUDE.md`: "a repository already set up for other coding agents works without adding a `CLAUDE.md`, an import, or a setting." It needs v2.1.277 or later. `@path` imports inside `AGENTS.md` are expanded. — `memory.md` §AGENTS.md
-- Instruction files are reloaded after compaction; the `InstructionsLoaded` hook reports each file loaded, with `load_reason` values including `session_start`, `include`, and `compact`. — `hooks.md` §InstructionsLoaded
+- Instruction files are reloaded after compaction; the `InstructionsLoaded` hook reports CLAUDE.md and rules files as they load, with `load_reason` values including `session_start`, `include`, and `compact`. It does **not** fire for an `AGENTS.md` that Claude reads directly. Text a hook added is not reloaded after compaction; a plugin must re-add it from a `SessionStart` hook matching `compact`. — `hooks.md` §InstructionsLoaded, `research-claude-code.md`
 - Size guidance: "target under 200 lines per CLAUDE.md file. Longer files consume more context and reduce adherence." — `memory.md` §Write effective instructions
 
 **Auto memory**
@@ -222,7 +222,7 @@ All URLs below were OPENED this session with `curl` from `code.claude.com/docs/e
 - Path variables are "substituted in skill, command, and agent content, in hook and monitor commands": `${CLAUDE_PLUGIN_ROOT}` (changes on every update; "Don't write state there"), `${CLAUDE_PLUGIN_DATA}` ("a directory that survives updates"), `${CLAUDE_PROJECT_DIR}`. — `plugins/components.md` §Reference plugin paths and store data
 - `userConfig` in the manifest asks the user for settings in a dialog and passes them to hooks as `CLAUDE_PLUGIN_OPTION_<KEY>`. Monitors do not receive them. — `plugins/components.md` §Ask the user for configuration values, §Monitors
 - **Monitors.** "A monitor is a shell command that runs in the background for the whole session. What it prints reaches Claude as notifications." They "don't start in non-interactive mode with the `-p` flag" and run "outside the sandbox". — `plugins/components.md` §Monitors
-- Mods are JavaScript or TypeScript handlers that run inside Claude Code and can draw panes. "A mod is code that runs with your permissions." CLI, Desktop, and VS Code only. — `plugins/mods/overview.md`
+- Mods are JavaScript or TypeScript handlers that run inside Claude Code and can draw panes. "A mod is code that runs with your permissions." Drawing works only in the CLI, Desktop, and VS Code; mod hooks also run in `-p`, the SDK, and cloud sessions. — `plugins/mods/overview.md` (corrected from `research-claude-code.md`)
 
 **Loops and schedules**
 
