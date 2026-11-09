@@ -511,8 +511,11 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
   assertHarnessName(harness);
   const real = canonical(root);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
-  // Only a registered project's own folder is renamed, and before anything in it is read.
-  if (target.location === 'project') {
+  // Only a registered project's own folder is renamed, and before anything in it is read. A strict
+  // read (a readDirectoryGuard and no write) never renames: it changes nothing on disk, so a project
+  // still holding a legacy folder reads as having no state until startup or a writer settles the name.
+  const strictRead = !forWrite && Boolean(readDirectoryGuard);
+  if (target.location === 'project' && !strictRead) {
     const settled = settleStateFolderName(real, { coreDir });
     if (forWrite && settled?.startsWith('not-renamed')) noProjectPlace(`the older ${LEGACY_STATE_DIRNAME} folder could not be renamed (${settled.slice(12)})`);
   }

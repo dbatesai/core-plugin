@@ -130,3 +130,15 @@ for(const linked of [false,true])test(`foreign-install selection preserves local
 for(const local of [false,true])test(`actual check CLI refuses linked ${local?'local':'project'} metrics parent without mutation`,t=>{
  if(!symlinkCapable())return t.skip('symlink fixture privilege unavailable');const f=enrolledFixture(t,{local}),foreign=join(f.base,'foreign-cli');fs.renameSync(f.meta,foreign);fs.symlinkSync(foreign,f.meta,'dir');const beforeRoot=snap(f.root),beforeHome=snap(f.home),beforeForeign=snap(foreign);const r=run(f,'',{cli:true});assert.equal(r.available,false);assert.equal(r.is_calibrated,false);assert.match(r.reason,/METRICS_DIRECTORY_CUSTODY/);assert.deepEqual(snap(f.root),beforeRoot);assert.deepEqual(snap(f.home),beforeHome);assert.deepEqual(snap(foreign),beforeForeign);
 });
+
+test('a strict calibration read leaves a legacy .core folder where it is and reports unavailable, not a zero',t=>{
+ const f=enrolledFixture(t);
+ fs.renameSync(join(f.root,'_core'),join(f.root,'.core'));   // the project as an older version left it
+ const beforeRoot=snap(f.root),beforeHome=snap(f.home);
+ const r=run(f,readBody(f));
+ assert.deepEqual(snap(f.root),beforeRoot,'a strict read never renames .core to _core');
+ assert.ok(fs.existsSync(join(f.root,'.core'))&&!fs.existsSync(join(f.root,'_core')),'the legacy folder stays as it was');
+ assert.deepEqual(snap(f.home),beforeHome);
+ assert.equal(r.is_calibrated,false,'state CORE did not read cannot claim readiness');
+ assert.equal(r.available,false,'unread legacy state is unavailable, not a genuine empty pool');
+});
