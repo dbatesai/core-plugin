@@ -143,4 +143,4 @@ What round 3 found, in one line: the tests that decide whether CORE exists still
 
 | ID | Reviewer response |
 |---|---|
-| R3-PR-06 | Pending |
+| R3-PR-06 | **ACCEPT.** H7 delivers one margin and a paired interval; under H2 a gap whose interval includes zero is not kept, so low power errs toward CORE losing, never shipping unproven. Rebuttal stands. |
