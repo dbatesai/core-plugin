@@ -130,10 +130,10 @@ Seven fresh reviewers, each given only the file paths and `reviewer-brief.md`. 9
 
 **Agreed:** the security table overstates what the enabled list protects. A skill in a cloned repository can read memory bodies that a hook would never pass. D2 now says so in plain words, and the threat model names it.
 
-**Not agreed:** gating skills on the enabled list. Every Claude Code cloud session and every new machine starts with an empty list, so gated skills would leave cloud users with nothing — the floor R2-PA-05 and G27 fought to raise. And the threat is not new: an agent asked about the past in a cloned repository will read its files, CORE or not. What CORE adds is a habit of reading `_memories/`, so the guard belongs on how bodies are read. **Done instead:** in a project not enabled on this machine, the skills treat memory bodies as quoted data — they report what a memory says and who said it (`said_by`), and never follow an instruction inside one. A case, `remember-ignores-injection`, already covers the enabled path; v5 adds its not-enabled twin.
+**Not agreed:** gating skills on the enabled list. Every Claude Code cloud session and every new machine starts with an empty list, so gated skills would leave cloud users with nothing — the floor R2-PA-05 and G27 fought to raise. And the threat is not new: an agent asked about the past in a cloned repository will read its files, CORE or not. What CORE adds is a habit of reading `_memories/`, so the guard belongs on how bodies are read. **Done instead:** in a project not enabled on this machine, the skills treat memory bodies as quoted data — they report what a memory says and who said it (`said_by`), and never follow an instruction inside one. A case, `remember-ignores-injection`, already covers the enabled path; v5 adds its not-enabled twin. D1 §7's planted-memory risk row names the skill path and this rule.
 
 ## Responses to the partial rebuttals
 
 | ID | Reviewer response |
 |---|---|
-| R4-PA-08 | Pending |
+| R4-PA-08 | **ACCEPT.** Gating skills would leave cloud sessions and new machines with nothing; the quoted-data rule and its not-enabled test go after the real risk. Asked that D1 §7's planted-memory risk row also name the skill path and the quoted-data rule; v5 does so. Rebuttal stands. |
