@@ -35,9 +35,9 @@ The long evidence files sit beside this one. This file is the digest.
 
 **1.3 The marketplace checkout is here.** It is the working directory: `ARCHITECTURE.md`, `USAGE.md`, `CHANGELOG.md`, `plugins/core/`, `tests/`. 400 tracked files. `[cmd: git ls-files | wc -l]`
 
-**1.4 The network is limited.** The environment's policy is "limited" with package managers allowed and no extra hosts. `[cmd: get_environment]` Refused by the proxy: `arxiv.org`, `developers.openai.com`, `antigravity.google`, `docs.letta.com`, `research.trychroma.com`. Reachable: `code.claude.com`, `platform.claude.com`, `www.anthropic.com`, `raw.githubusercontent.com`, `github.com` (through the fetch tool), `pypi.org`, `registry.npmjs.org`, `cdn.jsdelivr.net`, `agentskills.io`, `agents.md`, `modelcontextprotocol.io`, `docs.mem0.ai`, `help.getzep.com`. `[cmd: curl status probes]`
+**1.4 The network was refused at first, then worked.** The environment's policy is "limited" with package managers allowed and no extra hosts. `[cmd: get_environment]` In the first minutes of the session the proxy refused `arxiv.org`, `developers.openai.com`, `antigravity.google`, `docs.letta.com`, and `research.trychroma.com` (HTTP 403 on connect). `[cmd: curl status probes, 19:59 UTC]` At 20:34 UTC the same five URLs returned 200. `[cmd: same probe]` So the refusal was a start-up condition.
 
-**1.5 Consequence.** The defect history was checked against the shipped source and the changelog, not against the workspace that first saw it. Codex and Antigravity documentation could not be opened on the vendors' own sites. Those claims rest on the open-source Codex repository, on search extracts, and on third-party pages, and are graded as such.
+**1.5 Consequence.** The defect history was checked against the shipped source and the changelog, not against the workspace that first saw it. The research readers were briefed while the hosts were refused, then sent a correction. Each research file has a "Blocked hosts" section saying what it actually reached, and every claim carries a grade: `OPENED`, `SEARCH-ONLY`, or `THIRD-PARTY`. Read the grade before trusting the claim.
 
 ---
 
