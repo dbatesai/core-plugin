@@ -60,6 +60,10 @@ Write each finding as one block:
 - One problem per finding. Do not repeat a finding another location already covers; cite both locations in one finding.
 - Prefer ten findings that matter over forty that do not.
 
+## Earlier rounds
+
+Findings already raised in an earlier round must not be raised again, whether they were accepted or rebutted. Read the earlier reviewers' files in `gauntlet/round-<n>/` (not `defence.md`) before you write, and the ledger in D4 Part 3. If an earlier finding was accepted but the fix is wrong or incomplete, that is a **new** finding: say what the fix broke or missed, and cite the earlier ID.
+
 ## Rules
 
 - Write your findings to the output file named in your task, and nothing else. Do not edit the drafts. No git commands. Install nothing.
