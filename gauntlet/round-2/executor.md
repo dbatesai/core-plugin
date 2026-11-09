@@ -38,7 +38,7 @@ Role: a zero-context agent told to run D3 v2 from step 0.1 to 9.5 without asking
 - **What is wrong:** `gauntlet/` is tracked only on the current branch. `git ls-tree origin/main gauntlet` prints nothing. Step 0.1's checkout therefore deletes D3 itself, D2, `grounding.md` and `source-evaluation.md` from the working tree. D3 never names the branch they live on, never says to copy them, and the target layout has no place for them.
 - **What breaks if we ship it as-is:** A build spans many sessions. Any agent that resumes after 0.1, or re-reads a step, finds no plan. Phase 8, 8.5, 9.1 and 9.4 need files that are gone, and every `[G …]` citation points at nothing. A zero-context agent cannot recover without being told the old branch name, which fails the D3 acceptance test ("without asking anything").
 - **Suggested fix:** In 0.1, before the checkout, copy `gauntlet/` to `../core-v4-plan/` and record the source branch and commit in `docs/build-log.md`. Point every later reference at that copy.
-- **Evidence:** `git ls-tree origin/main gauntlet` → empty; `git diff --stat origin/main HEAD` → 30 files under `gauntlet/` only.
+- **Evidence:** `git ls-tree origin/main gauntlet` → empty; `git diff --name-only origin/main HEAD` → 37 files, all under `gauntlet/`.
 
 ### R2-EX-04  —  major
 - **Artifact:** D3
